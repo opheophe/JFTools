@@ -267,7 +267,6 @@ function renderRunningTasks(body, running) {
 }
 
 function renderActivityLog(body, act) {
-  body.innerHTML = "";
   if (!act.ok) {
     body.appendChild(el("p", { class: "error", text: act.error }));
     return;
@@ -295,20 +294,30 @@ function renderActivityLog(body, act) {
   body.appendChild(table);
 }
 
+function renderActivity(body, tasks, act) {
+  body.innerHTML = "";
+  const running = tasks.ok && tasks.running ? tasks.running : [];
+  const scans = tasks.ok && tasks.recent_scans ? tasks.recent_scans : [];
+
+  if (running.length === 0 && scans.length === 0) {
+    body.appendChild(el("p", { class: "muted", text: "No active tasks." }));
+  } else {
+    renderRecentScans(body, scans);
+    renderRunningTasks(body, running);
+  }
+
+  body.appendChild(el("h3", { class: "activity-heading", text: "Recent activity" }));
+  renderActivityLog(body, act);
+}
+
 async function refreshActivity() {
   const body = document.getElementById("activity-body");
   try {
-    const tasks = await getJSON("/api/jellyfin/tasks");
-    const running = tasks.ok && tasks.running ? tasks.running : [];
-    const scans = tasks.ok && tasks.recent_scans ? tasks.recent_scans : [];
-    if (running.length > 0 || scans.length > 0) {
-      body.innerHTML = "";
-      renderRecentScans(body, scans);
-      renderRunningTasks(body, running);
-      return;
-    }
-    const act = await getJSON("/api/jellyfin/activity");
-    renderActivityLog(body, act);
+    const [tasks, act] = await Promise.all([
+      getJSON("/api/jellyfin/tasks"),
+      getJSON("/api/jellyfin/activity"),
+    ]);
+    renderActivity(body, tasks, act);
   } catch (err) {
     body.innerHTML = "";
     body.appendChild(el("p", { class: "error", text: String(err) }));
