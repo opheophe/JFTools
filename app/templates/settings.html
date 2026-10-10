@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}MedServ — Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="muted">Changes are saved to the server and persist across restarts.</p>
+
+<section class="card">
+  <h2>Jellyfin connection</h2>
+  <p class="muted">Saved settings override the environment defaults.</p>
+  <form id="jellyfin-form">
+    <label for="jellyfin_url">Jellyfin URL</label>
+    <input type="text" id="jellyfin_url" name="jellyfin_url" value="{{ url }}"
+           placeholder="http://192.168.1.50:8096">
+    <p class="hint">The API root, not the web player. A trailing <code>/web</code> is stripped automatically.</p>
+
+    <label for="jellyfin_api_key">API key</label>
+    <input type="password" id="jellyfin_api_key" name="jellyfin_api_key" value=""
+           placeholder="{{ 'A key is already set' if api_key_is_set else 'Jellyfin → Dashboard → API Keys' }}"
+           autocomplete="off">
+    <p class="hint">{{ "A key is already set — leave blank to keep it." if api_key_is_set else "No key set yet." }}</p>
+
+    <div class="row">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" id="test-btn">Test connection</button>
+    </div>
+  </form>
+  <div class="result" id="jellyfin-result" hidden></div>
+</section>
+
+<section class="card">
+  <h2>Login</h2>
+  <p class="muted">Change the dashboard username and password. The password is stored as a hash.</p>
+  <form id="auth-form">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" value="{{ username }}"
+           autocomplete="username">
+
+    <label for="new_password">New password</label>
+    <input type="password" id="new_password" name="new_password" value=""
+           placeholder="Leave blank to keep current password" autocomplete="new-password">
+
+    <div class="row">
+      <button type="submit" class="primary">Save login</button>
+    </div>
+  </form>
+  <div class="result" id="auth-result" hidden></div>
+</section>
+{% endblock %}

@@ -1,0 +1,13 @@
+services:
+  medserv:
+    build: .
+    container_name: medserv
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8099:8099"
+    volumes:
+      - medserv-data:/data
+
+volumes:
+  medserv-data:

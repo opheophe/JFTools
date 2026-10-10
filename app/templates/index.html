@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="muted">Select an action to run it against your server.</p>
+
+<div class="cards">
+  {% for module in modules %}
+  <section class="card" id="module-{{ module.id }}">
+    <h2>{{ module.name }}</h2>
+    <p class="muted">{{ module.description }}</p>
+    <div class="actions">
+      {% for action in module.actions %}
+      <button
+        class="action-btn"
+        data-module="{{ module.id }}"
+        data-action="{{ action.id }}"
+        title="{{ action.description }}"
+      >{{ action.label }}</button>
+      {% endfor %}
+    </div>
+    <div class="result" id="result-{{ module.id }}" hidden></div>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}
