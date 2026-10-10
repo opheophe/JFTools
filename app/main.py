@@ -1,6 +1,7 @@
 """MedServ web dashboard application."""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -10,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import modules  # noqa: F401  (registers all modules)
-from .auth import clear_failures, is_locked, record_failure, verify_credentials
+from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError
 from .modules.base import Context, get_action, get_modules
@@ -42,6 +43,20 @@ async def require_login(request: Request) -> str:
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def _jellyfin_client() -> JellyfinClient:
+    return JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
+
+
+_SCAN_WINDOW_SECONDS = 300
+_recent_scans: list[dict] = []
+
+
+def _record_scan(name: str) -> None:
+    now = time.time()
+    _recent_scans[:] = [s for s in _recent_scans if now - s["started_at"] < _SCAN_WINDOW_SECONDS]
+    _recent_scans.append({"name": name, "started_at": now})
 
 
 # ---- pages ------------------------------------------------------------------
@@ -76,7 +91,19 @@ async def login_submit(
             status_code=429,
         )
 
-    if verify_credentials(config, username, password):
+    # 1. Local password — only accepted from the local network (localhost/LAN).
+    if is_local_ip(ip) and verify_credentials(config, username, password):
+        clear_failures(ip)
+        request.session["user"] = username
+        return RedirectResponse("/", status_code=303)
+
+    # 2. Jellyfin admin account — accepted from anywhere.
+    try:
+        client = JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
+        jf_user = await client.authenticate_user(username, password)
+    except JellyfinError:
+        jf_user = {}
+    if jf_user.get("Policy", {}).get("IsAdministrator"):
         clear_failures(ip)
         request.session["user"] = username
         return RedirectResponse("/", status_code=303)
@@ -189,6 +216,115 @@ async def run_action(
 
     result["ok"] = True
     return JSONResponse(result)
+
+
+@app.get("/api/jellyfin/libraries")
+async def jellyfin_libraries(request: Request, user: str = Depends(require_login)):
+    client = _jellyfin_client()
+    try:
+        libs = await client.get_libraries()
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    libraries = []
+    for lib in libs:
+        item_id = lib.get("ItemId")
+        count = ""
+        if item_id:
+            try:
+                count = await client.get_library_item_count(item_id)
+            except JellyfinError:
+                count = ""
+        libraries.append(
+            {
+                "id": item_id,
+                "name": lib.get("Name", "?"),
+                "type": lib.get("CollectionType") or "mixed",
+                "locations": lib.get("Locations") or [],
+                "items": count,
+            }
+        )
+    return JSONResponse({"ok": True, "libraries": libraries})
+
+
+@app.post("/api/jellyfin/scan/{library_id}")
+async def jellyfin_scan_library(
+    library_id: str,
+    request: Request,
+    user: str = Depends(require_login),
+):
+    client = _jellyfin_client()
+    try:
+        libs = await client.get_libraries()
+        lib = next((l for l in libs if l.get("ItemId") == library_id), None)
+        if lib is None:
+            return JSONResponse({"ok": False, "error": "Library not found."}, status_code=404)
+        locations = lib.get("Locations") or []
+        if not locations:
+            return JSONResponse({"ok": False, "error": "Library has no folder paths."}, status_code=400)
+        await client.scan_paths(locations)
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    _record_scan(lib.get("Name", "library"))
+    return JSONResponse({"ok": True, "message": f"Scan started for {lib.get('Name', 'library')}."})
+
+
+@app.post("/api/jellyfin/scan-all")
+async def jellyfin_scan_all(request: Request, user: str = Depends(require_login)):
+    client = _jellyfin_client()
+    try:
+        await client.scan_all()
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    _record_scan("all libraries")
+    return JSONResponse({"ok": True, "message": "Full library scan started."})
+
+
+@app.get("/api/jellyfin/tasks")
+async def jellyfin_tasks(request: Request, user: str = Depends(require_login)):
+    client = _jellyfin_client()
+    try:
+        tasks = await client.get_scheduled_tasks()
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    running = []
+    for t in tasks:
+        if t.get("State") == "Running":
+            running.append(
+                {
+                    "name": t.get("Name") or t.get("Key") or "?",
+                    "key": t.get("Key", ""),
+                    "progress": t.get("CurrentProgressPercentage"),
+                }
+            )
+    now = time.time()
+    recent_scans = [
+        {"name": s["name"], "age": int(now - s["started_at"])}
+        for s in _recent_scans
+        if now - s["started_at"] < _SCAN_WINDOW_SECONDS
+    ]
+    return JSONResponse({"ok": True, "running": running, "recent_scans": recent_scans})
+
+
+@app.get("/api/jellyfin/activity")
+async def jellyfin_activity(request: Request, user: str = Depends(require_login)):
+    client = _jellyfin_client()
+    try:
+        entries = await client.get_activity_log(limit=10)
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    items = []
+    for e in entries:
+        raw_date = e.get("Date") or ""
+        items.append(
+            {
+                "name": e.get("Name", ""),
+                "short_overview": e.get("ShortOverview", ""),
+                "date": raw_date[:19].replace("T", " "),
+                "severity": e.get("Severity", ""),
+            }
+        )
+    return JSONResponse({"ok": True, "entries": items})
 
 
 @app.get("/healthz")

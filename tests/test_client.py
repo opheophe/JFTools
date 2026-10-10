@@ -49,3 +49,69 @@ async def test_missing_key_raises():
     client = JellyfinClient("http://x:8096", "")
     with pytest.raises(JellyfinError, match="API key"):
         await client.get_system_info()
+
+
+async def test_authenticate_user_sends_pw_and_returns_user():
+    import json
+
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        seen["path"] = request.url.path
+        return httpx.Response(
+            200, json={"User": {"Name": "admin", "Policy": {"IsAdministrator": True}}}
+        )
+
+    client = JellyfinClient("http://x:8096", "unused", transport=httpx.MockTransport(handler))
+    user = await client.authenticate_user("admin", "pw")
+
+    assert user["Name"] == "admin"
+    assert user["Policy"]["IsAdministrator"] is True
+    assert seen["path"] == "/Users/AuthenticateByName"
+    assert seen["body"] == {"Username": "admin", "Pw": "pw"}
+
+
+async def test_scan_all_posts_library_refresh():
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        seen["method"] = request.method
+        return httpx.Response(204)
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    await client.scan_all()
+
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/Library/Refresh"
+
+
+async def test_scan_paths_sends_updates():
+    import json
+
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(204)
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    await client.scan_paths(["/Filmer", "/Shows"])
+
+    assert seen["body"] == {
+        "Updates": [
+            {"Path": "/Filmer", "UpdateType": "Modified"},
+            {"Path": "/Shows", "UpdateType": "Modified"},
+        ]
+    }
+
+
+async def test_get_scheduled_tasks():
+    def handler(request):
+        return httpx.Response(200, json=[{"Name": "Scan Media Library", "State": "Idle"}])
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    tasks = await client.get_scheduled_tasks()
+
+    assert tasks[0]["Name"] == "Scan Media Library"

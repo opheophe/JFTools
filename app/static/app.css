@@ -136,3 +136,24 @@ input:focus { outline: none; border-color: var(--accent); }
 .login-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; width: 100%; max-width: 380px; }
 .login-box .brand { margin: 0 0 1rem; }
 .login-box .error { margin-top: 1rem; }
+
+/* page sections */
+section.card { margin-top: 1.25rem; }
+h2.section-title { margin-top: 1.5rem; }
+
+.card table { border-collapse: collapse; width: 100%; margin-top: 0.75rem; }
+.card th, .card td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+.card th { color: var(--muted); font-weight: 600; }
+.card td.nowrap { white-space: nowrap; }
+
+.total-row td { font-weight: 700; border-top: 2px solid var(--border); }
+
+.scan-btn { padding: 0.25rem 0.7rem; font-size: 0.85rem; min-width: 88px; text-align: center; }
+
+/* activity / progress */
+.task { margin-bottom: 0.9rem; }
+.task-label { font-weight: 600; margin-bottom: 0.3rem; }
+.task-progress { font-size: 0.85rem; }
+.progress { height: 10px; background: #121821; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
+.task-pct { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }

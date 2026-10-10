@@ -11,7 +11,8 @@ existing server over its API.
 ## Features
 
 - Web UI (`http://<host>:8099`) with module cards and action buttons.
-- Session-based login with failed-login lockout.
+- Login: the local password works on your local network, and any Jellyfin admin
+  account works from anywhere. Failed-login lockout included.
 - Settings page to change the Jellyfin connection **and** the dashboard login at
   runtime (persisted to a volume; the password is stored as a hash).
 - Jellyfin actions: test connection, list libraries, recently added, library
@@ -28,7 +29,7 @@ Copy `.env.example` to `.env` and set real values. The Jellyfin URL/API key in
 | --- | --- |
 | `JELLYFIN_URL` | Jellyfin API root. The web-player `/web` suffix is stripped automatically. |
 | `JELLYFIN_API_KEY` | Created in Jellyfin → Dashboard → API Keys. |
-| `MEDSERV_USERNAME` / `MEDSERV_PASSWORD` | Dashboard login. Initial defaults; changeable on the Settings page (password stored hashed). |
+| `MEDSERV_USERNAME` / `MEDSERV_PASSWORD` | Local login (works only on your LAN/localhost). Initial defaults; changeable on the Settings page (password stored hashed). Jellyfin admin accounts can always log in. |
 | `MEDSERV_SECRET_KEY` | Signs session cookies. Auto-generated and persisted if unset. |
 | `MEDSERV_COOKIE_SECURE` | Set `true` when serving over HTTPS. |
 | `MEDSERV_DATA_DIR` | Where settings/state are persisted (`/data` in Docker). |

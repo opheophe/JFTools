@@ -28,8 +28,8 @@
 </section>
 
 <section class="card">
-  <h2>Login</h2>
-  <p class="muted">Change the dashboard username and password. The password is stored as a hash.</p>
+  <h2>Local login</h2>
+  <p class="muted">This username/password only works when connecting from your local network (localhost / LAN). Jellyfin admin accounts can always log in from anywhere.</p>
   <form id="auth-form">
     <label for="username">Username</label>
     <input type="text" id="username" name="username" value="{{ username }}"
@@ -40,7 +40,7 @@
            placeholder="Leave blank to keep current password" autocomplete="new-password">
 
     <div class="row">
-      <button type="submit" class="primary">Save login</button>
+      <button type="submit" class="primary">Save local login</button>
     </div>
   </form>
   <div class="result" id="auth-result" hidden></div>

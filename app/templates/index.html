@@ -1,8 +1,29 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Dashboard</h1>
-<p class="muted">Select an action to run it against your server.</p>
+<h1>Jellyfin</h1>
+<p class="muted">Manage your Jellyfin server.</p>
 
+<section class="card">
+  <h2>Refresh</h2>
+  <p class="muted">Scan libraries for new or changed files.</p>
+  <table class="lib-table">
+    <thead>
+      <tr><th>Library</th><th>Type</th><th>Items</th><th></th></tr>
+    </thead>
+    <tbody id="libraries-body">
+      <tr><td colspan="4"><span class="spinner"></span> Loading libraries…</td></tr>
+    </tbody>
+  </table>
+  <div id="refresh-error" class="error" hidden></div>
+</section>
+
+<section class="card">
+  <h2>Current activity</h2>
+  <p class="muted">Tasks running on your server.</p>
+  <div id="activity-body"><p class="muted">Loading…</p></div>
+</section>
+
+<h2 class="section-title">Actions</h2>
 <div class="cards">
   {% for module in modules %}
   <section class="card" id="module-{{ module.id }}">

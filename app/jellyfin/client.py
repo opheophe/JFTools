@@ -34,15 +34,11 @@ class JellyfinClient:
         self.timeout = timeout
         self._transport = transport
 
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": (
-                'MediaBrowser Client="MedServ", Device="MedServ", '
-                'DeviceId="medserv", Version="1.0.0", '
-                f'Token="{self.api_key}"'
-            ),
-            "Accept": "application/json",
-        }
+    def _headers(self, with_token: bool = True) -> dict[str, str]:
+        auth = 'MediaBrowser Client="MedServ", Device="MedServ", DeviceId="medserv", Version="1.0.0"'
+        if with_token:
+            auth += f', Token="{self.api_key}"'
+        return {"Authorization": auth, "Accept": "application/json"}
 
     async def _get(self, path: str, params: dict | None = None) -> dict:
         if not self.base_url:
@@ -61,8 +57,43 @@ class JellyfinClient:
             raise JellyfinError(f"Jellyfin returned HTTP {resp.status_code} for {path}.")
         return resp.json()
 
+    async def _post(self, path: str, json: dict | None = None) -> dict | None:
+        if not self.base_url:
+            raise JellyfinError("Jellyfin URL is not configured.")
+        if not self.api_key:
+            raise JellyfinError("Jellyfin API key is not configured.")
+        async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as client:
+            resp = await client.post(
+                self.base_url + path,
+                headers=self._headers(),
+                json=json,
+            )
+        if resp.status_code == 401:
+            raise JellyfinError("Unauthorized — check the Jellyfin API key.")
+        if resp.status_code >= 400:
+            raise JellyfinError(f"Jellyfin returned HTTP {resp.status_code} for {path}.")
+        if resp.status_code == 204 or not resp.content:
+            return None
+        return resp.json()
+
     async def get_system_info(self) -> dict:
         return await self._get("/System/Info")
+
+    async def authenticate_user(self, username: str, password: str) -> dict:
+        """Authenticate a Jellyfin user by username/password; return the User object."""
+        if not self.base_url:
+            raise JellyfinError("Jellyfin URL is not configured.")
+        async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as client:
+            resp = await client.post(
+                self.base_url + "/Users/AuthenticateByName",
+                headers=self._headers(with_token=False),
+                json={"Username": username, "Pw": password},
+            )
+        if resp.status_code == 401:
+            raise JellyfinError("Invalid Jellyfin username or password.")
+        if resp.status_code >= 400:
+            raise JellyfinError(f"Jellyfin returned HTTP {resp.status_code} for authentication.")
+        return resp.json().get("User") or {}
 
     async def get_libraries(self) -> list:
         return await self._get("/Library/VirtualFolders")
@@ -98,3 +129,21 @@ class JellyfinClient:
 
     async def get_sessions(self) -> list:
         return await self._get("/Sessions")
+
+    async def scan_all(self) -> None:
+        """Start a full library scan (all libraries)."""
+        await self._post("/Library/Refresh")
+
+    async def scan_paths(self, locations: list[str]) -> None:
+        """Scan specific folder paths (targeted per-library scan)."""
+        updates = [{"Path": loc, "UpdateType": "Modified"} for loc in locations]
+        await self._post("/Library/Media/Updated", json={"Updates": updates})
+
+    async def get_scheduled_tasks(self) -> list:
+        return await self._get("/ScheduledTasks")
+
+    async def get_activity_log(self, limit: int = 10) -> list:
+        data = await self._get("/System/ActivityLog/Entries", params={"Limit": str(limit)})
+        if isinstance(data, dict):
+            return data.get("Items", [])
+        return data
