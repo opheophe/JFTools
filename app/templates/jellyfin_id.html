@@ -10,7 +10,8 @@
     <label>Library <div class="ms" id="id-lib"></div></label>
     <label>Type <div class="ms" id="id-type"></div></label>
     <label>Ok <div class="ms" id="id-ok"></div></label>
-    <label>Match % <div class="ms" id="id-match"></div></label>
+    <label>Name match % <div class="ms" id="id-match"></div></label>
+    <label>Year match <div class="ms" id="id-ymatch"></div></label>
     <label>Search file <input type="text" id="id-search-file" placeholder="regex"></label>
     <label>Search Jellyfin <input type="text" id="id-search-jf" placeholder="regex"></label>
     <button id="id-fetch" class="primary">Fetch</button>
@@ -24,9 +25,9 @@
   <div class="table-wrap">
     <table id="id-table">
       <thead>
-        <tr><th class="ok-col"></th><th>Type</th><th>Full path</th><th>Item on disc</th><th>Match %</th><th>Jellyfin name</th><th>Actions</th></tr>
+        <tr><th class="ok-col"></th><th>Type</th><th>Full path</th><th>Item on disc</th><th>Name match %</th><th>Year match</th><th>Jellyfin name</th><th>Actions</th></tr>
       </thead>
-      <tbody id="id-body"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+      <tbody id="id-body"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
     </table>
   </div>
   <div id="id-error" class="error" hidden></div>

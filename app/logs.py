@@ -108,6 +108,21 @@ def read_log(name: str) -> str | None:
         return None
 
 
+def clear_logs() -> int:
+    """Delete all log files; return how many were removed."""
+    removed = 0
+    try:
+        for p in LOG_DIR.glob("*.log"):
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return removed
+
+
 @router.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request, user: str = Depends(require_login)):
     return templates.TemplateResponse(request, "logs.html", {"request": request})

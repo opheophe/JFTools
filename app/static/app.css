@@ -164,10 +164,10 @@ h2.section-title { margin-top: 1.5rem; }
 
 /* Jellyfin ID tab */
 .id-controls { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: flex-end; }
-.id-controls label { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); gap: 0.25rem; }
-.id-controls select, .id-controls input[type="text"] {
+.id-controls > label { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); gap: 4px; }
+.id-controls input[type="text"] {
   font: inherit; color: var(--text); background: #121821;
-  border: 1px solid var(--border); border-radius: 7px; height: 32px; padding: 0 0.5rem;
+  border: 1px solid var(--border); border-radius: 7px; height: 34px; padding: 0 0.5rem; margin: 0;
 }
 .id-controls input[type="text"] { width: 150px; }
 .id-status { margin-top: 0.75rem; font-size: 0.9rem; }
@@ -189,22 +189,23 @@ body.wide main { max-width: none; }
 #id-table th, #id-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #id-table th:nth-child(1), #id-table td:nth-child(1) { width: 42px; }
 #id-table th:nth-child(2), #id-table td:nth-child(2) { width: 80px; }
-#id-table th:nth-child(5), #id-table td:nth-child(5) { width: 80px; }
-#id-table th:nth-child(7), #id-table td:nth-child(7) { width: 280px; }
+#id-table th:nth-child(5), #id-table td:nth-child(5) { width: 90px; }
+#id-table th:nth-child(6), #id-table td:nth-child(6) { width: 100px; }
+#id-table th:nth-child(8), #id-table td:nth-child(8) { width: 280px; }
 #id-table td.id-actions { overflow: visible; }
 
 /* multi-select dropdowns */
 .ms { position: relative; }
-.ms-btn { height: 32px; padding: 0 0.5rem; min-width: 120px; text-align: left; }
+.ms-btn { height: 34px; padding: 0 0.5rem; margin: 0; line-height: normal; min-width: 100px; text-align: left; }
 .ms-menu {
   position: absolute; top: 100%; left: 0; z-index: 20; margin-top: 4px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  padding: 0.4rem; max-height: 260px; overflow-y: auto; min-width: 170px;
+  padding: 0.3rem; max-height: 240px; overflow-y: auto; min-width: 140px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
 }
-.ms-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0.4rem; cursor: pointer; font-size: 0.85rem; color: var(--text); }
+.ms-item { display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.15rem 0.35rem; cursor: pointer; font-size: 0.85rem; color: var(--text); }
 .ms-item:hover { background: #121821; }
-.ms-item input { margin: 0; }
+.ms-item input[type="checkbox"] { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
 
 /* Logs tab */
 .logs-layout { display: flex; gap: 1rem; }

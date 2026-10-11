@@ -3,7 +3,7 @@
 const ID = {
   rows: [], marks: new Set(), jellyfin: "", radarr: "", sonarr: "",
   fetched: false, timer: null,
-  filters: { lib: [], type: [], ok: [], match: [], file: "", jf: "" },
+  filters: { lib: [], type: [], ok: [], match: [], ymatch: [], file: "", jf: "" },
   ms: {},
 };
 
@@ -165,6 +165,7 @@ function MultiSelect(container, options, onChange) {
 
 const MATCH_OPTIONS = ["0-20", "20-40", "40-60", "60-80", "80-99", "100"].map((v) => ({ value: v, label: v }));
 const OK_OPTIONS = [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }];
+const YMATCH_OPTIONS = ["No year", "Correct", "+/-1 year", "Mismatch"].map((v) => ({ value: v, label: v }));
 
 // ---- filtering -------------------------------------------------------------
 
@@ -175,7 +176,8 @@ function idVisible() {
   return ID.rows.filter((r) => {
     if (f.lib.length && !f.lib.includes(r.library)) return false;
     if (f.type.length && !f.type.includes(r.type)) return false;
-    if (f.match.length && !f.match.some((range) => idInRanges(r.match, range))) return false;
+    if (f.match.length && !f.match.some((range) => idInRanges(r.match, [range]))) return false;
+    if (f.ymatch.length && !f.ymatch.includes(r.year_match || "")) return false;
     if (fileRe && !fileRe.test(r.file)) return false;
     if (jfRe && !jfRe.test(r.display || r.name)) return false;
     const marked = ID.marks.has(r.id);
@@ -201,6 +203,7 @@ function loadFilters() {
       ID.filters.type = Array.isArray(f.type) ? f.type : [];
       ID.filters.ok = Array.isArray(f.ok) ? f.ok : [];
       ID.filters.match = Array.isArray(f.match) ? f.match : [];
+      ID.filters.ymatch = Array.isArray(f.ymatch) ? f.ymatch : [];
       ID.filters.file = typeof f.file === "string" ? f.file : "";
       ID.filters.jf = typeof f.jf === "string" ? f.jf : "";
     }
@@ -216,12 +219,12 @@ function renderIdTable() {
   body.innerHTML = "";
 
   if (!ID.fetched) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "7", text: "Not fetched yet — click Fetch." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "Not fetched yet — click Fetch." })]));
     countEl.textContent = "";
     return;
   }
   if (visible.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "7", text: "No items match the filters." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "No items match the filters." })]));
     countEl.textContent = "";
     return;
   }
@@ -241,6 +244,7 @@ function renderIdTable() {
     tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
     tr.appendChild(el("td", { text: r.file, title: r.file }));
     tr.appendChild(el("td", { text: r.name ? r.match + "%" : "" }));
+    tr.appendChild(el("td", { text: r.year_match || "—" }));
     tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
     tr.appendChild(idBuildActions(r));
     body.appendChild(tr);
@@ -263,6 +267,7 @@ function applyFilterUI() {
   ID.ms.type.setValues(ID.filters.type);
   ID.ms.ok.setValues(ID.filters.ok);
   ID.ms.match.setValues(ID.filters.match);
+  ID.ms.ymatch.setValues(ID.filters.ymatch);
   document.getElementById("id-search-file").value = ID.filters.file;
   document.getElementById("id-search-jf").value = ID.filters.jf;
 }
@@ -353,6 +358,9 @@ function bindIdControls() {
   });
   ID.ms.match = MultiSelect(document.getElementById("id-match"), MATCH_OPTIONS, (vals) => {
     ID.filters.match = vals; saveFilters(); renderIdTable();
+  });
+  ID.ms.ymatch = MultiSelect(document.getElementById("id-ymatch"), YMATCH_OPTIONS, (vals) => {
+    ID.filters.ymatch = vals; saveFilters(); renderIdTable();
   });
 
   document.getElementById("id-search-file").addEventListener("input", () => {

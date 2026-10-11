@@ -1,4 +1,4 @@
-from app.jellyfin_id import clean_release_tags, match_score
+from app.jellyfin_id import clean_release_tags, name_match_score, year_match_category
 
 
 def test_clean_release_tags_strips_noise():
@@ -14,10 +14,19 @@ def test_clean_release_tags_keeps_title_words():
     assert "2010" in cleaned
 
 
-def test_match_score_exact():
-    assert match_score(clean_release_tags("The Matrix 1999"), "The Matrix", 1999) == 100
+def test_name_match_exact():
+    assert name_match_score(clean_release_tags("The Matrix 1999"), "The Matrix", 1999) == 100
 
 
-def test_match_score_mismatch_is_low():
-    score = match_score(clean_release_tags("Totally Unrelated Film 2001"), "The Matrix", 1999)
+def test_name_match_mismatch_is_low():
+    score = name_match_score(clean_release_tags("Totally Unrelated Film 2001"), "The Matrix", 1999)
     assert score < 50
+
+
+def test_year_match_categories():
+    assert year_match_category(1999, 1999) == "Correct"
+    assert year_match_category(2000, 1999) == "+/-1 year"
+    assert year_match_category(1998, 1999) == "+/-1 year"
+    assert year_match_category(2005, 1999) == "Mismatch"
+    assert year_match_category(None, 1999) == "No year"
+    assert year_match_category(1999, None) == "No year"

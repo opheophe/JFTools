@@ -56,6 +56,14 @@ def _save_state() -> None:
         pass
 
 
+def clear_cache() -> None:
+    """Reset the Jellyfin ID cache (rows, marks and last-sync)."""
+    _state["rows"] = []
+    _state["marks"] = set()
+    _state["last_sync"] = None
+    _save_state()
+
+
 _state = _load_state()
 _fetch = {"status": "idle", "fetched": 0, "total": 0, "error": None}
 
@@ -114,8 +122,11 @@ def _year_tokens(tokens):
     return {t for t in tokens if re.fullmatch(r"(19|20)\d{2}", t)}
 
 
-def match_score(disc_name: str, jf_name: str, jf_year=None) -> int:
-    """Score how well a (cleaned) file name matches Jellyfin's title (0-100)."""
+def name_match_score(disc_name: str, jf_name: str, jf_year=None) -> int:
+    """Score how well a (cleaned) file name matches Jellyfin's title (0-100).
+
+    The year is ignored here — it is scored separately via year_match_category().
+    """
     a = _norm(disc_name)
     b = _norm(jf_name)
     if not a or not b:
@@ -158,17 +169,33 @@ def match_score(disc_name: str, jf_name: str, jf_year=None) -> int:
             score = min(score, 0.20)
             break
 
-    if jf_year:
-        jy = str(int(jf_year))
-        disc_years = _year_tokens(a_toks)
-        if jy in disc_years:
-            pass
-        elif disc_years:
-            score = min(score, 0.20)
-        else:
-            score = min(score, 0.85)
-
     return max(1, round(score * 100))
+
+
+def _extract_disc_year(path: str):
+    """Find a 4-digit year in the file name or its parent folder; return int or None."""
+    fname = Path(path).name
+    folder = Path(path).parent.name
+    for s in (fname, folder):
+        m = re.search(r"(19|20)\d{2}", s)
+        if m:
+            return int(m.group(0))
+    return None
+
+
+def year_match_category(disc_year, jf_year) -> str:
+    """Classify how the on-disc year compares to Jellyfin's year.
+
+    Returns one of "Correct", "+/-1 year", "Mismatch" or "No year".
+    """
+    if disc_year is None or jf_year is None:
+        return "No year"
+    diff = abs(disc_year - int(jf_year))
+    if diff == 0:
+        return "Correct"
+    if diff == 1:
+        return "+/-1 year"
+    return "Mismatch"
 
 
 # ---- fetching ---------------------------------------------------------------
@@ -245,7 +272,8 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
                     "library": _library_for_path(path, locations),
                     "imdb": provider.get("Imdb", ""),
                     "tmdb": provider.get("Tmdb", ""),
-                    "match": match_score(clean_release_tags(Path(path).name), title, it.get("ProductionYear")),
+                    "match": name_match_score(clean_release_tags(Path(path).name), title, it.get("ProductionYear")),
+                    "year_match": year_match_category(_extract_disc_year(path), it.get("ProductionYear")),
                 }
             )
         progress(fetched, total)
