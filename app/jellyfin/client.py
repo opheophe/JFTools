@@ -98,6 +98,12 @@ class JellyfinClient:
     async def get_libraries(self) -> list:
         return await self._get("/Library/VirtualFolders")
 
+    async def get_users(self) -> list:
+        return await self._get("/Users")
+
+    async def get_user_items(self, user_id: str, params: dict) -> dict:
+        return await self._get(f"/Users/{user_id}/Items", params=params)
+
     async def get_items(self, params: dict) -> dict:
         return await self._get("/Items", params=params)
 

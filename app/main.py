@@ -17,6 +17,7 @@ from .jellyfin_id import router as jellyfin_id_router
 from .logs import log, router as logs_router
 from .modules.base import Context, get_action, get_modules
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
+from .users import router as users_router
 from .web import BASE_DIR, require_login, templates
 
 
@@ -42,6 +43,7 @@ app.mount("/resources", StaticFiles(directory=str(BASE_DIR.parent / "resources")
 app.include_router(jellyfin_id_router)
 app.include_router(logs_router)
 app.include_router(scheduler_router)
+app.include_router(users_router)
 
 
 def _client_ip(request: Request) -> str:

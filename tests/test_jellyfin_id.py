@@ -1,4 +1,4 @@
-from app.jellyfin_id import clean_release_tags, name_match_score, year_match_category
+from app.jellyfin_id import _extract_disc_year, clean_release_tags, name_match_score, year_match_category
 
 
 def test_clean_release_tags_strips_noise():
@@ -30,3 +30,9 @@ def test_year_match_categories():
     assert year_match_category(2005, 1999) == "Mismatch"
     assert year_match_category(None, 1999) == "No year"
     assert year_match_category(1999, None) == "No year"
+
+
+def test_extract_disc_year_prefers_parenthesized():
+    assert _extract_disc_year("/Filmer/2001 Maniacs (2005)/2001 Maniacs 2005 1080p BluRay.mp4") == 2005
+    assert _extract_disc_year("/Filmer/2001 A Space Odyssey (1968)/2001 A Space Odyssey (1968) [BluRay].mp4") == 1968
+    assert _extract_disc_year("/Filmer/1917 (2019)/1917 2019 PROPER 1080p BluRay.mp4") == 2019

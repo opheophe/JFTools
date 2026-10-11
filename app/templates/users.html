@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}MedServ — Users{% endblock %}
+{% block content %}
+<h1>Users</h1>
+<p class="muted">Jellyfin users and their watch activity. Click a user to see their view statistics.</p>
+
+<section class="card">
+  <div class="table-wrap">
+    <table id="users-table">
+      <thead><tr><th>User</th><th>Last login</th><th>Last watched</th><th>Currently watching</th></tr></thead>
+      <tbody id="users-body"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" id="user-history-card" hidden>
+  <h2 id="user-history-title">View statistics</h2>
+  <div class="table-wrap">
+    <table id="history-table">
+      <thead><tr><th>Date</th><th>Title</th><th>Status</th></tr></thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/users.js"></script>{% endblock %}

@@ -173,13 +173,34 @@ def name_match_score(disc_name: str, jf_name: str, jf_year=None) -> int:
 
 
 def _extract_disc_year(path: str):
-    """Find a 4-digit year in the file name or its parent folder; return int or None."""
-    fname = Path(path).name
-    folder = Path(path).parent.name
-    for s in (fname, folder):
-        m = re.search(r"(19|20)\d{2}", s)
-        if m:
-            return int(m.group(0))
+    """Find the release year, preferring a parenthesized year (e.g. "Title (2005)").
+
+    Movie titles often start with a 4-digit number ("2001 Maniacs", "1917"), so
+    matching the first number is wrong. Prefer the parenthesized year, otherwise
+    take the last plausible 4-digit number (the year usually sits after the title
+    and before the release tags).
+    """
+    p = Path(path)
+    parts = [p.name]
+    parent = p.parent
+    while parent.name:
+        parts.append(parent.name)
+        parent = parent.parent
+        if len(parts) >= 4:
+            break
+
+    # 1. parenthesized year (filename first, then folders)
+    for s in parts:
+        m = re.search(r"\((\d{4})\)", s)
+        if m and 1900 <= int(m.group(1)) <= 2100:
+            return int(m.group(1))
+
+    # 2. fallback: last plausible 4-digit year
+    for s in parts:
+        for yv in reversed([int(y) for y in re.findall(r"(19|20)\d{2}", s)]):
+            if 1900 <= yv <= 2100:
+                return yv
+
     return None
 
 

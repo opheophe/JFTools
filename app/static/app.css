@@ -238,3 +238,9 @@ body.wide main { max-width: none; }
 .sch-actions .mini { margin-right: 0.4rem; }
 .toggle { min-width: 46px; padding: 0.1rem 0.6rem; font-size: 0.85rem; }
 .sch-time { display: flex; align-items: center; gap: 0.25rem; }
+
+/* Users tab */
+.user-row { cursor: pointer; }
+.user-row:hover td { background: #121821; }
+#user-history-card { margin-top: 1.25rem; }
+#user-history-card .progress { margin-top: 0.2rem; }
