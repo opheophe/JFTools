@@ -8,11 +8,14 @@
   <link rel="icon" type="image/svg+xml" href="/resources/icon.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
+<body class="{% block bodyclass %}{% endblock %}">
   <header class="topbar">
     <div class="brand"><img src="/resources/icon.svg" alt="MedServ" class="brand-logo"> MedServ</div>
     <nav>
       <a href="/">Jellyfin</a>
+      <a href="/jellyfin-id">Jellyfin ID</a>
+      <a href="/scheduler">Scheduler</a>
+      <a href="/logs">Logs</a>
       <a href="/settings">Settings</a>
       <form method="post" action="/logout" class="inline">
         <button type="submit" class="link">Log out</button>
@@ -23,5 +26,6 @@
     {% block content %}{% endblock %}
   </main>
   <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

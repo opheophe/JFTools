@@ -142,6 +142,8 @@ function bindFormSubmit(formId, url, resultId) {
 function bindSettings() {
   bindFormSubmit("jellyfin-form", "/settings", "jellyfin-result");
   bindFormSubmit("auth-form", "/settings/auth", "auth-result");
+  bindFormSubmit("integrations-form", "/settings/integrations", "integrations-result");
+  bindFormSubmit("timezone-form", "/settings/timezone", "timezone-result");
 
   const testBtn = document.getElementById("test-btn");
   const resultEl = document.getElementById("jellyfin-result");

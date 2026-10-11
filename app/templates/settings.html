@@ -28,6 +28,58 @@
 </section>
 
 <section class="card">
+  <h2>Integrations</h2>
+  <p class="muted">URL prefixes used by the Jellyfin ID tab to open Radarr/Sonarr searches.</p>
+  <form id="integrations-form">
+    <label for="radarr_url">Radarr URL</label>
+    <input type="text" id="radarr_url" name="radarr_url" value="{{ radarr_url }}"
+           placeholder="http://host:7878/add/new?term=">
+
+    <label for="sonarr_url">Sonarr URL</label>
+    <input type="text" id="sonarr_url" name="sonarr_url" value="{{ sonarr_url }}"
+           placeholder="http://host:8989/add/new?term=">
+
+    <div class="row">
+      <button type="submit" class="primary">Save integrations</button>
+    </div>
+  </form>
+  <div class="result" id="integrations-result" hidden></div>
+</section>
+
+<section class="card">
+  <h2>Time zone</h2>
+  <p class="muted">Used for log timestamps and the Scheduler. Auto-handles summer/winter time.</p>
+  <form id="timezone-form">
+    <label for="timezone">Time zone</label>
+    <input type="text" id="timezone" name="timezone" list="tz-options" value="{{ timezone }}">
+    <datalist id="tz-options">
+      <option value="Europe/Stockholm"></option>
+      <option value="Europe/London"></option>
+      <option value="Europe/Berlin"></option>
+      <option value="Europe/Paris"></option>
+      <option value="Europe/Madrid"></option>
+      <option value="Europe/Rome"></option>
+      <option value="Europe/Amsterdam"></option>
+      <option value="Europe/Oslo"></option>
+      <option value="Europe/Copenhagen"></option>
+      <option value="Europe/Helsinki"></option>
+      <option value="America/New_York"></option>
+      <option value="America/Chicago"></option>
+      <option value="America/Denver"></option>
+      <option value="America/Los_Angeles"></option>
+      <option value="Asia/Tokyo"></option>
+      <option value="Asia/Shanghai"></option>
+      <option value="Australia/Sydney"></option>
+      <option value="UTC"></option>
+    </datalist>
+    <div class="row">
+      <button type="submit" class="primary">Save time zone</button>
+    </div>
+  </form>
+  <div class="result" id="timezone-result" hidden></div>
+</section>
+
+<section class="card">
   <h2>Local login</h2>
   <p class="muted">This username/password only works when connecting from your local network (localhost / LAN). Jellyfin admin accounts can always log in from anywhere.</p>
   <form id="auth-form">

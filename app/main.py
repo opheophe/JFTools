@@ -2,23 +2,32 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import modules  # noqa: F401  (registers all modules)
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError
+from .jellyfin_id import router as jellyfin_id_router
+from .logs import log, router as logs_router
 from .modules.base import Context, get_action, get_modules
+from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
+from .web import BASE_DIR, require_login, templates
 
-BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="MedServ")
+@asynccontextmanager
+async def lifespan(app):
+    start_scheduler()
+    yield
+    shutdown_scheduler()
+
+
+app = FastAPI(title="MedServ", lifespan=lifespan)
 
 app.add_middleware(
     SessionMiddleware,
@@ -30,16 +39,9 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.mount("/resources", StaticFiles(directory=str(BASE_DIR.parent / "resources")), name="resources")
 
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-
-
-async def require_login(request: Request) -> str:
-    user = request.session.get("user")
-    if user:
-        return user
-    if request.url.path.startswith("/api/"):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    raise HTTPException(status_code=307, headers={"Location": "/login"})
+app.include_router(jellyfin_id_router)
+app.include_router(logs_router)
+app.include_router(scheduler_router)
 
 
 def _client_ip(request: Request) -> str:
@@ -96,6 +98,7 @@ async def login_submit(
     if is_local_ip(ip) and verify_credentials(config, username, password):
         clear_failures(ip)
         request.session["user"] = username
+        log("Jellyfin", "INFO", f"Login: {username} (local password)")
         return RedirectResponse("/", status_code=303)
 
     # 2. Jellyfin admin account — accepted from anywhere.
@@ -107,9 +110,11 @@ async def login_submit(
     if jf_user.get("Policy", {}).get("IsAdministrator"):
         clear_failures(ip)
         request.session["user"] = username
+        log("Jellyfin", "INFO", f"Login: {username} (Jellyfin admin)")
         return RedirectResponse("/", status_code=303)
 
     record_failure(ip)
+    log("Jellyfin", "WARN", f"Failed login: {username}")
     return templates.TemplateResponse(
         request,
         "login.html",
@@ -134,6 +139,9 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "url": config.settings.jellyfin_url,
             "api_key_is_set": bool(config.settings.jellyfin_api_key),
             "username": config.resolved_username,
+            "radarr_url": config.settings.radarr_url,
+            "sonarr_url": config.settings.sonarr_url,
+            "timezone": config.settings.timezone,
         },
     )
 
@@ -147,6 +155,7 @@ async def settings_save(
 ):
     api_key = jellyfin_api_key.strip() or config.settings.jellyfin_api_key
     config.save_settings(jellyfin_url, api_key)
+    log("Jellyfin", "INFO", "Jellyfin settings saved")
     return JSONResponse({"ok": True, "message": "Jellyfin settings saved."})
 
 
@@ -162,7 +171,39 @@ async def settings_auth_save(
         return JSONResponse({"ok": False, "error": "Username cannot be empty."}, status_code=400)
     config.save_auth(username, new_password)
     request.session["user"] = username
+    log("Jellyfin", "INFO", "Local login settings saved")
     return JSONResponse({"ok": True, "message": "Login settings saved."})
+
+
+@app.post("/settings/integrations")
+async def settings_integrations_save(
+    request: Request,
+    user: str = Depends(require_login),
+    radarr_url: str = Form(""),
+    sonarr_url: str = Form(""),
+):
+    config.save_integrations(radarr_url, sonarr_url)
+    log("Jellyfin", "INFO", "Integration links saved")
+    return JSONResponse({"ok": True, "message": "Integrations saved."})
+
+
+@app.post("/settings/timezone")
+async def settings_timezone_save(
+    request: Request,
+    user: str = Depends(require_login),
+    timezone: str = Form(...),
+):
+    from zoneinfo import ZoneInfo
+
+    tz = timezone.strip()
+    try:
+        ZoneInfo(tz)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid time zone."}, status_code=400)
+    config.save_timezone(tz)
+    set_timezone(tz)
+    log("Jellyfin", "INFO", f"Time zone set to {tz}")
+    return JSONResponse({"ok": True, "message": "Time zone saved."})
 
 
 # ---- API --------------------------------------------------------------------
@@ -181,7 +222,9 @@ async def settings_test(
     try:
         info = await client.get_system_info()
     except JellyfinError as exc:
+        log("Jellyfin", "ERROR", f"Test connection: {exc}")
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    log("Jellyfin", "INFO", "Test connection OK")
     return JSONResponse(
         {
             "ok": True,
@@ -211,10 +254,13 @@ async def run_action(
     try:
         result = dict(await action.handler(ctx))
     except JellyfinError as exc:
+        log("Jellyfin", "ERROR", f"{module_id}/{action_id}: {exc}")
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI
+        log("Jellyfin", "ERROR", f"{module_id}/{action_id}: {exc}")
         return JSONResponse({"ok": False, "error": f"Unexpected error: {exc}"}, status_code=500)
 
+    log("Jellyfin", "INFO", f"Ran action {module_id}/{action_id}")
     result["ok"] = True
     return JSONResponse(result)
 
@@ -265,8 +311,10 @@ async def jellyfin_scan_library(
             return JSONResponse({"ok": False, "error": "Library has no folder paths."}, status_code=400)
         await client.scan_paths(locations)
     except JellyfinError as exc:
+        log("Jellyfin", "ERROR", f"Scan {lib.get('Name', '?')}: {exc}")
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     _record_scan(lib.get("Name", "library"))
+    log("Jellyfin", "INFO", f"Scan started: {lib.get('Name', 'library')}")
     return JSONResponse({"ok": True, "message": f"Scan started for {lib.get('Name', 'library')}."})
 
 
@@ -276,8 +324,10 @@ async def jellyfin_scan_all(request: Request, user: str = Depends(require_login)
     try:
         await client.scan_all()
     except JellyfinError as exc:
+        log("Jellyfin", "ERROR", f"Scan all: {exc}")
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     _record_scan("all libraries")
+    log("Jellyfin", "INFO", "Scan all started")
     return JSONResponse({"ok": True, "message": "Full library scan started."})
 
 

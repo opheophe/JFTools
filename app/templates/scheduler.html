@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}MedServ — Scheduler{% endblock %}
+{% block content %}
+<h1>Scheduler</h1>
+<p class="muted">Schedule operations to run automatically.</p>
+
+<section class="card">
+  <div class="sch-head">
+    <button id="sch-new" class="primary">+ New schedule</button>
+  </div>
+  <div class="table-wrap">
+    <table id="sch-table">
+      <thead><tr><th>Operation</th><th>Schedule</th><th>Enabled</th><th>Last run</th><th>Actions</th></tr></thead>
+      <tbody id="sch-body"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" id="sch-form-card" hidden>
+  <h2 id="sch-form-title">New schedule</h2>
+  <form id="sch-form">
+    <div class="sch-fields">
+      <label>Operation
+        <select id="sch-op"></select>
+      </label>
+      <label>Frequency
+        <select id="sch-freq">
+          <option value="every15m">Every 15 minutes</option>
+          <option value="every30m">Every 30 minutes</option>
+          <option value="every1h">Every hour</option>
+          <option value="every3h">Every 3 hours</option>
+          <option value="every6h">Every 6 hours</option>
+          <option value="every12h">Every 12 hours</option>
+          <option value="daily">Every day</option>
+          <option value="weekly">Weekly</option>
+          <option value="cron">Custom cron</option>
+        </select>
+      </label>
+      <label id="sch-time-label">At
+        <div class="sch-time">
+          <select id="sch-hour"></select><span>:</span><select id="sch-minute"></select>
+        </div>
+      </label>
+      <label id="sch-day-label" hidden>On
+        <select id="sch-day">
+          <option value="mon">Monday</option>
+          <option value="tue">Tuesday</option>
+          <option value="wed">Wednesday</option>
+          <option value="thu">Thursday</option>
+          <option value="fri">Friday</option>
+          <option value="sat">Saturday</option>
+          <option value="sun">Sunday</option>
+        </select>
+      </label>
+      <label id="sch-cron-label" hidden>Cron
+        <input type="text" id="sch-cron" placeholder="0 3 * * *">
+      </label>
+      <label class="sch-enabled">Enabled
+        <input type="checkbox" id="sch-enabled" checked>
+      </label>
+    </div>
+    <div class="row">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" id="sch-cancel">Cancel</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/scheduler.js"></script>{% endblock %}

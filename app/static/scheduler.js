@@ -1,0 +1,201 @@
+"use strict";
+
+const SCH = { jobs: [], operations: [], editing: null };
+
+function schFmtAgo(ts) {
+  if (!ts) return "—";
+  const d = Math.max(0, Math.round((Date.now() / 1000) - ts));
+  if (d < 60) return d + "s ago";
+  const m = Math.floor(d / 60);
+  if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + "h ago";
+  return Math.floor(h / 24) + "d ago";
+}
+
+function pad(n) { return String(n).padStart(2, "0"); }
+
+function populateTimeSelects() {
+  const hSel = document.getElementById("sch-hour");
+  const mSel = document.getElementById("sch-minute");
+  hSel.innerHTML = "";
+  mSel.innerHTML = "";
+  for (let h = 0; h < 24; h++) hSel.appendChild(el("option", { value: String(h), text: pad(h) }));
+  for (let m = 0; m < 60; m++) mSel.appendChild(el("option", { value: String(m), text: pad(m) }));
+}
+
+function setTime(h, m) {
+  document.getElementById("sch-hour").value = String(h);
+  document.getElementById("sch-minute").value = String(m);
+}
+
+function getTime() {
+  return { h: Number(document.getElementById("sch-hour").value), m: Number(document.getElementById("sch-minute").value) };
+}
+
+async function schLoad() {
+  const body = document.getElementById("sch-body");
+  try {
+    const data = await getJSON("/api/scheduler/jobs");
+    SCH.jobs = data.jobs || [];
+    SCH.operations = data.operations || [];
+    populateOpSelect();
+    renderJobs();
+  } catch (err) {
+    body.innerHTML = "";
+    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "error", text: String(err) })]));
+  }
+}
+
+function populateOpSelect() {
+  const sel = document.getElementById("sch-op");
+  sel.innerHTML = "";
+  SCH.operations.forEach((op) => sel.appendChild(el("option", { value: op.id, text: op.label })));
+}
+
+function schBtn(label, fn) {
+  const b = el("button", { class: "mini", text: label });
+  b.addEventListener("click", fn);
+  return b;
+}
+
+function renderJobs() {
+  const body = document.getElementById("sch-body");
+  body.innerHTML = "";
+  if (SCH.jobs.length === 0) {
+    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "No schedules yet — click '+ New schedule'." })]));
+    return;
+  }
+  SCH.jobs.forEach((j) => {
+    const tr = el("tr");
+    tr.appendChild(el("td", { text: j.operation_label }));
+    tr.appendChild(el("td", { text: j.schedule }));
+
+    const td = el("td");
+    const tog = el("button", { class: "toggle", text: j.enabled ? "on" : "off" });
+    tog.addEventListener("click", () => schToggle(j.id));
+    td.appendChild(tog);
+    tr.appendChild(td);
+
+    let last = "—";
+    if (j.last_run) {
+      last = schFmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : ""));
+    }
+    tr.appendChild(el("td", { class: "muted", text: last }));
+
+    const atd = el("td", { class: "sch-actions" });
+    atd.appendChild(schBtn("Run now", () => schRun(j.id)));
+    atd.appendChild(schBtn("Edit", () => schEdit(j)));
+    atd.appendChild(schBtn("Delete", () => schDelete(j.id)));
+    tr.appendChild(atd);
+    body.appendChild(tr);
+  });
+}
+
+async function schRun(id) {
+  await postJSON("/api/scheduler/jobs/" + id + "/run", null);
+  schLoad();
+}
+
+async function schToggle(id) {
+  await postJSON("/api/scheduler/jobs/" + id + "/toggle", null);
+  schLoad();
+}
+
+async function schDelete(id) {
+  if (!confirm("Delete this schedule?")) return;
+  await fetch("/api/scheduler/jobs/" + id, { method: "DELETE" });
+  schLoad();
+}
+
+function showForm(show) {
+  document.getElementById("sch-form-card").hidden = !show;
+}
+
+function schNew() {
+  SCH.editing = null;
+  document.getElementById("sch-form-title").textContent = "New schedule";
+  document.getElementById("sch-op").value = SCH.operations.length ? SCH.operations[0].id : "";
+  document.getElementById("sch-freq").value = "daily";
+  setTime(3, 0);
+  document.getElementById("sch-day").value = "mon";
+  document.getElementById("sch-cron").value = "0 3 * * *";
+  document.getElementById("sch-enabled").checked = true;
+  syncFreqFields();
+  showForm(true);
+}
+
+function freqFromTrigger(t) {
+  if (t.kind === "interval") {
+    const map = { 15: "every15m", 30: "every30m", 60: "every1h", 180: "every3h", 360: "every6h", 720: "every12h" };
+    return map[t.minutes] || "every1h";
+  }
+  if (t.kind === "cron") return t.day_of_week ? "weekly" : "daily";
+  if (t.kind === "crontab") return "cron";
+  return "daily";
+}
+
+function schEdit(job) {
+  SCH.editing = job.id;
+  document.getElementById("sch-form-title").textContent = "Edit schedule";
+  document.getElementById("sch-op").value = job.operation;
+  const t = job.trigger || {};
+  document.getElementById("sch-freq").value = freqFromTrigger(t);
+  setTime(t.hour || 0, t.minute || 0);
+  if (t.day_of_week) document.getElementById("sch-day").value = t.day_of_week;
+  if (t.expr) document.getElementById("sch-cron").value = t.expr;
+  document.getElementById("sch-enabled").checked = !!job.enabled;
+  syncFreqFields();
+  showForm(true);
+}
+
+function syncFreqFields() {
+  const freq = document.getElementById("sch-freq").value;
+  document.getElementById("sch-time-label").hidden = !(freq === "daily" || freq === "weekly");
+  document.getElementById("sch-day-label").hidden = freq !== "weekly";
+  document.getElementById("sch-cron-label").hidden = freq !== "cron";
+}
+
+function buildTrigger() {
+  const freq = document.getElementById("sch-freq").value;
+  const { h, m } = getTime();
+  const day = document.getElementById("sch-day").value;
+  if (freq === "every15m") return { kind: "interval", minutes: 15 };
+  if (freq === "every30m") return { kind: "interval", minutes: 30 };
+  if (freq === "every1h") return { kind: "interval", minutes: 60 };
+  if (freq === "every3h") return { kind: "interval", minutes: 180 };
+  if (freq === "every6h") return { kind: "interval", minutes: 360 };
+  if (freq === "every12h") return { kind: "interval", minutes: 720 };
+  if (freq === "daily") return { kind: "cron", hour: h, minute: m };
+  if (freq === "weekly") return { kind: "cron", day_of_week: day, hour: h, minute: m };
+  if (freq === "cron") return { kind: "crontab", expr: document.getElementById("sch-cron").value.trim() || "0 3 * * *" };
+  return { kind: "interval", minutes: 60 };
+}
+
+async function schSave(e) {
+  e.preventDefault();
+  const payload = {
+    operation: document.getElementById("sch-op").value,
+    trigger: buildTrigger(),
+    enabled: document.getElementById("sch-enabled").checked,
+  };
+  const url = SCH.editing ? "/api/scheduler/jobs/" + SCH.editing : "/api/scheduler/jobs";
+  const method = SCH.editing ? "PUT" : "POST";
+  const resp = await fetch(url, {
+    method: method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (resp.status === 401) { window.location.href = "/login"; return; }
+  showForm(false);
+  schLoad();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  populateTimeSelects();
+  document.getElementById("sch-new").addEventListener("click", schNew);
+  document.getElementById("sch-cancel").addEventListener("click", () => showForm(false));
+  document.getElementById("sch-freq").addEventListener("change", syncFreqFields);
+  document.getElementById("sch-form").addEventListener("submit", schSave);
+  schLoad();
+});

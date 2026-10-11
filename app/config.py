@@ -63,6 +63,9 @@ class Settings:
     jellyfin_api_key: str = ""
     username: str = ""
     password_hash: str = ""
+    radarr_url: str = ""
+    sonarr_url: str = ""
+    timezone: str = "Europe/Stockholm"
 
 
 class Config:
@@ -105,6 +108,9 @@ class Config:
         settings = Settings(
             jellyfin_url=_env("JELLYFIN_URL", ""),
             jellyfin_api_key=_env("JELLYFIN_API_KEY", ""),
+            radarr_url=_env("MEDSERV_RADARR_URL", ""),
+            sonarr_url=_env("MEDSERV_SONARR_URL", ""),
+            timezone=_env("MEDSERV_TIMEZONE", "Europe/Stockholm"),
         )
         try:
             if self.settings_file.exists():
@@ -117,6 +123,12 @@ class Config:
                     settings.username = data["username"]
                 if data.get("password_hash"):
                     settings.password_hash = data["password_hash"]
+                if data.get("radarr_url"):
+                    settings.radarr_url = data["radarr_url"]
+                if data.get("sonarr_url"):
+                    settings.sonarr_url = data["sonarr_url"]
+                if data.get("timezone"):
+                    settings.timezone = data["timezone"]
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -129,6 +141,9 @@ class Config:
             "jellyfin_api_key": s.jellyfin_api_key,
             "username": s.username,
             "password_hash": s.password_hash,
+            "radarr_url": s.radarr_url,
+            "sonarr_url": s.sonarr_url,
+            "timezone": s.timezone,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -158,6 +173,15 @@ class Config:
         self._settings.username = username.strip()
         if new_password:
             self._settings.password_hash = hash_password(new_password)
+        self._persist()
+
+    def save_integrations(self, radarr_url: str, sonarr_url: str) -> None:
+        self._settings.radarr_url = radarr_url.strip()
+        self._settings.sonarr_url = sonarr_url.strip()
+        self._persist()
+
+    def save_timezone(self, timezone: str) -> None:
+        self._settings.timezone = timezone.strip()
         self._persist()
 
 

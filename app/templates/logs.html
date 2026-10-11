@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}MedServ — Logs{% endblock %}
+{% block content %}
+<h1>Logs</h1>
+<p class="muted">Per-tab log files (10 kept per tab).</p>
+
+<section class="card">
+  <div class="logs-layout">
+    <div class="logs-list" id="logs-list"><p class="muted">Loading…</p></div>
+    <div class="logs-viewer">
+      <div class="logs-viewer-head">
+        <strong id="log-name" class="muted">Select a log file</strong>
+        <span class="spacer"></span>
+        <button id="log-refresh" class="mini" hidden>Refresh</button>
+        <a id="log-download" class="btn-link" hidden>Download</a>
+      </div>
+      <pre id="log-content" class="log-content">Select a log file on the left to inspect it.</pre>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/logs.js"></script>{% endblock %}
