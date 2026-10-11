@@ -1,4 +1,4 @@
-"""Jellyfin ID — list Jellyfin media with file paths and score them against
+"""Movie Match — list Jellyfin media with file paths and score them against
 their identified titles.
 
 Everything comes from the Jellyfin API (no drive scanning). A manual "Fetch"
@@ -57,7 +57,7 @@ def _save_state() -> None:
 
 
 def clear_cache() -> None:
-    """Reset the Jellyfin ID cache (rows, marks and last-sync)."""
+    """Reset the Movie Match cache (rows, marks and last-sync)."""
     _state["rows"] = []
     _state["marks"] = set()
     _state["last_sync"] = None
@@ -172,49 +172,35 @@ def name_match_score(disc_name: str, jf_name: str, jf_year=None) -> int:
     return max(1, round(score * 100))
 
 
-def _extract_disc_year(path: str):
-    """Find the release year, preferring a parenthesized year (e.g. "Title (2005)").
-
-    Movie titles often start with a 4-digit number ("2001 Maniacs", "1917"), so
-    matching the first number is wrong. Prefer the parenthesized year, otherwise
-    take the last plausible 4-digit number (the year usually sits after the title
-    and before the release tags).
-    """
+def _path_years(path: str) -> list[int]:
+    """All standalone/[year]/(year) years found in the filename and folder."""
     p = Path(path)
-    parts = [p.name]
-    parent = p.parent
-    while parent.name:
-        parts.append(parent.name)
-        parent = parent.parent
-        if len(parts) >= 4:
-            break
-
-    # 1. parenthesized year (filename first, then folders)
-    for s in parts:
-        m = re.search(r"\((\d{4})\)", s)
-        if m and 1900 <= int(m.group(1)) <= 2100:
-            return int(m.group(1))
-
-    # 2. fallback: last plausible 4-digit year
-    for s in parts:
-        for yv in reversed([int(y) for y in re.findall(r"(19|20)\d{2}", s)]):
+    years = []
+    for s in (p.name, p.parent.name):
+        for m in re.findall(r"\b((?:19|20)\d{2})\b", s):
+            yv = int(m)
             if 1900 <= yv <= 2100:
-                return yv
+                years.append(yv)
+    return years
 
-    return None
 
+def year_match_category(path: str, jf_year) -> str:
+    """Classify how the path's years compare to Jellyfin's year.
 
-def year_match_category(disc_year, jf_year) -> str:
-    """Classify how the on-disc year compares to Jellyfin's year.
-
-    Returns one of "Correct", "+/-1 year", "Mismatch" or "No year".
+    Jellyfin-first: check whether Jellyfin's year appears in the path, rather
+    than guessing which number in the filename is the year. Returns one of
+    "Correct", "+/-1 year", "Mismatch" or "No year".
     """
-    if disc_year is None or jf_year is None:
+    if jf_year is None:
         return "No year"
-    diff = abs(disc_year - int(jf_year))
-    if diff == 0:
+    jf = int(jf_year)
+    years = _path_years(path)
+    if jf in years:
         return "Correct"
-    if diff == 1:
+    if not years:
+        return "No year"
+    closest = min(years, key=lambda y: abs(y - jf))
+    if abs(closest - jf) == 1:
         return "+/-1 year"
     return "Mismatch"
 
@@ -294,7 +280,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
                     "imdb": provider.get("Imdb", ""),
                     "tmdb": provider.get("Tmdb", ""),
                     "match": name_match_score(clean_release_tags(Path(path).name), title, it.get("ProductionYear")),
-                    "year_match": year_match_category(_extract_disc_year(path), it.get("ProductionYear")),
+                    "year_match": year_match_category(path, it.get("ProductionYear")),
                 }
             )
         progress(fetched, total)
@@ -306,7 +292,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
 
 async def _run_fetch() -> None:
     _fetch.update({"status": "running", "fetched": 0, "total": 0, "error": None})
-    log("Jellyfin ID", "INFO", "Fetch started")
+    log("Movie Match", "INFO", "Fetch started")
     try:
         client = JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
 
@@ -320,15 +306,15 @@ async def _run_fetch() -> None:
         _state["last_sync"] = time.time()
         _save_state()
         _fetch["status"] = "done"
-        log("Jellyfin ID", "INFO", f"Fetch complete: {len(rows)} item(s)")
+        log("Movie Match", "INFO", f"Fetch complete: {len(rows)} item(s)")
     except JellyfinError as exc:
         _fetch["status"] = "error"
         _fetch["error"] = str(exc)
-        log("Jellyfin ID", "ERROR", f"Fetch failed: {exc}")
+        log("Movie Match", "ERROR", f"Fetch failed: {exc}")
     except Exception as exc:  # noqa: BLE001
         _fetch["status"] = "error"
         _fetch["error"] = f"Unexpected error: {exc}"
-        log("Jellyfin ID", "ERROR", f"Fetch failed: {exc}")
+        log("Movie Match", "ERROR", f"Fetch failed: {exc}")
 
 
 # ---- routes -----------------------------------------------------------------
@@ -377,9 +363,9 @@ async def jellyfin_id_mark(
 ):
     if marked in ("true", "1", "yes"):
         _state["marks"].add(item_id)
-        log("Jellyfin ID", "INFO", f"Marked {item_id}")
+        log("Movie Match", "INFO", f"Marked {item_id}")
     else:
         _state["marks"].discard(item_id)
-        log("Jellyfin ID", "INFO", f"Unmarked {item_id}")
+        log("Movie Match", "INFO", f"Unmarked {item_id}")
     _save_state()
     return JSONResponse({"ok": True})

@@ -7,10 +7,9 @@ function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit",
-  });
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+         " " + p(d.getHours()) + ":" + p(d.getMinutes());
 }
 
 async function loadUsers() {

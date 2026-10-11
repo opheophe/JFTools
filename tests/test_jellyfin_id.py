@@ -1,4 +1,4 @@
-from app.jellyfin_id import _extract_disc_year, clean_release_tags, name_match_score, year_match_category
+from app.jellyfin_id import clean_release_tags, name_match_score, year_match_category
 
 
 def test_clean_release_tags_strips_noise():
@@ -23,16 +23,28 @@ def test_name_match_mismatch_is_low():
     assert score < 50
 
 
-def test_year_match_categories():
-    assert year_match_category(1999, 1999) == "Correct"
-    assert year_match_category(2000, 1999) == "+/-1 year"
-    assert year_match_category(1998, 1999) == "+/-1 year"
-    assert year_match_category(2005, 1999) == "Mismatch"
-    assert year_match_category(None, 1999) == "No year"
-    assert year_match_category(1999, None) == "No year"
+def test_year_match_correct():
+    # exact year present in the path
+    assert year_match_category("/Filmer/The Matrix (1999)/The Matrix 1999 1080p.mkv", 1999) == "Correct"
+    # title number ("2001") must not confuse the match
+    assert year_match_category("/Filmer/2001 Maniacs (2005)/2001 Maniacs 2005 1080p BluRay.mp4", 2005) == "Correct"
+    assert year_match_category("/Filmer/2001 A Space Odyssey (1968)/2001 A Space Odyssey (1968) [BluRay].mp4", 1968) == "Correct"
+    assert year_match_category("/Filmer/1917 (2019)/1917 2019 PROPER 1080p BluRay.mp4", 2019) == "Correct"
+    # mislabeled folder: the filename year wins
+    assert year_match_category("/Filmer/Extinction (2020)/Extinction.2018.1080p.NF.WEB-DL.DDP5.1.x264-NTG.mkv", 2018) == "Correct"
+    # release-group tag with embedded year ("EDGE2020") is ignored
+    assert year_match_category("/Filmer/101 Dalmatians (1996)/101 Dalmatians 1996 1080p AMZN WEBRip DD+ 2.0 x265-EDGE2020.mkv", 1996) == "Correct"
 
 
-def test_extract_disc_year_prefers_parenthesized():
-    assert _extract_disc_year("/Filmer/2001 Maniacs (2005)/2001 Maniacs 2005 1080p BluRay.mp4") == 2005
-    assert _extract_disc_year("/Filmer/2001 A Space Odyssey (1968)/2001 A Space Odyssey (1968) [BluRay].mp4") == 1968
-    assert _extract_disc_year("/Filmer/1917 (2019)/1917 2019 PROPER 1080p BluRay.mp4") == 2019
+def test_year_match_off_by_one():
+    assert year_match_category("/Filmer/Movie/Movie.1994.1080p.mkv", 1995) == "+/-1 year"
+    assert year_match_category("/Filmer/Movie/Movie.1996.1080p.mkv", 1995) == "+/-1 year"
+
+
+def test_year_match_mismatch():
+    assert year_match_category("/Filmer/Movie (2005)/Movie.2005.1080p.mkv", 2010) == "Mismatch"
+
+
+def test_year_match_no_year():
+    assert year_match_category("/Filmer/Movie/Movie.1080p.mkv", 2010) == "No year"
+    assert year_match_category("/Filmer/Movie (2010)/Movie.1080p.mkv", None) == "No year"

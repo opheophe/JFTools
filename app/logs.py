@@ -21,7 +21,7 @@ LOG_DIR = config.data_dir / "logs"
 MAX_FILES_PER_TAB = 10
 
 # Feature tabs that have their own log stream.
-TABS = ("Jellyfin", "Jellyfin ID")
+TABS = ("Jellyfin", "Movie Match")
 
 router = APIRouter()
 

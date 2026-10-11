@@ -53,10 +53,10 @@ async def _op_clear_cache() -> None:
 
 
 OPERATIONS = [
-    {"id": "jellyfin_id_fetch", "label": "Fetch Jellyfin ID", "tab": "Jellyfin ID", "handler": _op_fetch_jellyfin_id},
+    {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id},
     {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all},
     {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs},
-    {"id": "clear_cache", "label": "Clear local cache", "tab": "Jellyfin ID", "handler": _op_clear_cache},
+    {"id": "clear_cache", "label": "Clear local cache", "tab": "Movie Match", "handler": _op_clear_cache},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
 OPERATIONS_PUBLIC = [{"id": op["id"], "label": op["label"]} for op in OPERATIONS]

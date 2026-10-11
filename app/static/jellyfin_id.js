@@ -75,9 +75,9 @@ function idBuildActions(r) {
   if (r.id && ID.jellyfin) {
     td.appendChild(idLink(ID.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + r.id, "Jellyfin"));
   }
-  if (r.type === "Movie" && ID.radarr) {
+  if ((r.type === "Movie" || r.type === "Video") && ID.radarr) {
     td.appendChild(idLink(ID.radarr + idEnc(r.name), "Radarr"));
-  } else if (r.type === "Episode" && ID.sonarr) {
+  } else if ((r.type === "Series" || r.type === "Episode") && ID.sonarr) {
     td.appendChild(idLink(ID.sonarr + idEnc(r.series || r.name), "Sonarr"));
   }
   td.appendChild(idLink("https://www.google.com/search?q=" + idEnc(r.name), "Google"));
