@@ -231,6 +231,7 @@ h2.section-title { margin-top: 1.5rem; }
 }
 .sch-fields input[type="text"] { width: 140px; }
 .sch-fields label.sch-enabled { flex-direction: row; align-items: center; gap: 0.5rem; }
+.sch-running { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--ok); white-space: nowrap; }
 .sch-actions { white-space: nowrap; }
 .sch-actions .mini { margin-right: 0.4rem; }
 .toggle { min-width: 46px; padding: 0.1rem 0.6rem; font-size: 0.85rem; }

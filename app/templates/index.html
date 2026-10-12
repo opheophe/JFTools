@@ -3,6 +3,7 @@
 <h1>Jellyfin</h1>
 <p class="muted">Manage your Jellyfin server.</p>
 
+{% if jellyfin_configured %}
 <section class="card">
   <h2>Refresh</h2>
   <p class="muted">Scan libraries for new or changed files.</p>
@@ -22,6 +23,12 @@
   <p class="muted">Active tasks and recent activity on your server.</p>
   <div id="activity-body"><p class="muted">Loading…</p></div>
 </section>
+{% else %}
+<section class="card">
+  <h2>Jellyfin not connected yet</h2>
+  <p class="muted">Add your Jellyfin URL and API key on the <a href="/settings">Settings</a> page to load libraries and activity.</p>
+</section>
+{% endif %}
 
 <h2 class="section-title">Actions</h2>
 <div class="cards">

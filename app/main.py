@@ -54,6 +54,16 @@ def _jellyfin_client() -> JellyfinClient:
     return JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
 
 
+def _jellyfin_unconfigured() -> JSONResponse:
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": "Jellyfin is not configured. Add the URL and API key on the Settings page.",
+        },
+        status_code=400,
+    )
+
+
 _SCAN_WINDOW_SECONDS = 300
 _recent_scans: list[dict] = []
 
@@ -70,12 +80,60 @@ def _record_scan(name: str) -> None:
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, user: str = Depends(require_login)):
     return templates.TemplateResponse(
-        request, "index.html", {"request": request, "modules": get_modules()}
+        request,
+        "index.html",
+        {
+            "request": request,
+            "modules": get_modules(),
+            "jellyfin_configured": config.jellyfin_configured,
+        },
     )
+
+
+def _setup_error(request: Request, message: str) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "setup.html",
+        {"request": request, "error": message},
+        status_code=400,
+    )
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request):
+    if not config.needs_setup:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "setup.html", {"request": request, "error": None})
+
+
+@app.post("/setup", response_class=HTMLResponse)
+async def setup_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    if not config.needs_setup:
+        return RedirectResponse("/", status_code=303)
+
+    username = username.strip()
+    if not username:
+        return _setup_error(request, "Username cannot be empty.")
+    if len(password) < 8:
+        return _setup_error(request, "Password must be at least 8 characters.")
+    if password != confirm_password:
+        return _setup_error(request, "Passwords do not match.")
+
+    config.save_auth(username, password)
+    request.session["user"] = username
+    log("Jellyfin", "INFO", f"Initial login created: {username}")
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    if config.needs_setup:
+        return RedirectResponse("/setup", status_code=303)
     if request.session.get("user"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "login.html", {"request": request, "error": None})
@@ -87,6 +145,8 @@ async def login_submit(
     username: str = Form(...),
     password: str = Form(...),
 ):
+    if config.needs_setup:
+        return RedirectResponse("/setup", status_code=303)
     ip = _client_ip(request)
     if is_locked(ip):
         return templates.TemplateResponse(
@@ -103,12 +163,14 @@ async def login_submit(
         log("Jellyfin", "INFO", f"Login: {username} (local password)")
         return RedirectResponse("/", status_code=303)
 
-    # 2. Jellyfin admin account — accepted from anywhere.
-    try:
-        client = JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
-        jf_user = await client.authenticate_user(username, password)
-    except JellyfinError:
-        jf_user = {}
+    # 2. Jellyfin admin account — accepted from anywhere (once configured).
+    jf_user = {}
+    if config.jellyfin_configured:
+        try:
+            client = JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
+            jf_user = await client.authenticate_user(username, password)
+        except JellyfinError:
+            jf_user = {}
     if jf_user.get("Policy", {}).get("IsAdministrator"):
         clear_failures(ip)
         request.session["user"] = username
@@ -269,6 +331,8 @@ async def run_action(
 
 @app.get("/api/jellyfin/libraries")
 async def jellyfin_libraries(request: Request, user: str = Depends(require_login)):
+    if not config.jellyfin_configured:
+        return _jellyfin_unconfigured()
     client = _jellyfin_client()
     try:
         libs = await client.get_libraries()
@@ -302,6 +366,8 @@ async def jellyfin_scan_library(
     request: Request,
     user: str = Depends(require_login),
 ):
+    if not config.jellyfin_configured:
+        return _jellyfin_unconfigured()
     client = _jellyfin_client()
     try:
         libs = await client.get_libraries()
@@ -322,6 +388,8 @@ async def jellyfin_scan_library(
 
 @app.post("/api/jellyfin/scan-all")
 async def jellyfin_scan_all(request: Request, user: str = Depends(require_login)):
+    if not config.jellyfin_configured:
+        return _jellyfin_unconfigured()
     client = _jellyfin_client()
     try:
         await client.scan_all()
@@ -335,6 +403,8 @@ async def jellyfin_scan_all(request: Request, user: str = Depends(require_login)
 
 @app.get("/api/jellyfin/tasks")
 async def jellyfin_tasks(request: Request, user: str = Depends(require_login)):
+    if not config.jellyfin_configured:
+        return _jellyfin_unconfigured()
     client = _jellyfin_client()
     try:
         tasks = await client.get_scheduled_tasks()
@@ -361,6 +431,8 @@ async def jellyfin_tasks(request: Request, user: str = Depends(require_login)):
 
 @app.get("/api/jellyfin/activity")
 async def jellyfin_activity(request: Request, user: str = Depends(require_login)):
+    if not config.jellyfin_configured:
+        return _jellyfin_unconfigured()
     client = _jellyfin_client()
     try:
         entries = await client.get_activity_log(limit=10)

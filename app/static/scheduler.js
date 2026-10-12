@@ -33,17 +33,17 @@ function getTime() {
   return { h: Number(document.getElementById("sch-hour").value), m: Number(document.getElementById("sch-minute").value) };
 }
 
-async function schLoad() {
+async function schLoad(refreshOps = true) {
   const body = document.getElementById("sch-body");
   try {
     const data = await getJSON("/api/scheduler/jobs");
     SCH.jobs = data.jobs || [];
     SCH.operations = data.operations || [];
-    populateOpSelect();
+    if (refreshOps) populateOpSelect();
     renderJobs();
   } catch (err) {
     body.innerHTML = "";
-    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "error", text: String(err) })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "error", text: String(err) })]));
   }
 }
 
@@ -63,7 +63,7 @@ function renderJobs() {
   const body = document.getElementById("sch-body");
   body.innerHTML = "";
   if (SCH.jobs.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "No schedules yet — click '+ New schedule'." })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No schedules yet — click '+ New schedule'." })]));
     return;
   }
   SCH.jobs.forEach((j) => {
@@ -76,6 +76,17 @@ function renderJobs() {
     tog.addEventListener("click", () => schToggle(j.id));
     td.appendChild(tog);
     tr.appendChild(td);
+
+    const std = el("td");
+    if (j.running) {
+      const wrap = el("span", { class: "sch-running" });
+      wrap.appendChild(el("span", { class: "spinner" }));
+      wrap.appendChild(el("span", { text: "Running" }));
+      std.appendChild(wrap);
+    } else {
+      std.appendChild(el("span", { class: "muted", text: "Idle" }));
+    }
+    tr.appendChild(std);
 
     let last = "—";
     if (j.last_run) {
@@ -191,6 +202,14 @@ async function schSave(e) {
   schLoad();
 }
 
+let schTimer = null;
+function startSchPolling() {
+  if (schTimer) return;
+  schTimer = setInterval(() => {
+    if (!document.hidden) schLoad(false);
+  }, 5000);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   populateTimeSelects();
   document.getElementById("sch-new").addEventListener("click", schNew);
@@ -198,4 +217,5 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("sch-freq").addEventListener("change", syncFreqFields);
   document.getElementById("sch-form").addEventListener("submit", schSave);
   schLoad();
+  startSchPolling();
 });

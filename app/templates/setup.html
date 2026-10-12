@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MedServ — Set up</title>
+  <link rel="icon" href="/resources/icon.ico">
+  <link rel="icon" type="image/svg+xml" href="/resources/icon.svg">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+  <main class="login-box">
+    <h1 class="brand"><img src="/resources/icon.svg" alt="MedServ" class="brand-logo brand-logo-lg"> MedServ</h1>
+    <p class="muted">Welcome! Create the local login for this dashboard.</p>
+    <form method="post" action="/setup">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="new-password" minlength="8" required>
+
+      <label for="confirm_password">Confirm password</label>
+      <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" minlength="8" required>
+
+      {% if error %}
+      <p class="error">{{ error }}</p>
+      {% endif %}
+
+      <button type="submit" class="primary">Create login</button>
+      <p class="hint">This username and password work when connecting from your local network. Jellyfin admin accounts can also log in from anywhere.</p>
+    </form>
+  </main>
+</body>
+</html>

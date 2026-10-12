@@ -80,7 +80,11 @@ class Config:
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self._env_username = _env("MEDSERV_USERNAME", "admin")
-        self._env_password = _env("MEDSERV_PASSWORD", "admin")
+        self._env_password = _env("MEDSERV_PASSWORD", "")
+        # When both are supplied explicitly, first-run setup is skipped.
+        self._env_creds_set = (
+            "MEDSERV_USERNAME" in os.environ and "MEDSERV_PASSWORD" in os.environ
+        )
 
         self.secret_key = self._load_or_create_secret()
         self._settings = self._load_settings()
@@ -157,12 +161,30 @@ class Config:
     def resolved_username(self) -> str:
         return self._settings.username or self._env_username
 
+    @property
+    def jellyfin_configured(self) -> bool:
+        """True once a Jellyfin URL and API key are both set."""
+        return bool(self._settings.jellyfin_url and self._settings.jellyfin_api_key)
+
+    @property
+    def needs_setup(self) -> bool:
+        """True on first run until a local login exists.
+
+        A persisted username + password hash, or both MEDSERV_USERNAME and
+        MEDSERV_PASSWORD in the environment, count as an existing login.
+        """
+        if self._settings.username and self._settings.password_hash:
+            return False
+        return not self._env_creds_set
+
     def check_password(self, username: str, password: str) -> bool:
         if not hmac.compare_digest(username, self.resolved_username):
             return False
         if self._settings.password_hash:
             return verify_password(password, self._settings.password_hash)
-        return hmac.compare_digest(password, self._env_password)
+        if self._env_password:
+            return hmac.compare_digest(password, self._env_password)
+        return False
 
     def save_settings(self, jellyfin_url: str, jellyfin_api_key: str) -> None:
         self._settings.jellyfin_url = jellyfin_url.strip()

@@ -66,6 +66,9 @@ OPERATIONS_PUBLIC = [{"id": op["id"], "label": op["label"]} for op in OPERATIONS
 _JOBS_FILE = config.data_dir / "schedules.json"
 _jobs: dict[str, dict] = {}
 
+# Job ids currently executing (in-memory only; resets on restart).
+_running: set[str] = set()
+
 
 def _load_jobs() -> None:
     try:
@@ -151,6 +154,9 @@ async def _run_job(job_id: str) -> None:
     op = _OP_BY_ID.get(job.get("operation")) if job else None
     if not job or not op:
         return
+    if job_id in _running:
+        return
+    _running.add(job_id)
     job["last_run"] = time.time()
     try:
         await op["handler"]()
@@ -161,6 +167,8 @@ async def _run_job(job_id: str) -> None:
         job["last_status"] = "error"
         job["last_error"] = str(exc)
         log(op["tab"], "ERROR", f"Scheduled run: {op['label']} failed: {exc}")
+    finally:
+        _running.discard(job_id)
     _save_jobs()
 
 
@@ -225,6 +233,7 @@ def _public_job(job_id: str) -> dict:
         "trigger": job.get("trigger", {}),
         "schedule": _describe_schedule(job.get("trigger", {})),
         "enabled": bool(job.get("enabled", True)),
+        "running": job["id"] in _running,
         "last_run": job.get("last_run"),
         "last_status": job.get("last_status"),
         "last_error": job.get("last_error"),
@@ -292,6 +301,7 @@ async def delete_job(job_id: str, request: Request, user: str = Depends(require_
         return JSONResponse({"ok": False, "error": "Job not found."}, status_code=404)
     _remove_job(job_id)
     _jobs.pop(job_id, None)
+    _running.discard(job_id)
     _save_jobs()
     return JSONResponse({"ok": True})
 
@@ -300,6 +310,8 @@ async def delete_job(job_id: str, request: Request, user: str = Depends(require_
 async def run_job(job_id: str, request: Request, user: str = Depends(require_login)):
     if job_id not in _jobs:
         return JSONResponse({"ok": False, "error": "Job not found."}, status_code=404)
+    if job_id in _running:
+        return JSONResponse({"ok": True, "message": "Already running."})
     asyncio.create_task(_run_job(job_id))
     return JSONResponse({"ok": True, "message": "Run started."})
 
