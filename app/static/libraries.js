@@ -135,4 +135,7 @@ async function refreshLibraries() {
   pollLibrariesUntilDone();
 }
 
-document.addEventListener("DOMContentLoaded", loadLibraries);
+document.addEventListener("DOMContentLoaded", () => {
+  loadLibraries();
+  document.getElementById("lib-refresh").addEventListener("click", refreshLibraries);
+});

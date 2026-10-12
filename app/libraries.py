@@ -6,7 +6,6 @@ and on demand). Opening the page never blocks on Jellyfin.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 
@@ -136,14 +135,6 @@ async def _run_fetch() -> None:
         log("Jellyfin", "ERROR", f"Libraries refresh failed: {exc}")
 
 
-def trigger_refresh() -> bool:
-    """Start a background refresh unless one is already running."""
-    if _fetch["status"] == "running":
-        return False
-    asyncio.create_task(_run_fetch())
-    return True
-
-
 # ---- routes -----------------------------------------------------------------
 
 
@@ -157,7 +148,9 @@ async def api_libraries(request: Request, user: str = Depends(require_login)):
     # First view with no cached data (or an empty recent list, e.g. a cache
     # written before that field existed): kick off a background fetch.
     if _fetch["status"] == "idle" and (not _state["last_sync"] or not _state["recent"]):
-        trigger_refresh()
+        from .scheduler import trigger_operation
+
+        trigger_operation("refresh_libraries")
     return JSONResponse(
         {
             "ok": True,
@@ -172,7 +165,9 @@ async def api_libraries(request: Request, user: str = Depends(require_login)):
 
 @router.post("/api/libraries/refresh")
 async def api_libraries_refresh(request: Request, user: str = Depends(require_login)):
-    started = trigger_refresh()
+    from .scheduler import trigger_operation
+
+    started, _ = trigger_operation("refresh_libraries")
     return JSONResponse(
         {"ok": True, "message": "Refresh started." if started else "Already refreshing."}
     )

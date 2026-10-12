@@ -7,7 +7,6 @@ live sessions — are always fetched live so the page renders instantly.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 
@@ -147,14 +146,6 @@ async def _run_fetch() -> None:
         log("Jellyfin", "ERROR", f"Users refresh failed: {exc}")
 
 
-def trigger_refresh() -> bool:
-    """Start a background refresh unless one is already running."""
-    if _fetch["status"] == "running":
-        return False
-    asyncio.create_task(_run_fetch())
-    return True
-
-
 # ---- routes -----------------------------------------------------------------
 
 
@@ -167,7 +158,9 @@ async def users_page(request: Request, user: str = Depends(require_login)):
 async def api_users(request: Request, user: str = Depends(require_login)):
     # First view with no cached data: kick off a background fetch.
     if not _state["last_sync"] and _fetch["status"] != "running":
-        trigger_refresh()
+        from .scheduler import trigger_operation
+
+        trigger_operation("refresh_users")
 
     client = _client()
     try:
@@ -226,7 +219,9 @@ async def api_users(request: Request, user: str = Depends(require_login)):
 
 @router.post("/api/users/refresh")
 async def api_users_refresh(request: Request, user: str = Depends(require_login)):
-    started = trigger_refresh()
+    from .scheduler import trigger_operation
+
+    started, _ = trigger_operation("refresh_users")
     return JSONResponse(
         {"ok": True, "message": "Refresh started." if started else "Already refreshing."}
     )

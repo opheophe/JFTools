@@ -147,6 +147,7 @@ async function refreshUsers() {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadUsers();
+  document.getElementById("users-refresh").addEventListener("click", refreshUsers);
   ageTimer = setInterval(() => {
     if (!statusTimer && LAST_SYNC && !document.hidden) {
       document.getElementById("users-updated").textContent = "Updated " + fmtAgo(LAST_SYNC);

@@ -367,6 +367,29 @@ async def run_job(job_id: str, request: Request, user: str = Depends(require_log
     return JSONResponse({"ok": True, "message": "Run started."})
 
 
+def trigger_operation(operation: str) -> tuple[bool, bool]:
+    """Run an operation now, routed through its scheduler job when one exists.
+
+    Routing through the job means manual refreshes (Users/Libraries buttons)
+    show up in the Scheduler's run history exactly like scheduled runs. Falls
+    back to running the handler directly if the job was deleted. Returns
+    (started, via_job).
+    """
+    job_id = next(
+        (jid for jid, j in _jobs.items() if j.get("operation") == operation), None
+    )
+    if job_id is not None:
+        if job_id in _running:
+            return False, True
+        asyncio.create_task(_run_job(job_id))
+        return True, True
+    op = _OP_BY_ID.get(operation)
+    if op is None:
+        return False, False
+    asyncio.create_task(op["handler"]())
+    return True, False
+
+
 @router.post("/api/scheduler/jobs/{job_id}/toggle")
 async def toggle_job(job_id: str, request: Request, user: str = Depends(require_login)):
     job = _jobs.get(job_id)
