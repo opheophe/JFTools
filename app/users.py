@@ -1,16 +1,29 @@
-"""Users — list Jellyfin users and their watch activity."""
+"""Users — list Jellyfin users and their watch activity.
+
+Per-user "last watched" requires one Jellyfin request per user, so it is fetched
+in the background, cached to ``data/users.json`` and refreshed on a schedule
+(see the Scheduler page). The cheap parts — the user list, last-login dates and
+live sessions — are always fetched live so the page renders instantly.
+"""
 from __future__ import annotations
+
+import asyncio
+import json
+import time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError
+from .logs import log
 from .web import require_login, templates
 
 router = APIRouter()
 
 COMPLETION_THRESHOLD = 90  # watched % at or above this counts as "Completed"
+
+_USERS_FILE = config.data_dir / "users.json"
 
 
 def _client() -> JellyfinClient:
@@ -40,31 +53,56 @@ def _item_label(it: dict) -> str:
     return name
 
 
-@router.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request, user: str = Depends(require_login)):
-    return templates.TemplateResponse(request, "users.html", {"request": request})
+# ---- persistence ------------------------------------------------------------
 
 
-@router.get("/api/users")
-async def api_users(request: Request, user: str = Depends(require_login)):
-    client = _client()
+def _load_state() -> dict:
     try:
-        users = await client.get_users()
-        sessions = await client.get_sessions()
-    except JellyfinError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+        data = json.loads(_USERS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    last_watched = data.get("last_watched")
+    if not isinstance(last_watched, dict):
+        last_watched = {}
+    return {"last_watched": last_watched, "last_sync": data.get("last_sync")}
 
-    session_by_user = {}
-    for s in sessions:
-        uid = s.get("UserId")
-        if uid:
-            session_by_user[uid] = s
 
-    result = []
+def _save_state() -> None:
+    payload = {
+        "last_watched": _state["last_watched"],
+        "last_sync": _state["last_sync"],
+    }
+    try:
+        config.data_dir.mkdir(parents=True, exist_ok=True)
+        tmp = _USERS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(_USERS_FILE)
+    except OSError:
+        pass
+
+
+def clear_cache() -> None:
+    """Reset the cached per-user watch data (and last-sync)."""
+    _state["last_watched"] = {}
+    _state["last_sync"] = None
+    _save_state()
+
+
+_state = _load_state()
+_fetch = {"status": "idle", "error": None}
+
+
+# ---- fetching ---------------------------------------------------------------
+
+
+async def _build_last_watched(client: JellyfinClient) -> dict:
+    """Fetch each user's most recently played item (one request per user)."""
+    users = await client.get_users()
+    result: dict[str, dict] = {}
     for u in users:
         uid = u.get("Id")
-
-        last_watched = {}
+        if not uid:
+            continue
         try:
             data = await client.get_user_items(
                 uid,
@@ -81,12 +119,73 @@ async def api_users(request: Request, user: str = Depends(require_login)):
             if items:
                 it = items[0]
                 ud = it.get("UserData") or {}
-                last_watched = {
+                result[uid] = {
                     "name": _item_label(it),
                     "date": ud.get("LastPlayedDate"),
                 }
         except JellyfinError:
-            pass
+            continue
+    return result
+
+
+async def _run_fetch() -> None:
+    _fetch.update({"status": "running", "error": None})
+    try:
+        last_watched = await _build_last_watched(_client())
+        _state["last_watched"] = last_watched
+        _state["last_sync"] = time.time()
+        _save_state()
+        _fetch["status"] = "done"
+        log("Jellyfin", "INFO", f"Users refresh complete: {len(last_watched)} user(s)")
+    except JellyfinError as exc:
+        _fetch["status"] = "error"
+        _fetch["error"] = str(exc)
+        log("Jellyfin", "ERROR", f"Users refresh failed: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        _fetch["status"] = "error"
+        _fetch["error"] = f"Unexpected error: {exc}"
+        log("Jellyfin", "ERROR", f"Users refresh failed: {exc}")
+
+
+def trigger_refresh() -> bool:
+    """Start a background refresh unless one is already running."""
+    if _fetch["status"] == "running":
+        return False
+    asyncio.create_task(_run_fetch())
+    return True
+
+
+# ---- routes -----------------------------------------------------------------
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def users_page(request: Request, user: str = Depends(require_login)):
+    return templates.TemplateResponse(request, "users.html", {"request": request})
+
+
+@router.get("/api/users")
+async def api_users(request: Request, user: str = Depends(require_login)):
+    # First view with no cached data: kick off a background fetch.
+    if not _state["last_sync"] and _fetch["status"] != "running":
+        trigger_refresh()
+
+    client = _client()
+    try:
+        users = await client.get_users()
+        sessions = await client.get_sessions()
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    session_by_user = {}
+    for s in sessions:
+        uid = s.get("UserId")
+        if uid:
+            session_by_user[uid] = s
+
+    result = []
+    for u in users:
+        uid = u.get("Id")
+        last_watched = _state["last_watched"].get(uid) or {}
 
         active = None
         sess = session_by_user.get(uid)
@@ -114,7 +213,35 @@ async def api_users(request: Request, user: str = Depends(require_login)):
             }
         )
 
-    return JSONResponse({"ok": True, "users": result})
+    return JSONResponse(
+        {
+            "ok": True,
+            "users": result,
+            "last_sync": _state["last_sync"],
+            "fetching": _fetch["status"] == "running",
+            "fetch_error": _fetch.get("error"),
+        }
+    )
+
+
+@router.post("/api/users/refresh")
+async def api_users_refresh(request: Request, user: str = Depends(require_login)):
+    started = trigger_refresh()
+    return JSONResponse(
+        {"ok": True, "message": "Refresh started." if started else "Already refreshing."}
+    )
+
+
+@router.get("/api/users/status")
+async def api_users_status(request: Request, user: str = Depends(require_login)):
+    return JSONResponse(
+        {
+            "ok": True,
+            "status": _fetch["status"],
+            "error": _fetch["error"],
+            "last_sync": _state["last_sync"],
+        }
+    )
 
 
 @router.get("/api/users/{user_id}/history")

@@ -2,7 +2,7 @@
 
 const ID = {
   rows: [], marks: new Set(), jellyfin: "", radarr: "", sonarr: "",
-  fetched: false, timer: null,
+  fetched: false,
   filters: { lib: [], type: [], ok: [], match: [], ymatch: [], file: "", jf: "" },
   ms: {},
 };
@@ -27,17 +27,6 @@ function idInRanges(score, ranges) {
     }
   }
   return false;
-}
-
-function idFmtAgo(ts) {
-  if (!ts) return "Not fetched";
-  const d = Math.max(0, Math.round((Date.now() / 1000) - ts));
-  if (d < 60) return "Fetched " + d + "s ago";
-  const m = Math.floor(d / 60);
-  if (m < 60) return "Fetched " + m + "m ago";
-  const h = Math.floor(m / 60);
-  if (h < 24) return "Fetched " + h + "h " + (m % 60) + "m ago";
-  return "Fetched " + Math.floor(h / 24) + "d ago";
 }
 
 function idFallbackCopy(text, done) {
@@ -289,7 +278,7 @@ async function idLoad() {
     ID.radarr = data.radarr_url || "";
     ID.sonarr = data.sonarr_url || "";
     ID.fetched = !!data.fetched;
-    document.getElementById("id-sync-age").textContent = idFmtAgo(data.last_sync);
+    document.getElementById("id-sync-age").textContent = fmtAgo(data.last_sync);
     populateOptions();
     applyFilterUI();
     renderIdTable();
@@ -301,47 +290,37 @@ async function idLoad() {
 
 async function idFetch() {
   const btn = document.getElementById("id-fetch");
-  btn.disabled = true;
-  try {
-    await postJSON("/api/jellyfin-id/refresh", null);
-  } catch (e) {
-    document.getElementById("id-status").textContent = String(e);
-    btn.disabled = false;
-    return;
-  }
-  pollIdStatus(btn);
-}
-
-function pollIdStatus(btn) {
   const prog = document.getElementById("id-progress");
   const fill = document.getElementById("id-progress-fill");
   const statusEl = document.getElementById("id-status");
+  btn.disabled = true;
   prog.hidden = false;
-  const tick = async () => {
-    try {
-      const s = await getJSON("/api/jellyfin-id/status");
+  try {
+    await postJSON("/api/jellyfin-id/refresh", null);
+  } catch (e) {
+    prog.hidden = true;
+    btn.disabled = false;
+    statusEl.textContent = String(e);
+    return;
+  }
+  startStatusPoll(
+    "/api/jellyfin-id/status",
+    (s) => {
       if (s.status === "running") {
         const pct = s.total ? Math.round(100 * s.fetched / s.total) : 0;
         fill.style.width = pct + "%";
         statusEl.textContent = "Fetching… " + s.fetched + "/" + (s.total || "?") + " (" + pct + "%)";
-        ID.timer = setTimeout(tick, 600);
       } else {
-        prog.hidden = true;
-        btn.disabled = false;
-        if (s.status === "error") {
-          statusEl.textContent = "Fetch failed: " + (s.error || "");
-        } else {
-          statusEl.textContent = "Fetched.";
-          await idLoad();
-        }
+        statusEl.textContent = s.status === "error" ? "Fetch failed: " + (s.error || "") : "Fetched.";
       }
-    } catch (err) {
+    },
+    async (s) => {
       prog.hidden = true;
       btn.disabled = false;
-      statusEl.textContent = String(err);
-    }
-  };
-  tick();
+      if (s.status !== "error") await idLoad();
+    },
+    600
+  );
 }
 
 // ---- init ------------------------------------------------------------------

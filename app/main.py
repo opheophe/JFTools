@@ -14,6 +14,7 @@ from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError
 from .jellyfin_id import router as jellyfin_id_router
+from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .modules.base import Context, get_action, get_modules
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
@@ -41,6 +42,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 app.mount("/resources", StaticFiles(directory=str(BASE_DIR.parent / "resources")), name="resources")
 
 app.include_router(jellyfin_id_router)
+app.include_router(libraries_router)
 app.include_router(logs_router)
 app.include_router(scheduler_router)
 app.include_router(users_router)
@@ -327,37 +329,6 @@ async def run_action(
     log("Jellyfin", "INFO", f"Ran action {module_id}/{action_id}")
     result["ok"] = True
     return JSONResponse(result)
-
-
-@app.get("/api/jellyfin/libraries")
-async def jellyfin_libraries(request: Request, user: str = Depends(require_login)):
-    if not config.jellyfin_configured:
-        return _jellyfin_unconfigured()
-    client = _jellyfin_client()
-    try:
-        libs = await client.get_libraries()
-    except JellyfinError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-
-    libraries = []
-    for lib in libs:
-        item_id = lib.get("ItemId")
-        count = ""
-        if item_id:
-            try:
-                count = await client.get_library_item_count(item_id)
-            except JellyfinError:
-                count = ""
-        libraries.append(
-            {
-                "id": item_id,
-                "name": lib.get("Name", "?"),
-                "type": lib.get("CollectionType") or "mixed",
-                "locations": lib.get("Locations") or [],
-                "items": count,
-            }
-        )
-    return JSONResponse({"ok": True, "libraries": libraries})
 
 
 @app.post("/api/jellyfin/scan/{library_id}")

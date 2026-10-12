@@ -5,20 +5,6 @@
 
 {% if jellyfin_configured %}
 <section class="card">
-  <h2>Refresh</h2>
-  <p class="muted">Scan libraries for new or changed files.</p>
-  <table class="lib-table">
-    <thead>
-      <tr><th>Library</th><th>Type</th><th>Items</th><th></th></tr>
-    </thead>
-    <tbody id="libraries-body">
-      <tr><td colspan="4"><span class="spinner"></span> Loading libraries…</td></tr>
-    </tbody>
-  </table>
-  <div id="refresh-error" class="error" hidden></div>
-</section>
-
-<section class="card">
   <h2>Current activity</h2>
   <p class="muted">Active tasks and recent activity on your server.</p>
   <div id="activity-body"><p class="muted">Loading…</p></div>

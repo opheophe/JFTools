@@ -1,9 +1,16 @@
 {% extends "base.html" %}
 {% block title %}MedServ — Movie Match{% endblock %}
-{% block bodyclass %}wide{% endblock %}
 {% block content %}
 <h1>Movie Match</h1>
 <p class="muted">Jellyfin media with file paths, scored against their identified titles.</p>
+
+<div class="page-head">
+  <button id="id-fetch" class="primary">Fetch</button>
+  <span id="id-sync-age" class="muted"></span>
+  <span id="id-count" class="muted"></span>
+</div>
+<div class="progress" id="id-progress" hidden><div class="progress-fill" id="id-progress-fill"></div></div>
+<div id="id-status" class="muted id-status"></div>
 
 <section class="card">
   <div class="id-controls">
@@ -14,13 +21,7 @@
     <label>Year match <div class="ms" id="id-ymatch"></div></label>
     <label>Search file <input type="text" id="id-search-file" placeholder="regex"></label>
     <label>Search Jellyfin <input type="text" id="id-search-jf" placeholder="regex"></label>
-    <button id="id-fetch" class="primary">Fetch</button>
-    <span id="id-sync-age" class="muted"></span>
-    <span id="id-count" class="muted"></span>
   </div>
-
-  <div class="progress" id="id-progress" hidden><div class="progress-fill" id="id-progress-fill"></div></div>
-  <div id="id-status" class="muted id-status"></div>
 
   <div class="table-wrap">
     <table id="id-table">

@@ -75,6 +75,51 @@ async function getJSON(url) {
   return resp.json();
 }
 
+// ---- shared utilities -------------------------------------------------------
+
+function fmtAgo(ts) {
+  if (!ts) return "never";
+  const d = Math.max(0, Math.round((Date.now() / 1000) - ts));
+  if (d < 60) return d + "s ago";
+  const m = Math.floor(d / 60);
+  if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + "h ago";
+  return Math.floor(h / 24) + "d ago";
+}
+
+let statusTimer = null;
+
+// Poll a "/status" endpoint until it reports no longer "running".
+// onUpdate(status) runs each tick (including the final one);
+// onDone(status) runs once polling stops.
+function startStatusPoll(url, onUpdate, onDone, interval) {
+  if (statusTimer) return;
+  const tick = async () => {
+    let s = null;
+    try {
+      s = await getJSON(url);
+      onUpdate(s);
+    } catch (err) {
+      /* keep polling */
+    }
+    if (s && s.status !== "running") {
+      stopStatusPoll();
+      if (onDone) onDone(s);
+      return;
+    }
+    statusTimer = setTimeout(tick, interval || 2000);
+  };
+  statusTimer = setTimeout(tick, 1000);
+}
+
+function stopStatusPoll() {
+  if (statusTimer) {
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  }
+}
+
 function bindActionButtons() {
   document.querySelectorAll(".action-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -163,77 +208,6 @@ function bindSettings() {
     } finally {
       testBtn.disabled = false;
     }
-  });
-}
-
-async function loadLibraries() {
-  const body = document.getElementById("libraries-body");
-  const errEl = document.getElementById("refresh-error");
-  try {
-    const data = await getJSON("/api/jellyfin/libraries");
-    if (!data.ok) {
-      body.innerHTML = "";
-      errEl.textContent = data.error || "Failed to load libraries.";
-      errEl.hidden = false;
-      return;
-    }
-    body.innerHTML = "";
-    let total = 0;
-    data.libraries.forEach((lib) => {
-      const count = typeof lib.items === "number" ? lib.items : 0;
-      total += count;
-      const tr = el("tr");
-      tr.appendChild(el("td", { text: lib.name }));
-      tr.appendChild(el("td", { class: "muted", text: lib.type }));
-      tr.appendChild(el("td", { text: typeof lib.items === "number" ? String(lib.items) : "—" }));
-      const td = el("td");
-      const btn = el("button", { class: "scan-btn", text: "Scan" });
-      btn.dataset.libraryId = lib.id;
-      btn.dataset.name = lib.name;
-      td.appendChild(btn);
-      tr.appendChild(td);
-      body.appendChild(tr);
-    });
-    // total row
-    const tr = el("tr", { class: "total-row" });
-    tr.appendChild(el("td", { text: "Total" }));
-    tr.appendChild(el("td", { text: "" }));
-    tr.appendChild(el("td", { text: String(total) }));
-    const td = el("td");
-    const btn = el("button", { class: "scan-btn primary", text: "Scan all" });
-    btn.dataset.scanAll = "1";
-    btn.dataset.name = "all libraries";
-    td.appendChild(btn);
-    tr.appendChild(td);
-    body.appendChild(tr);
-
-    bindScanButtons();
-  } catch (err) {
-    body.innerHTML = "";
-    errEl.textContent = String(err);
-    errEl.hidden = false;
-  }
-}
-
-function bindScanButtons() {
-  document.querySelectorAll(".scan-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const url = btn.dataset.scanAll
-        ? "/api/jellyfin/scan-all"
-        : "/api/jellyfin/scan/" + btn.dataset.libraryId;
-      const original = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = "Starting…";
-      try {
-        await postJSON(url, null);
-        btn.textContent = "Started";
-      } catch (err) {
-        btn.textContent = "Failed";
-      } finally {
-        setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1500);
-      }
-      refreshActivity();
-    });
   });
 }
 
@@ -336,8 +310,7 @@ function startActivityPolling() {
 document.addEventListener("DOMContentLoaded", () => {
   bindActionButtons();
   bindSettings();
-  if (document.getElementById("libraries-body")) {
-    loadLibraries();
+  if (document.getElementById("activity-body")) {
     startActivityPolling();
   }
 });

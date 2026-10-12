@@ -2,6 +2,8 @@
 
 let USERS = [];
 let selectedUserId = null;
+let LAST_SYNC = null;
+let ageTimer = null;
 
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -12,6 +14,34 @@ function fmtDate(iso) {
          " " + p(d.getHours()) + ":" + p(d.getMinutes());
 }
 
+function setUpdated(lastSync, fetching, error) {
+  LAST_SYNC = lastSync;
+  const elU = document.getElementById("users-updated");
+  if (fetching) {
+    elU.textContent = "Refreshing…";
+    elU.className = "muted";
+    return;
+  }
+  if (error) {
+    elU.textContent = "Update failed: " + error;
+    elU.className = "error";
+    return;
+  }
+  elU.textContent = lastSync ? "Updated " + fmtAgo(lastSync) : "Not updated yet";
+  elU.className = "muted";
+}
+
+function pollUsersUntilDone() {
+  startStatusPoll(
+    "/api/users/status",
+    (s) => setUpdated(s.last_sync, s.status === "running", s.error),
+    () => {
+      document.getElementById("users-refresh").disabled = false;
+      loadUsers();
+    }
+  );
+}
+
 async function loadUsers() {
   const body = document.getElementById("users-body");
   try {
@@ -19,10 +49,13 @@ async function loadUsers() {
     if (!data.ok) {
       body.innerHTML = "";
       body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "error", text: data.error })]));
+      setUpdated(data.last_sync, false, data.error || "Failed to load users.");
       return;
     }
     USERS = data.users || [];
     renderUsers();
+    setUpdated(data.last_sync, data.fetching, data.fetch_error);
+    if (data.fetching) pollUsersUntilDone();
   } catch (err) {
     body.innerHTML = "";
     body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "error", text: String(err) })]));
@@ -105,4 +138,18 @@ async function toggleHistory(u) {
   }
 }
 
-document.addEventListener("DOMContentLoaded", loadUsers);
+async function refreshUsers() {
+  const btn = document.getElementById("users-refresh");
+  btn.disabled = true;
+  try { await postJSON("/api/users/refresh", null); } catch (err) { /* ignore */ }
+  pollUsersUntilDone();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadUsers();
+  ageTimer = setInterval(() => {
+    if (!statusTimer && LAST_SYNC && !document.hidden) {
+      document.getElementById("users-updated").textContent = "Updated " + fmtAgo(LAST_SYNC);
+    }
+  }, 30000);
+});

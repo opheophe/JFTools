@@ -2,17 +2,6 @@
 
 const SCH = { jobs: [], operations: [], editing: null };
 
-function schFmtAgo(ts) {
-  if (!ts) return "—";
-  const d = Math.max(0, Math.round((Date.now() / 1000) - ts));
-  if (d < 60) return d + "s ago";
-  const m = Math.floor(d / 60);
-  if (m < 60) return m + "m ago";
-  const h = Math.floor(m / 60);
-  if (h < 24) return h + "h ago";
-  return Math.floor(h / 24) + "d ago";
-}
-
 function pad(n) { return String(n).padStart(2, "0"); }
 
 function populateTimeSelects() {
@@ -53,8 +42,8 @@ function populateOpSelect() {
   SCH.operations.forEach((op) => sel.appendChild(el("option", { value: op.id, text: op.label })));
 }
 
-function schBtn(label, fn) {
-  const b = el("button", { class: "mini", text: label });
+function schBtn(label, fn, extraClass) {
+  const b = el("button", { class: "mini" + (extraClass ? " " + extraClass : ""), text: label });
   b.addEventListener("click", fn);
   return b;
 }
@@ -72,7 +61,7 @@ function renderJobs() {
     tr.appendChild(el("td", { text: j.schedule }));
 
     const td = el("td");
-    const tog = el("button", { class: "toggle", text: j.enabled ? "on" : "off" });
+    const tog = el("button", { class: "toggle " + (j.enabled ? "on" : "off"), text: j.enabled ? "on" : "off" });
     tog.addEventListener("click", () => schToggle(j.id));
     td.appendChild(tog);
     tr.appendChild(td);
@@ -90,14 +79,14 @@ function renderJobs() {
 
     let last = "—";
     if (j.last_run) {
-      last = schFmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : ""));
+      last = fmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : ""));
     }
     tr.appendChild(el("td", { class: "muted", text: last }));
 
     const atd = el("td", { class: "sch-actions" });
-    atd.appendChild(schBtn("Run now", () => schRun(j.id)));
-    atd.appendChild(schBtn("Edit", () => schEdit(j)));
-    atd.appendChild(schBtn("Delete", () => schDelete(j.id)));
+    atd.appendChild(schBtn("Run now", () => schRun(j.id), "btn-run"));
+    atd.appendChild(schBtn("Edit", () => schEdit(j), "btn-edit"));
+    atd.appendChild(schBtn("Delete", () => schDelete(j.id), "btn-danger"));
     tr.appendChild(atd);
     body.appendChild(tr);
   });

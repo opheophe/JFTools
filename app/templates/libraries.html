@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}MedServ — Libraries{% endblock %}
+{% block content %}
+<h1>Libraries</h1>
+<p class="muted">Scan libraries for new or changed files.</p>
+
+<div class="page-head">
+  <button id="lib-refresh" class="primary">Refresh</button>
+  <span id="lib-updated" class="muted"></span>
+  <div id="refresh-error" class="error" hidden></div>
+</div>
+
+<section class="card">
+  <h2>Library overview</h2>
+  <p class="muted">Item counts and per-library scan actions.</p>
+  <table class="lib-table">
+    <thead>
+      <tr><th>Library</th><th>Type</th><th>Items</th><th></th></tr>
+    </thead>
+    <tbody id="libraries-body">
+      <tr><td colspan="4"><span class="spinner"></span> Loading libraries…</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Latest additions</h2>
+  <p class="muted">The 50 most recently added items.</p>
+  <div class="table-wrap">
+    <table id="recent-table">
+      <thead><tr><th>Added</th><th>Title</th><th>Type</th><th>Year</th></tr></thead>
+      <tbody id="recent-body"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/libraries.js"></script>{% endblock %}

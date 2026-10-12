@@ -52,14 +52,41 @@ async def _op_clear_cache() -> None:
     clear_cache()
 
 
+async def _op_refresh_users() -> None:
+    from .users import _run_fetch as _users_run_fetch
+
+    await _users_run_fetch()
+
+
+async def _op_refresh_libraries() -> None:
+    from .libraries import _run_fetch as _libraries_run_fetch
+
+    await _libraries_run_fetch()
+
+
 OPERATIONS = [
     {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id},
     {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all},
     {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs},
     {"id": "clear_cache", "label": "Clear local cache", "tab": "Movie Match", "handler": _op_clear_cache},
+    {"id": "refresh_users", "label": "Refresh users", "tab": "Jellyfin", "handler": _op_refresh_users},
+    {"id": "refresh_libraries", "label": "Refresh libraries", "tab": "Jellyfin", "handler": _op_refresh_libraries},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
 OPERATIONS_PUBLIC = [{"id": op["id"], "label": op["label"]} for op in OPERATIONS]
+
+# Default schedule + enabled flag used when seeding a first job for an
+# operation. Everything seeds disabled so a fresh install shows every operation
+# without running it; the cache refreshers are the exception.
+_DEFAULT_SCHEDULES = {
+    "jellyfin_id_fetch": {"kind": "interval", "minutes": 720},
+    "jellyfin_scan_all": {"kind": "interval", "minutes": 360},
+    "clear_logs": {"kind": "cron", "hour": 0, "minute": 0},
+    "clear_cache": {"kind": "interval", "minutes": 720},
+    "refresh_users": {"kind": "interval", "minutes": 5},
+    "refresh_libraries": {"kind": "interval", "minutes": 30},
+}
+_ACTIVE_BY_DEFAULT = {"refresh_users", "refresh_libraries"}
 
 # ---- persistence ------------------------------------------------------------
 
@@ -79,6 +106,30 @@ def _load_jobs() -> None:
     for j in (data.get("jobs") or []):
         if isinstance(j, dict) and j.get("id") and j.get("operation") in _OP_BY_ID:
             _jobs[j["id"]] = j
+    _ensure_default_jobs()
+
+
+def _ensure_default_jobs() -> None:
+    """Seed one job per operation so a fresh install shows every option.
+
+    Jobs are seeded disabled (visible but not running); the cache refreshers
+    seed enabled instead. Existing jobs for an operation are never overwritten.
+    Disabling persists, but a deleted default job is recreated on the next
+    start.
+    """
+    for operation in _OP_BY_ID:
+        if any(j.get("operation") == operation for j in _jobs.values()):
+            continue
+        _jobs[operation] = {
+            "id": operation,
+            "operation": operation,
+            "trigger": dict(_DEFAULT_SCHEDULES.get(operation, {"kind": "interval", "minutes": 60})),
+            "enabled": operation in _ACTIVE_BY_DEFAULT,
+            "last_run": None,
+            "last_status": None,
+            "last_error": None,
+        }
+    _save_jobs()
 
 
 def _save_jobs() -> None:
