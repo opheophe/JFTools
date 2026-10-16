@@ -1,19 +1,7 @@
 "use strict";
 
 function setUpdated(lastSync, fetching, error) {
-  const elU = document.getElementById("lib-updated");
-  if (fetching) {
-    elU.textContent = "Refreshing…";
-    elU.className = "muted";
-    return;
-  }
-  if (error) {
-    elU.textContent = "Update failed: " + error;
-    elU.className = "error";
-    return;
-  }
-  elU.textContent = lastSync ? "Updated " + fmtAgo(lastSync) : "Not updated yet";
-  elU.className = "muted";
+  renderSyncLabel("lib-updated", { lastSync, fetching, error });
 }
 
 function pollLibrariesUntilDone() {
@@ -103,6 +91,7 @@ function renderRecent(items) {
     tr.appendChild(el("td", { class: "muted", text: it.type }));
     tr.appendChild(el("td", { class: "muted", text: it.year || "—" }));
     body.appendChild(tr);
+    if (it.id) registerPopup(tr, { key: it.id, itemId: it.id });
   });
 }
 

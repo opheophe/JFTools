@@ -34,9 +34,9 @@ async def _op_fetch_jellyfin_id() -> None:
 
 
 async def _op_scan_all() -> None:
-    from .jellyfin.client import JellyfinClient
+    from .jellyfin.client import get_client
 
-    client = JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
+    client = get_client()
     await client.scan_all()
 
 
@@ -52,12 +52,6 @@ async def _op_clear_cache() -> None:
     clear_cache()
 
 
-async def _op_refresh_users() -> None:
-    from .users import _run_fetch as _users_run_fetch
-
-    await _users_run_fetch()
-
-
 async def _op_refresh_libraries() -> None:
     from .libraries import _run_fetch as _libraries_run_fetch
 
@@ -69,7 +63,6 @@ OPERATIONS = [
     {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all},
     {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs},
     {"id": "clear_cache", "label": "Clear local cache", "tab": "Movie Match", "handler": _op_clear_cache},
-    {"id": "refresh_users", "label": "Refresh users", "tab": "Jellyfin", "handler": _op_refresh_users},
     {"id": "refresh_libraries", "label": "Refresh libraries", "tab": "Jellyfin", "handler": _op_refresh_libraries},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
@@ -83,10 +76,9 @@ _DEFAULT_SCHEDULES = {
     "jellyfin_scan_all": {"kind": "interval", "minutes": 360},
     "clear_logs": {"kind": "cron", "hour": 0, "minute": 0},
     "clear_cache": {"kind": "interval", "minutes": 720},
-    "refresh_users": {"kind": "interval", "minutes": 5},
     "refresh_libraries": {"kind": "interval", "minutes": 30},
 }
-_ACTIVE_BY_DEFAULT = {"refresh_users", "refresh_libraries"}
+_ACTIVE_BY_DEFAULT = {"refresh_libraries"}
 
 # ---- persistence ------------------------------------------------------------
 

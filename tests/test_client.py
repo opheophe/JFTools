@@ -115,3 +115,64 @@ async def test_get_scheduled_tasks():
     tasks = await client.get_scheduled_tasks()
 
     assert tasks[0]["Name"] == "Scan Media Library"
+
+
+async def test_get_image_returns_bytes_and_content_type():
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        seen["params"] = dict(request.url.params)
+        seen["accept"] = request.headers.get("Accept")
+        return httpx.Response(200, content=b"\xff\xd8\xff", headers={"content-type": "image/jpeg"})
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    content, ctype = await client.get_image("abc123", "tag1", max_width=100)
+
+    assert content == b"\xff\xd8\xff"
+    assert ctype == "image/jpeg"
+    assert seen["path"] == "/Items/abc123/Images/Primary"
+    assert seen["params"].get("tag") == "tag1"
+    assert seen["params"].get("maxWidth") == "100"
+    assert seen["accept"] == "image/*"
+
+
+async def test_get_image_error_raises():
+    def handler(request):
+        return httpx.Response(404)
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    with pytest.raises(JellyfinError, match="HTTP 404"):
+        await client.get_image("abc")
+
+
+async def test_get_image_kinds_use_matching_path():
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        return httpx.Response(200, content=b"x", headers={"content-type": "image/jpeg"})
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    await client.get_image("abc", kind="Backdrop", max_width=400)
+    assert seen["path"] == "/Items/abc/Images/Backdrop"
+
+    await client.get_image("abc", kind="Thumb", max_width=400)
+    assert seen["path"] == "/Items/abc/Images/Thumb"
+
+
+async def test_get_item_sends_fields():
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        seen["params"] = dict(request.url.params)
+        return httpx.Response(200, json={"Id": "i1", "Name": "Dune"})
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    item = await client.get_item("u1", "i1", "Name,Overview")
+
+    assert item["Name"] == "Dune"
+    assert seen["path"] == "/Users/u1/Items/i1"
+    assert seen["params"]["Fields"] == "Name,Overview"
+

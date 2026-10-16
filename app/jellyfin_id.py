@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import config
-from .jellyfin.client import JellyfinClient, JellyfinError
+from .jellyfin.client import JellyfinClient, JellyfinError, get_client
 from .logs import log
 from .web import require_login, templates
 
@@ -294,7 +294,7 @@ async def _run_fetch() -> None:
     _fetch.update({"status": "running", "fetched": 0, "total": 0, "error": None})
     log("Movie Match", "INFO", "Fetch started")
     try:
-        client = JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
+        client = get_client()
 
         def _progress(fetched: int, total: int) -> None:
             _fetch["fetched"] = fetched

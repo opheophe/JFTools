@@ -4,45 +4,45 @@ let USERS = [];
 let selectedUserId = null;
 let LAST_SYNC = null;
 let ageTimer = null;
+let LOADING = false;
 
-function fmtDate(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "—";
-  const p = (n) => String(n).padStart(2, "0");
-  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
-         " " + p(d.getHours()) + ":" + p(d.getMinutes());
+const IMG_CACHE = new Map();
+
+// Reuse already-loaded poster nodes so live re-renders never refetch an image.
+function posterEl(image) {
+  if (!image || !image.item_id) return null;
+  let url = "/api/media/image/" + encodeURIComponent(image.item_id);
+  if (image.tag) url += "?tag=" + encodeURIComponent(image.tag);
+
+  const cached = IMG_CACHE.get(url);
+  if (cached) return cached.isConnected ? cached.cloneNode(true) : cached;
+
+  const img = el("img", { class: "now-poster", src: url, alt: "", loading: "lazy" });
+  IMG_CACHE.set(url, img);
+  img.addEventListener("error", () => { IMG_CACHE.delete(url); img.remove(); });
+  return img;
+}
+
+function renderUpdatedLabel() {
+  renderSyncLabel("users-updated", { lastSync: LAST_SYNC, live: isLiveEnabled() });
 }
 
 function setUpdated(lastSync, fetching, error) {
   LAST_SYNC = lastSync;
-  const elU = document.getElementById("users-updated");
-  if (fetching) {
-    elU.textContent = "Refreshing…";
-    elU.className = "muted";
-    return;
-  }
-  if (error) {
-    elU.textContent = "Update failed: " + error;
-    elU.className = "error";
-    return;
-  }
-  elU.textContent = lastSync ? "Updated " + fmtAgo(lastSync) : "Not updated yet";
-  elU.className = "muted";
+  renderSyncLabel("users-updated", { lastSync, fetching, error, live: isLiveEnabled() });
 }
 
 function pollUsersUntilDone() {
   startStatusPoll(
     "/api/users/status",
     (s) => setUpdated(s.last_sync, s.status === "running", s.error),
-    () => {
-      document.getElementById("users-refresh").disabled = false;
-      loadUsers();
-    }
+    () => loadUsers()
   );
 }
 
 async function loadUsers() {
+  if (LOADING) return;
+  LOADING = true;
   const body = document.getElementById("users-body");
   try {
     const data = await getJSON("/api/users");
@@ -59,10 +59,14 @@ async function loadUsers() {
   } catch (err) {
     body.innerHTML = "";
     body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "error", text: String(err) })]));
+  } finally {
+    LOADING = false;
   }
 }
 
 function renderUsers() {
+  POPUP_ANCHORS.clear();
+  POPUP_DESCS.clear();
   const body = document.getElementById("users-body");
   body.innerHTML = "";
   if (USERS.length === 0) {
@@ -75,18 +79,38 @@ function renderUsers() {
 
     tr.appendChild(el("td", { class: "muted", text: fmtDate(u.last_login) }));
 
-    const lw = u.last_watched && u.last_watched.name
-      ? fmtDate(u.last_watched.date) + " · " + u.last_watched.name
-      : "—";
-    tr.appendChild(el("td", { text: lw }));
+    tr.appendChild(renderLastWatched(u));
 
     if (u.active) {
       const td = el("td");
-      td.appendChild(el("div", { class: "muted", text: u.active.name + (u.active.paused ? " (paused)" : "") }));
+      const wrap = el("div", { class: "now-watching" });
+      const poster = posterEl(u.active.image);
+      if (poster) wrap.appendChild(poster);
+      const info = el("div", { class: "now-info" });
+      info.appendChild(el("div", { class: "muted", text: u.active.name + (u.active.paused ? " (paused)" : "") }));
       const bar = el("div", { class: "progress" });
       bar.appendChild(el("div", { class: "progress-fill", style: "width:" + u.active.pct + "%" }));
-      td.appendChild(bar);
+      info.appendChild(bar);
+      info.appendChild(el("div", {
+        class: "now-time",
+        text: fmtHM(u.active.pos_s) + " of " + fmtHM(u.active.total_s),
+      }));
+      wrap.appendChild(info);
+      td.appendChild(wrap);
       tr.appendChild(td);
+      if (u.active.item_id) {
+        registerPopup(wrap, {
+          key: u.id + ":" + u.active.item_id,
+          itemId: u.active.item_id,
+          userId: u.id,
+          live: {
+            pct: u.active.pct,
+            pos_s: u.active.pos_s,
+            total_s: u.active.total_s,
+            paused: u.active.paused,
+          },
+        });
+      }
     } else {
       tr.appendChild(el("td", { class: "muted", text: "—" }));
     }
@@ -94,6 +118,28 @@ function renderUsers() {
     tr.addEventListener("click", () => toggleHistory(u));
     body.appendChild(tr);
   });
+
+  // Keep an open popup alive across live re-renders by re-anchoring it.
+  reattachOpenPopup();
+}
+
+function renderLastWatched(u) {
+  const td = el("td");
+  const lw = u.last_watched;
+  if (!lw || !lw.name) {
+    td.appendChild(el("span", { class: "muted", text: "—" }));
+    return td;
+  }
+  const wrap = el("div", { class: "now-watching" });
+  const poster = posterEl(lw.image);
+  if (poster) wrap.appendChild(poster);
+  const info = el("div", { class: "now-info" });
+  info.appendChild(el("div", { text: lw.name }));
+  info.appendChild(el("div", { class: "now-time", text: fmtDate(lw.date) }));
+  wrap.appendChild(info);
+  td.appendChild(wrap);
+  if (lw.id) registerPopup(wrap, { key: u.id + ":" + lw.id, itemId: lw.id, userId: u.id });
+  return td;
 }
 
 async function toggleHistory(u) {
@@ -125,12 +171,14 @@ async function toggleHistory(u) {
     items.forEach((it) => {
       const tr = el("tr");
       tr.appendChild(el("td", { class: "muted", text: fmtDate(it.date) }));
-      tr.appendChild(el("td", { text: it.name }));
+      const nameTd = el("td", { text: it.name });
+      tr.appendChild(nameTd);
       tr.appendChild(el("td", {
         class: it.completed ? "ok" : "muted",
         text: it.status,
       }));
       body.appendChild(tr);
+      if (it.id) registerPopup(nameTd, { key: u.id + ":hist:" + it.id, itemId: it.id, userId: u.id });
     });
   } catch (err) {
     body.innerHTML = "";
@@ -138,19 +186,23 @@ async function toggleHistory(u) {
   }
 }
 
-async function refreshUsers() {
-  const btn = document.getElementById("users-refresh");
-  btn.disabled = true;
-  try { await postJSON("/api/users/refresh", null); } catch (err) { /* ignore */ }
-  pollUsersUntilDone();
+// ---- live polling ----------------------------------------------------------
+
+const usersLive = LiveToggle("users-live", "medserv.users.live", 5000, () => {
+  if (statusTimer || LOADING) return;  // don't fight the refresh-status poll
+  loadUsers();
+});
+
+function isLiveEnabled() {
+  return usersLive.enabled();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   loadUsers();
-  document.getElementById("users-refresh").addEventListener("click", refreshUsers);
+  const live = document.getElementById("users-live");
+  if (live) live.addEventListener("change", renderUpdatedLabel);
+  usersLive.apply(usersLive.stored(), false);
   ageTimer = setInterval(() => {
-    if (!statusTimer && LAST_SYNC && !document.hidden) {
-      document.getElementById("users-updated").textContent = "Updated " + fmtAgo(LAST_SYNC);
-    }
+    if (!statusTimer && LAST_SYNC && !document.hidden) renderUpdatedLabel();
   }, 30000);
 });

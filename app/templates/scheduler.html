@@ -4,14 +4,16 @@
 <h1>Scheduler</h1>
 <p class="muted">Schedule operations to run automatically.</p>
 
+<div class="page-head">
+  <button id="sch-new" class="primary">+ New schedule</button>
+</div>
+
 <section class="card">
-  <div class="page-head">
-    <button id="sch-new" class="primary">+ New schedule</button>
-  </div>
+  <h2>Schedules</h2>
   <div class="table-wrap">
     <table id="sch-table">
       <thead><tr><th>Operation</th><th>Schedule</th><th>Enabled</th><th>Status</th><th>Last run</th><th>Actions</th></tr></thead>
-      <tbody id="sch-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+      <tbody id="sch-body"><tr><td colspan="6" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
     </table>
   </div>
 </section>

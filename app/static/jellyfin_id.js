@@ -2,12 +2,14 @@
 
 const ID = {
   rows: [], marks: new Set(), jellyfin: "", radarr: "", sonarr: "",
-  fetched: false,
+  fetched: false, page: 1, sort: { col: null, dir: 1 },
   filters: { lib: [], type: [], ok: [], match: [], ymatch: [], file: "", jf: "" },
   ms: {},
 };
 
-const LS_KEY = "medserv.jellyfinId.filters";
+const LS_KEY = "medserv.moviematch.filters";
+const SORT_KEY = "medserv.moviematch.sort";
+const PAGE_SIZE = 50;
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -199,27 +201,112 @@ function loadFilters() {
   } catch (e) {}
 }
 
+// ---- sorting ---------------------------------------------------------------
+
+// Year-match categories in severity order (worst first), not alphabetical.
+const YEAR_ORDER = ["No year", "Mismatch", "+/-1 year", "Correct"];
+
+// Sortable column registry: value getter for each header's data-sort key.
+const SORTABLE = {
+  ok: (r) => (ID.marks.has(r.id) ? 1 : 0),
+  type: (r) => r.type || "",
+  path: (r) => r.path || "",
+  file: (r) => r.file || "",
+  match: (r) => r.match,
+  year_match: (r) => YEAR_ORDER.indexOf(r.year_match || "No year"),
+  display: (r) => r.display || r.name || "",
+};
+
+function saveSort() {
+  try { localStorage.setItem(SORT_KEY, JSON.stringify(ID.sort)); } catch (e) {}
+}
+
+function loadSort() {
+  try {
+    const s = localStorage.getItem(SORT_KEY);
+    if (!s) return;
+    const o = JSON.parse(s);
+    if (o && typeof o === "object" && SORTABLE[o.col]) {
+      ID.sort = { col: o.col, dir: o.dir === -1 ? -1 : 1 };
+    }
+  } catch (e) {}
+}
+
+function compareRows(a, b, col, dir) {
+  const get = SORTABLE[col];
+  if (!get) return 0;
+  const va = get(a);
+  const vb = get(b);
+  const aEmpty = va === null || va === undefined || va === "";
+  const bEmpty = vb === null || vb === undefined || vb === "";
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;  // empties always sort last
+  if (bEmpty) return -1;
+  let cmp;
+  if (typeof va === "number" && typeof vb === "number") cmp = va - vb;
+  else cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base" });
+  return cmp * dir;
+}
+
+function applySort(list) {
+  if (!ID.sort.col) return list;
+  return list.slice().sort((a, b) => compareRows(a, b, ID.sort.col, ID.sort.dir));
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll("#id-table th[data-sort]").forEach((th) => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (arrow) {
+      arrow.textContent = th.dataset.sort === ID.sort.col ? (ID.sort.dir === 1 ? "▲" : "▼") : "";
+    }
+  });
+}
+
+function setSort(col) {
+  if (ID.sort.col === col) ID.sort.dir = -ID.sort.dir;
+  else ID.sort = { col: col, dir: 1 };
+  ID.page = 1;
+  saveSort();
+  renderIdTable();
+}
+
+function bindSortHeaders() {
+  document.querySelectorAll("#id-table th[data-sort]").forEach((th) => {
+    th.addEventListener("click", () => setSort(th.dataset.sort));
+  });
+}
+
 // ---- rendering -------------------------------------------------------------
 
 function renderIdTable() {
   const body = document.getElementById("id-body");
   const countEl = document.getElementById("id-count");
-  const visible = idVisible();
+  const visible = applySort(idVisible());
   body.innerHTML = "";
+  updateSortIndicators();
 
   if (!ID.fetched) {
     body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "Not fetched yet — click Fetch." })]));
     countEl.textContent = "";
+    renderPager(0);
     return;
   }
   if (visible.length === 0) {
     body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "No items match the filters." })]));
     countEl.textContent = "";
+    renderPager(0);
     return;
   }
+
+  const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  if (ID.page > pages) ID.page = pages;
+  if (ID.page < 1) ID.page = 1;
+  const start = (ID.page - 1) * PAGE_SIZE;
+  const pageRows = visible.slice(start, start + PAGE_SIZE);
+
   countEl.textContent = visible.length + " / " + ID.rows.length + " shown";
 
-  visible.forEach((r) => {
+  pageRows.forEach((r) => {
     const tr = el("tr");
     const marked = ID.marks.has(r.id);
     const okTd = el("td");
@@ -237,7 +324,38 @@ function renderIdTable() {
     tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
     tr.appendChild(idBuildActions(r));
     body.appendChild(tr);
+    if (r.id) registerPopup(tr, { key: r.id, itemId: r.id });
   });
+
+  renderPager(visible.length);
+}
+
+function renderPager(total) {
+  const box = document.getElementById("id-pager");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!total) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const mkBtn = (label, disabled, onClick) => {
+    const b = el("button", { type: "button", class: "page-btn", text: label });
+    b.disabled = disabled;
+    b.addEventListener("click", onClick);
+    return b;
+  };
+
+  box.appendChild(mkBtn("« First", ID.page === 1, () => { ID.page = 1; renderIdTable(); }));
+  box.appendChild(mkBtn("‹ Prev", ID.page === 1, () => { ID.page -= 1; renderIdTable(); }));
+  box.appendChild(el("span", {
+    class: "muted page-info",
+    text: "Page " + ID.page + " of " + pages,
+  }));
+  box.appendChild(mkBtn("Next ›", ID.page === pages, () => { ID.page += 1; renderIdTable(); }));
+  box.appendChild(mkBtn("Last »", ID.page === pages, () => { ID.page = pages; renderIdTable(); }));
 }
 
 async function idToggleMark(id, marked) {
@@ -326,29 +444,31 @@ async function idFetch() {
 // ---- init ------------------------------------------------------------------
 
 function bindIdControls() {
+  const onFilter = () => { ID.page = 1; saveFilters(); renderIdTable(); };
+
   ID.ms.lib = MultiSelect(document.getElementById("id-lib"), [], (vals) => {
-    ID.filters.lib = vals; saveFilters(); renderIdTable();
+    ID.filters.lib = vals; onFilter();
   });
   ID.ms.type = MultiSelect(document.getElementById("id-type"), [], (vals) => {
-    ID.filters.type = vals; saveFilters(); renderIdTable();
+    ID.filters.type = vals; onFilter();
   });
   ID.ms.ok = MultiSelect(document.getElementById("id-ok"), OK_OPTIONS, (vals) => {
-    ID.filters.ok = vals; saveFilters(); renderIdTable();
+    ID.filters.ok = vals; onFilter();
   });
   ID.ms.match = MultiSelect(document.getElementById("id-match"), MATCH_OPTIONS, (vals) => {
-    ID.filters.match = vals; saveFilters(); renderIdTable();
+    ID.filters.match = vals; onFilter();
   });
   ID.ms.ymatch = MultiSelect(document.getElementById("id-ymatch"), YMATCH_OPTIONS, (vals) => {
-    ID.filters.ymatch = vals; saveFilters(); renderIdTable();
+    ID.filters.ymatch = vals; onFilter();
   });
 
   document.getElementById("id-search-file").addEventListener("input", () => {
     ID.filters.file = document.getElementById("id-search-file").value;
-    saveFilters(); renderIdTable();
+    onFilter();
   });
   document.getElementById("id-search-jf").addEventListener("input", () => {
     ID.filters.jf = document.getElementById("id-search-jf").value;
-    saveFilters(); renderIdTable();
+    onFilter();
   });
 
   document.getElementById("id-fetch").addEventListener("click", idFetch);
@@ -356,6 +476,8 @@ function bindIdControls() {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadFilters();
+  loadSort();
   bindIdControls();
+  bindSortHeaders();
   idLoad();
 });

@@ -24,40 +24,19 @@ function renderResult(container, data) {
 
   if (data.title) container.appendChild(el("h3", { text: data.title }));
 
-  if (data.type === "table") {
-    const table = el("table");
-    const thead = el("thead");
-    const headRow = el("tr");
-    data.columns.forEach((c) => headRow.appendChild(el("th", { text: c })));
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    const tbody = el("tbody");
-    data.rows.forEach((row) => {
-      const tr = el("tr");
-      row.forEach((cell) => tr.appendChild(el("td", { text: cell === null || cell === undefined ? "" : String(cell) })));
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    container.appendChild(table);
-  } else if (data.type === "kv") {
+  if (data.type === "kv") {
     const grid = el("div", { class: "kv" });
     data.items.forEach(([k, v]) => {
       grid.appendChild(el("span", { class: "k", text: k }));
       grid.appendChild(el("span", { text: v === null || v === undefined ? "" : String(v) }));
     });
     container.appendChild(grid);
-  } else if (data.type === "message") {
-    const cls = data.level === "error" ? "error" : data.level === "ok" ? "ok" : "muted";
-    container.appendChild(el("p", { class: cls, text: data.text }));
   } else {
-    container.appendChild(el("pre", { text: JSON.stringify(data, null, 2) }));
+    container.appendChild(el("p", { class: "muted", text: data.message || "Done." }));
   }
 }
 
-async function postJSON(url, body) {
-  const opts = body
-    ? { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }
-    : { method: "POST" };
+async function requestJSON(url, opts) {
   const resp = await fetch(url, opts);
   if (resp.status === 401) {
     window.location.href = "/login";
@@ -66,13 +45,15 @@ async function postJSON(url, body) {
   return resp.json();
 }
 
+async function postJSON(url, body) {
+  const opts = body
+    ? { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }
+    : { method: "POST" };
+  return requestJSON(url, opts);
+}
+
 async function getJSON(url) {
-  const resp = await fetch(url);
-  if (resp.status === 401) {
-    window.location.href = "/login";
-    throw new Error("Not authenticated");
-  }
-  return resp.json();
+  return requestJSON(url);
 }
 
 // ---- shared utilities -------------------------------------------------------
@@ -86,6 +67,80 @@ function fmtAgo(ts) {
   const h = Math.floor(m / 60);
   if (h < 24) return h + "h ago";
   return Math.floor(h / 24) + "d ago";
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+         " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+function fmtHM(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  const p = (n) => String(n).padStart(2, "0");
+  return p(Math.floor(s / 3600)) + ":" + p(Math.floor((s % 3600) / 60));
+}
+
+// Shared "Updated … / Refreshing… / Update failed" label (Users + Libraries).
+function renderSyncLabel(elementId, opts) {
+  const elU = document.getElementById(elementId);
+  if (!elU) return;
+  if (opts.fetching) {
+    elU.textContent = "Refreshing…";
+    elU.className = "muted";
+    return;
+  }
+  if (opts.error) {
+    elU.textContent = "Update failed: " + opts.error;
+    elU.className = "error";
+    return;
+  }
+  const prefix = opts.live ? "Live · " : "";
+  elU.textContent = prefix + (opts.lastSync ? "Updated " + fmtAgo(opts.lastSync) : "Not updated yet");
+  elU.className = "muted";
+}
+
+// Shared "Live" auto-refresh toggle: persists its state and polls onTick.
+function LiveToggle(checkboxId, storageKey, interval, onTick) {
+  const cb = document.getElementById(checkboxId);
+  let timer = null;
+
+  function enabled() { return !!(cb && cb.checked); }
+  function stop() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+  function start() {
+    stop();
+    if (!enabled()) return;
+    timer = setInterval(() => { if (!document.hidden) onTick(); }, interval);
+  }
+  function apply(on, persist) {
+    if (cb) cb.checked = on;
+    if (persist) {
+      try { localStorage.setItem(storageKey, on ? "1" : "0"); } catch (e) {}
+    }
+    if (on) start(); else stop();
+  }
+  function stored() {
+    try { return localStorage.getItem(storageKey) === "1"; } catch (e) { return false; }
+  }
+
+  if (cb) cb.addEventListener("change", () => apply(cb.checked, true));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && enabled()) onTick();
+  });
+  return { apply, stored, enabled, stop };
+}
+
+// Highlight the nav link for the current page.
+function highlightNav() {
+  const path = window.location.pathname;
+  document.querySelectorAll(".topbar nav a").forEach((a) => {
+    if (a.getAttribute("href") === path) a.classList.add("active");
+  });
 }
 
 let statusTimer = null;
@@ -118,31 +173,6 @@ function stopStatusPoll() {
     clearTimeout(statusTimer);
     statusTimer = null;
   }
-}
-
-function bindActionButtons() {
-  document.querySelectorAll(".action-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const moduleId = btn.dataset.module;
-      const actionId = btn.dataset.action;
-      const resultEl = document.getElementById("result-" + moduleId);
-      btn.disabled = true;
-      resultEl.hidden = false;
-      resultEl.innerHTML = "";
-      resultEl.appendChild(el("span", { class: "spinner" }));
-      try {
-        const data = await postJSON("/api/actions/" + moduleId + "/" + actionId, null);
-        renderResult(resultEl, data);
-      } catch (err) {
-        if (err.message !== "Not authenticated") {
-          resultEl.innerHTML = "";
-          resultEl.appendChild(el("p", { class: "error", text: String(err) }));
-        }
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  });
 }
 
 function serializeForm(form) {
@@ -300,17 +330,252 @@ async function refreshActivity() {
   }
 }
 
-function startActivityPolling() {
-  refreshActivity();
-  setInterval(() => {
-    if (!document.hidden) refreshActivity();
-  }, 3000);
-}
+const activityLive = LiveToggle("activity-live", "medserv.activity.live", 3000, refreshActivity);
 
 document.addEventListener("DOMContentLoaded", () => {
-  bindActionButtons();
+  highlightNav();
   bindSettings();
+  window.addEventListener("resize", hidePopup);
+  window.addEventListener("scroll", hidePopup, true);
   if (document.getElementById("activity-body")) {
-    startActivityPolling();
+    refreshActivity();  // always load once when the page opens
+    activityLive.apply(activityLive.stored(), false);
   }
 });
+
+// ---- hover popup (shared by Users / Libraries / Movie Match) ----------------
+
+const ITEM_CACHE = new Map();
+const POPUP_ANCHORS = new Map();  // popup key -> element (current render)
+const POPUP_DESCS = new Map();    // popup key -> descriptor (current render)
+let popupNode = null;
+let popupTimer = null;
+let popupHide = null;
+let popupKey = null;
+
+function popupKeyOf(desc) {
+  return desc.key || desc.itemId;
+}
+
+function fmtRuntime(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? h + "h " + m + "m" : m + "m";
+}
+
+function chip(text, cls) {
+  return el("span", { class: "chip" + (cls ? " " + cls : ""), text });
+}
+
+function popImg(ref, kind, w, cls) {
+  if (!ref || !ref.item_id) return null;
+  let url = "/api/media/image/" + encodeURIComponent(ref.item_id) + "?kind=" + kind + "&w=" + w;
+  if (ref.tag) url += "&tag=" + encodeURIComponent(ref.tag);
+  return el("img", { class: cls, src: url, alt: "" });
+}
+
+function loadItem(itemId, userId) {
+  if (!ITEM_CACHE.has(itemId)) {
+    let url = "/api/media/item/" + encodeURIComponent(itemId);
+    if (userId) url += "?user_id=" + encodeURIComponent(userId);
+    ITEM_CACHE.set(itemId,
+      getJSON(url)
+        .then((d) => (d && d.ok ? d : null))
+        .catch(() => null));
+  }
+  return ITEM_CACHE.get(itemId);
+}
+
+function hidePopup() {
+  clearTimeout(popupTimer);
+  clearTimeout(popupHide);
+  if (popupNode) popupNode.hidden = true;
+  popupKey = null;
+}
+
+function scheduleHide() {
+  clearTimeout(popupHide);
+  popupHide = setTimeout(hidePopup, 300);
+}
+
+function ensurePopup() {
+  if (popupNode) return popupNode;
+  popupNode = el("div", { class: "pop" });
+  popupNode.hidden = true;
+  popupNode.addEventListener("mouseenter", () => clearTimeout(popupHide));
+  popupNode.addEventListener("mouseleave", scheduleHide);
+  document.body.appendChild(popupNode);
+  return popupNode;
+}
+
+function positionPopup(anchor) {
+  if (!popupNode) return;
+  const r = anchor.getBoundingClientRect();
+  const w = popupNode.offsetWidth;
+  const h = popupNode.offsetHeight;
+  let left = Math.round(r.left + r.width / 2 - w / 2);
+  left = Math.max(10, Math.min(left, window.innerWidth - w - 10));
+  let top = Math.round(r.bottom + 8);
+  if (top + h > window.innerHeight - 10) top = Math.max(10, r.top - h - 8);
+  popupNode.style.left = left + "px";
+  popupNode.style.top = top + "px";
+}
+
+function renderPopup(resp, desc) {
+  if (!popupNode) return;
+  popupNode.innerHTML = "";
+  const inner = el("div", { class: "pop-inner" });
+
+  if (!resp || !resp.item) {
+    inner.appendChild(el("div", { class: "muted", text: "No details available." }));
+    popupNode.appendChild(inner);
+    return;
+  }
+
+  const item = resp.item;
+  const imgs = item.images || {};
+
+  // Wide banner: episode still for episodes, otherwise the backdrop.
+  const wideRef = (item.type === "Episode" && imgs.thumb) || imgs.backdrop || imgs.primary;
+  const wideKind = (item.type === "Episode" && imgs.thumb)
+    ? "Thumb" : (imgs.backdrop ? "Backdrop" : "Primary");
+  const wide = popImg(wideRef, wideKind, 800, "pop-wide");
+  if (wide) inner.appendChild(wide);
+
+  inner.appendChild(el("div", { class: "pop-title", text: item.name }));
+
+  const sub = [];
+  if (item.series) sub.push(item.series);
+  if (item.season && item.episode != null) {
+    sub.push("S" + String(item.season).padStart(2, "0") + "E" + String(item.episode).padStart(2, "0"));
+  }
+  const yr = item.year || (item.premiere ? fmtDate(item.premiere).slice(0, 10) : "");
+  if (yr) sub.push(yr);
+  const subline = sub.join(" · ");
+  if (subline) inner.appendChild(el("div", { class: "muted pop-sub", text: subline }));
+
+  const chips = el("div", { class: "pop-chips" });
+  if (item.community_rating) chips.appendChild(chip("★ " + Number(item.community_rating).toFixed(1), "chip-rating"));
+  if (item.critic_rating) chips.appendChild(chip("Critics " + item.critic_rating + "%", "chip-critics"));
+  if (item.official_rating) chips.appendChild(chip(item.official_rating));
+  if (item.runtime_s) chips.appendChild(chip(fmtRuntime(item.runtime_s)));
+  if (item.studios && item.studios.length) chips.appendChild(chip(item.studios[0]));
+  if (chips.children.length) inner.appendChild(chips);
+
+  if (item.genres && item.genres.length) {
+    inner.appendChild(el("div", { class: "muted pop-genres", text: item.genres.join(" · ") }));
+  }
+
+  if (item.overview) {
+    inner.appendChild(el("div", { class: "pop-overview", text: item.overview }));
+  }
+
+  const credits = [];
+  if (item.directors && item.directors.length) credits.push("Dir. " + item.directors.join(", "));
+  if (item.cast && item.cast.length) credits.push(item.cast.join(", "));
+  if (credits.length) inner.appendChild(el("div", { class: "muted pop-credits", text: credits.join(" — ") }));
+
+  // Live playback position (only when the item is being watched right now).
+  const a = desc.live;
+  if (a) {
+    const live = el("div", { class: "pop-live" });
+    live.appendChild(el("div", { class: "progress" }, [
+      el("div", { class: "progress-fill", style: "width:" + a.pct + "%" }),
+    ]));
+    live.appendChild(el("div", {
+      class: "muted",
+      text: (a.paused ? "Paused" : "Playing") + " · " + fmtHM(a.pos_s) + " of " + fmtHM(a.total_s),
+    }));
+    inner.appendChild(live);
+  }
+
+  const links = el("div", { class: "pop-links" });
+  if (resp.jellyfin_url && item.name) {
+    const href = resp.jellyfin_url.replace(/\/+$/, "") + "/web/#/details?id=" + encodeURIComponent(desc.itemId);
+    links.appendChild(el("a", { class: "pop-link", href: href, target: "_blank", rel: "noopener", text: "Open in Jellyfin" }));
+  }
+  if ((item.type === "Movie" || item.type === "Video") && resp.radarr_url) {
+    links.appendChild(el("a", {
+      class: "pop-link",
+      href: resp.radarr_url + encodeURIComponent(item.name),
+      target: "_blank",
+      rel: "noopener",
+      text: "Radarr",
+    }));
+  } else if ((item.type === "Series" || item.type === "Episode") && resp.sonarr_url) {
+    links.appendChild(el("a", {
+      class: "pop-link",
+      href: resp.sonarr_url + encodeURIComponent(item.series || item.name),
+      target: "_blank",
+      rel: "noopener",
+      text: "Sonarr",
+    }));
+  }
+  if (links.children.length) inner.appendChild(links);
+
+  if (item.path) {
+    const rescan = el("a", { class: "pop-rescan", href: "#", text: "Rescan library file" });
+    rescan.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      rescanFile(rescan, item.path);
+    });
+    inner.appendChild(el("div", { class: "pop-links" }, [rescan]));
+  }
+
+  popupNode.appendChild(inner);
+}
+
+async function rescanFile(node, path) {
+  if (node.dataset.busy) return;
+  node.dataset.busy = "1";
+  const prev = node.textContent;
+  node.textContent = "Rescanning…";
+  try {
+    const data = await postJSON("/api/media/rescan", "path=" + encodeURIComponent(path));
+    node.textContent = data.ok ? "✓ Rescan started" : "Rescan failed";
+  } catch (err) {
+    node.textContent = "Rescan failed";
+  }
+  setTimeout(() => { node.textContent = prev; delete node.dataset.busy; }, 2500);
+}
+
+function showPopup(desc, anchor) {
+  const node = ensurePopup();
+  const key = popupKeyOf(desc);
+  popupKey = key;
+  node.hidden = false;
+  node.innerHTML = "";
+  node.appendChild(el("div", { class: "pop-inner muted", text: "Loading…" }));
+  positionPopup(anchor);
+  loadItem(desc.itemId, desc.userId).then((resp) => {
+    if (popupKey !== key) return;
+    renderPopup(resp, desc);
+    positionPopup(anchor);
+  });
+}
+
+function registerPopup(anchor, desc) {
+  const key = popupKeyOf(desc);
+  POPUP_ANCHORS.set(key, anchor);
+  POPUP_DESCS.set(key, desc);
+  anchor.addEventListener("mouseenter", () => {
+    clearTimeout(popupHide);
+    clearTimeout(popupTimer);
+    popupTimer = setTimeout(() => showPopup(desc, anchor), 220);
+  });
+  anchor.addEventListener("mouseleave", () => {
+    clearTimeout(popupTimer);
+    scheduleHide();
+  });
+}
+
+// Re-anchor an open popup after a table re-render (call from render code, after
+// the new rows are built, so the popup survives live refreshes).
+function reattachOpenPopup() {
+  if (!popupKey) return;
+  const anchor = POPUP_ANCHORS.get(popupKey);
+  const desc = POPUP_DESCS.get(popupKey);
+  if (anchor && desc) showPopup(desc, anchor);
+  else hidePopup();
+}

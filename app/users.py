@@ -1,12 +1,13 @@
 """Users — list Jellyfin users and their watch activity.
 
 Per-user "last watched" requires one Jellyfin request per user, so it is fetched
-in the background, cached to ``data/users.json`` and refreshed on a schedule
-(see the Scheduler page). The cheap parts — the user list, last-login dates and
-live sessions — are always fetched live so the page renders instantly.
+in the background and cached to ``data/users.json``. A background refresh is
+kicked off on every page load. The cheap parts — the user list, last-login dates
+and live sessions — are always fetched live so the page renders instantly.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
@@ -14,8 +15,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import config
-from .jellyfin.client import JellyfinClient, JellyfinError
+from .jellyfin.client import JellyfinClient, JellyfinError, get_client
 from .logs import log
+from .media import _image_ref, _item_label
 from .web import require_login, templates
 
 router = APIRouter()
@@ -23,10 +25,6 @@ router = APIRouter()
 COMPLETION_THRESHOLD = 90  # watched % at or above this counts as "Completed"
 
 _USERS_FILE = config.data_dir / "users.json"
-
-
-def _client() -> JellyfinClient:
-    return JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
 
 
 def _completion(ud: dict) -> tuple[str, bool]:
@@ -43,13 +41,6 @@ def _completion(ud: dict) -> tuple[str, bool]:
     if pct > 0:
         return f"In progress ({pct}%)", False
     return "Unwatched", False
-
-
-def _item_label(it: dict) -> str:
-    name = it.get("Name") or "?"
-    if it.get("Type") == "Episode" and it.get("SeriesName"):
-        return f"{it['SeriesName']} — {name}"
-    return name
 
 
 # ---- persistence ------------------------------------------------------------
@@ -89,48 +80,64 @@ def clear_cache() -> None:
 
 _state = _load_state()
 _fetch = {"status": "idle", "error": None}
+_in_flight = False
 
 
 # ---- fetching ---------------------------------------------------------------
 
 
 async def _build_last_watched(client: JellyfinClient) -> dict:
-    """Fetch each user's most recently played item (one request per user)."""
+    """Fetch each user's most recently played item (one request per user).
+
+    The per-user calls are independent, so they run concurrently (bounded) —
+    a sequential loop took roughly one round-trip per user.
+    """
     users = await client.get_users()
-    result: dict[str, dict] = {}
-    for u in users:
-        uid = u.get("Id")
-        if not uid:
-            continue
+    uids = [u.get("Id") for u in users if u.get("Id")]
+    sem = asyncio.Semaphore(8)
+
+    async def one(uid: str) -> tuple[str, dict] | None:
+        params = {
+            "Recursive": "true",
+            "IncludeItemTypes": "Movie,Episode",
+            "Filters": "IsPlayed",
+            "SortBy": "DatePlayed",
+            "SortOrder": "Descending",
+            "Limit": "1",
+            "Fields": "SeriesPrimaryImage",
+        }
         try:
-            data = await client.get_user_items(
-                uid,
-                {
-                    "Recursive": "true",
-                    "IncludeItemTypes": "Movie,Episode",
-                    "Filters": "IsPlayed",
-                    "SortBy": "DatePlayed",
-                    "SortOrder": "Descending",
-                    "Limit": "1",
-                },
-            )
-            items = data.get("Items") or []
-            if items:
-                it = items[0]
-                ud = it.get("UserData") or {}
-                result[uid] = {
-                    "name": _item_label(it),
-                    "date": ud.get("LastPlayedDate"),
-                }
+            async with sem:
+                data = await client.get_user_items(uid, params)
         except JellyfinError:
-            continue
-    return result
+            return None
+        items = data.get("Items") or []
+        if not items:
+            return None
+        it = items[0]
+        ud = it.get("UserData") or {}
+        return uid, {
+            "name": _item_label(it),
+            "date": ud.get("LastPlayedDate"),
+            "id": it.get("Id"),
+            "type": it.get("Type"),
+            "image": _image_ref(it),
+        }
+
+    results = await asyncio.gather(*(one(uid) for uid in uids))
+    out: dict[str, dict] = {}
+    for r in results:
+        if r:
+            out[r[0]] = r[1]
+    return out
 
 
 async def _run_fetch() -> None:
+    global _in_flight
+    _in_flight = True
     _fetch.update({"status": "running", "error": None})
     try:
-        last_watched = await _build_last_watched(_client())
+        last_watched = await _build_last_watched(get_client())
         _state["last_watched"] = last_watched
         _state["last_sync"] = time.time()
         _save_state()
@@ -144,6 +151,15 @@ async def _run_fetch() -> None:
         _fetch["status"] = "error"
         _fetch["error"] = f"Unexpected error: {exc}"
         log("Jellyfin", "ERROR", f"Users refresh failed: {exc}")
+    finally:
+        _in_flight = False
+
+
+def _maybe_start_fetch() -> None:
+    """Start a background last-watched refresh; no-op if one is already running."""
+    if _in_flight:
+        return
+    asyncio.create_task(_run_fetch())
 
 
 # ---- routes -----------------------------------------------------------------
@@ -151,18 +167,18 @@ async def _run_fetch() -> None:
 
 @router.get("/users", response_class=HTMLResponse)
 async def users_page(request: Request, user: str = Depends(require_login)):
+    # Every page load refreshes the cached last-watched data in the background.
+    _maybe_start_fetch()
     return templates.TemplateResponse(request, "users.html", {"request": request})
 
 
 @router.get("/api/users")
 async def api_users(request: Request, user: str = Depends(require_login)):
-    # First view with no cached data: kick off a background fetch.
-    if not _state["last_sync"] and _fetch["status"] != "running":
-        from .scheduler import trigger_operation
+    # Cold start (no cache yet, e.g. deep link straight to the JSON).
+    if not _state["last_sync"]:
+        _maybe_start_fetch()
 
-        trigger_operation("refresh_users")
-
-    client = _client()
+    client = get_client()
     try:
         users = await client.get_users()
         sessions = await client.get_sessions()
@@ -193,7 +209,11 @@ async def api_users(request: Request, user: str = Depends(require_login)):
                     "name": _item_label(np),
                     "type": np.get("Type"),
                     "pct": pct,
+                    "pos_s": int(pos // 10_000_000),
+                    "total_s": int(total // 10_000_000),
                     "paused": bool(ps.get("IsPaused")),
+                    "image": _image_ref(np),
+                    "item_id": np.get("Id"),
                 }
 
         result.append(
@@ -206,6 +226,8 @@ async def api_users(request: Request, user: str = Depends(require_login)):
             }
         )
 
+    result.sort(key=lambda r: r.get("last_login") or "", reverse=True)
+
     return JSONResponse(
         {
             "ok": True,
@@ -214,16 +236,6 @@ async def api_users(request: Request, user: str = Depends(require_login)):
             "fetching": _fetch["status"] == "running",
             "fetch_error": _fetch.get("error"),
         }
-    )
-
-
-@router.post("/api/users/refresh")
-async def api_users_refresh(request: Request, user: str = Depends(require_login)):
-    from .scheduler import trigger_operation
-
-    started, _ = trigger_operation("refresh_users")
-    return JSONResponse(
-        {"ok": True, "message": "Refresh started." if started else "Already refreshing."}
     )
 
 
@@ -241,7 +253,7 @@ async def api_users_status(request: Request, user: str = Depends(require_login))
 
 @router.get("/api/users/{user_id}/history")
 async def api_user_history(user_id: str, request: Request, user: str = Depends(require_login)):
-    client = _client()
+    client = get_client()
     base = {
         "Recursive": "true",
         "IncludeItemTypes": "Movie,Episode",
@@ -268,6 +280,7 @@ async def api_user_history(user_id: str, request: Request, user: str = Depends(r
         status, completed = _completion(ud)
         rows.append(
             {
+                "id": it["Id"],
                 "name": _item_label(it),
                 "type": it.get("Type") or "",
                 "year": it.get("ProductionYear"),

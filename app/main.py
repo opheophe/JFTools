@@ -9,14 +9,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import modules  # noqa: F401  (registers all modules)
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
 from .config import config
-from .jellyfin.client import JellyfinClient, JellyfinError
+from .jellyfin.client import JellyfinClient, JellyfinError, close_shared_client, get_client
 from .jellyfin_id import router as jellyfin_id_router
 from .libraries import router as libraries_router
 from .logs import log, router as logs_router
-from .modules.base import Context, get_action, get_modules
+from .media import router as media_router
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
 from .users import router as users_router
 from .web import BASE_DIR, require_login, templates
@@ -27,6 +26,7 @@ async def lifespan(app):
     start_scheduler()
     yield
     shutdown_scheduler()
+    await close_shared_client()
 
 
 app = FastAPI(title="MedServ", lifespan=lifespan)
@@ -44,16 +44,13 @@ app.mount("/resources", StaticFiles(directory=str(BASE_DIR.parent / "resources")
 app.include_router(jellyfin_id_router)
 app.include_router(libraries_router)
 app.include_router(logs_router)
+app.include_router(media_router)
 app.include_router(scheduler_router)
 app.include_router(users_router)
 
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
-
-
-def _jellyfin_client() -> JellyfinClient:
-    return JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
 
 
 def _jellyfin_unconfigured() -> JSONResponse:
@@ -86,7 +83,6 @@ async def dashboard(request: Request, user: str = Depends(require_login)):
         "index.html",
         {
             "request": request,
-            "modules": get_modules(),
             "jellyfin_configured": config.jellyfin_configured,
         },
     )
@@ -169,7 +165,7 @@ async def login_submit(
     jf_user = {}
     if config.jellyfin_configured:
         try:
-            client = JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
+            client = get_client()
             jf_user = await client.authenticate_user(username, password)
         except JellyfinError:
             jf_user = {}
@@ -305,32 +301,6 @@ async def settings_test(
     )
 
 
-@app.post("/api/actions/{module_id}/{action_id}")
-async def run_action(
-    module_id: str,
-    action_id: str,
-    request: Request,
-    user: str = Depends(require_login),
-):
-    action = get_action(module_id, action_id)
-    if action is None:
-        return JSONResponse({"ok": False, "error": "Unknown action."}, status_code=404)
-
-    ctx = Context(settings=config.settings)
-    try:
-        result = dict(await action.handler(ctx))
-    except JellyfinError as exc:
-        log("Jellyfin", "ERROR", f"{module_id}/{action_id}: {exc}")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-    except Exception as exc:  # noqa: BLE001 - surfaced to the UI
-        log("Jellyfin", "ERROR", f"{module_id}/{action_id}: {exc}")
-        return JSONResponse({"ok": False, "error": f"Unexpected error: {exc}"}, status_code=500)
-
-    log("Jellyfin", "INFO", f"Ran action {module_id}/{action_id}")
-    result["ok"] = True
-    return JSONResponse(result)
-
-
 @app.post("/api/jellyfin/scan/{library_id}")
 async def jellyfin_scan_library(
     library_id: str,
@@ -339,7 +309,7 @@ async def jellyfin_scan_library(
 ):
     if not config.jellyfin_configured:
         return _jellyfin_unconfigured()
-    client = _jellyfin_client()
+    client = get_client()
     try:
         libs = await client.get_libraries()
         lib = next((l for l in libs if l.get("ItemId") == library_id), None)
@@ -361,7 +331,7 @@ async def jellyfin_scan_library(
 async def jellyfin_scan_all(request: Request, user: str = Depends(require_login)):
     if not config.jellyfin_configured:
         return _jellyfin_unconfigured()
-    client = _jellyfin_client()
+    client = get_client()
     try:
         await client.scan_all()
     except JellyfinError as exc:
@@ -376,7 +346,7 @@ async def jellyfin_scan_all(request: Request, user: str = Depends(require_login)
 async def jellyfin_tasks(request: Request, user: str = Depends(require_login)):
     if not config.jellyfin_configured:
         return _jellyfin_unconfigured()
-    client = _jellyfin_client()
+    client = get_client()
     try:
         tasks = await client.get_scheduled_tasks()
     except JellyfinError as exc:
@@ -404,9 +374,9 @@ async def jellyfin_tasks(request: Request, user: str = Depends(require_login)):
 async def jellyfin_activity(request: Request, user: str = Depends(require_login)):
     if not config.jellyfin_configured:
         return _jellyfin_unconfigured()
-    client = _jellyfin_client()
+    client = get_client()
     try:
-        entries = await client.get_activity_log(limit=10)
+        entries = await client.get_activity_log(limit=50)
     except JellyfinError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     items = []

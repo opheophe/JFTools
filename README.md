@@ -1,24 +1,23 @@
 # MedServ
 
 A self-hosted web dashboard that sits next to your media stack and drives
-external services over HTTP APIs. It ships with a **Jellyfin** module and a
-small plugin framework so new modules (subtitle audit, renaming, duplicates,
-notifications, ...) can be added as single files.
+Jellyfin over its HTTP API.
 
 Jellyfin itself is **not** part of this repository — MedServ only talks to your
 existing server over its API.
 
 ## Features
 
-- Web UI (`http://<host>:8099`) with module cards and action buttons.
+- Web UI (`http://<host>:8099`) with pages for server activity, Jellyfin users,
+  libraries and Movie Match (comparing on-disk files to Jellyfin's metadata).
 - First-run setup: on first launch you choose your own local login (username +
   password) — no default credentials. The local password works on your local
   network, and any Jellyfin admin account works from anywhere. Failed-login
   lockout included.
 - Settings page to change the Jellyfin connection **and** the dashboard login at
   runtime (persisted to a volume; the password is stored as a hash).
-- Jellyfin actions: test connection, list libraries, recently added, library
-  stats, active sessions.
+- Jellyfin connection test, library listing, recently added, library stats,
+  active sessions and scheduled scans.
 - Docker image (non-root) + compose file, with a `/healthz` healthcheck.
 
 ## Configuration
@@ -93,21 +92,3 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-## Adding a module
-
-Create a file in `app/modules/`, register a `Module` with `Action`s, and import
-it from `app/modules/__init__.py`. The dashboard picks it up automatically.
-
-```python
-from .base import Module, Action, register_module, message
-
-async def hello(ctx):
-    return message("Hello world", title="Greeting")
-
-register_module(Module(
-    id="example",
-    name="Example",
-    description="An example module.",
-    actions=[Action("hello", "Say hello", "Returns a greeting.", hello)],
-))
-```

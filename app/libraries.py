@@ -13,17 +13,13 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import config
-from .jellyfin.client import JellyfinClient, JellyfinError
+from .jellyfin.client import JellyfinError, get_client
 from .logs import log
 from .web import require_login, templates
 
 router = APIRouter()
 
 _LIBRARIES_FILE = config.data_dir / "libraries.json"
-
-
-def _client() -> JellyfinClient:
-    return JellyfinClient(config.settings.jellyfin_url, config.settings.jellyfin_api_key)
 
 
 # ---- persistence ------------------------------------------------------------
@@ -104,6 +100,7 @@ async def _build_recent(client: JellyfinClient, limit: int = 50) -> list[dict]:
         title = f"{parent} — {name}" if parent else name
         rows.append(
             {
+                "id": it.get("Id"),
                 "name": title,
                 "type": it.get("Type") or "",
                 "year": it.get("ProductionYear"),
@@ -116,7 +113,7 @@ async def _build_recent(client: JellyfinClient, limit: int = 50) -> list[dict]:
 async def _run_fetch() -> None:
     _fetch.update({"status": "running", "error": None})
     try:
-        client = _client()
+        client = get_client()
         libraries = await _build_libraries(client)
         recent = await _build_recent(client)
         _state["libraries"] = libraries
@@ -146,8 +143,10 @@ async def libraries_page(request: Request, user: str = Depends(require_login)):
 @router.get("/api/libraries")
 async def api_libraries(request: Request, user: str = Depends(require_login)):
     # First view with no cached data (or an empty recent list, e.g. a cache
-    # written before that field existed): kick off a background fetch.
-    if _fetch["status"] == "idle" and (not _state["last_sync"] or not _state["recent"]):
+    # written before that field existed): kick off a background fetch. Also
+    # refresh a cache whose recent rows predate item ids (needed for the popup).
+    stale = bool(_state["recent"]) and not any(r.get("id") for r in _state["recent"])
+    if _fetch["status"] == "idle" and (not _state["last_sync"] or not _state["recent"] or stale):
         from .scheduler import trigger_operation
 
         trigger_operation("refresh_libraries")

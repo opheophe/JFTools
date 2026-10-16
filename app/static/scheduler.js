@@ -104,7 +104,7 @@ async function schToggle(id) {
 
 async function schDelete(id) {
   if (!confirm("Delete this schedule?")) return;
-  await fetch("/api/scheduler/jobs/" + id, { method: "DELETE" });
+  await requestJSON("/api/scheduler/jobs/" + id, { method: "DELETE" });
   schLoad();
 }
 
@@ -181,12 +181,11 @@ async function schSave(e) {
   };
   const url = SCH.editing ? "/api/scheduler/jobs/" + SCH.editing : "/api/scheduler/jobs";
   const method = SCH.editing ? "PUT" : "POST";
-  const resp = await fetch(url, {
+  await requestJSON(url, {
     method: method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (resp.status === 401) { window.location.href = "/login"; return; }
   showForm(false);
   schLoad();
 }

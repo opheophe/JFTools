@@ -1,13 +1,19 @@
 {% extends "base.html" %}
+{% from "_macros.html" import live_switch %}
+{% block title %}MedServ — Current activity{% endblock %}
 {% block content %}
-<h1>Jellyfin</h1>
-<p class="muted">Manage your Jellyfin server.</p>
+<h1>Current activity</h1>
+<p class="muted">Active tasks and recent activity on your server.</p>
 
 {% if jellyfin_configured %}
+<div class="page-head">
+  <span class="spacer"></span>
+  {{ live_switch("activity-live") }}
+</div>
+
 <section class="card">
-  <h2>Current activity</h2>
-  <p class="muted">Active tasks and recent activity on your server.</p>
-  <div id="activity-body"><p class="muted">Loading…</p></div>
+  <h2>Server activity</h2>
+  <div id="activity-body"><p class="muted"><span class="spinner"></span> Loading…</p></div>
 </section>
 {% else %}
 <section class="card">
@@ -15,25 +21,4 @@
   <p class="muted">Add your Jellyfin URL and API key on the <a href="/settings">Settings</a> page to load libraries and activity.</p>
 </section>
 {% endif %}
-
-<h2 class="section-title">Actions</h2>
-<div class="cards">
-  {% for module in modules %}
-  <section class="card" id="module-{{ module.id }}">
-    <h2>{{ module.name }}</h2>
-    <p class="muted">{{ module.description }}</p>
-    <div class="actions">
-      {% for action in module.actions %}
-      <button
-        class="action-btn"
-        data-module="{{ module.id }}"
-        data-action="{{ action.id }}"
-        title="{{ action.description }}"
-      >{{ action.label }}</button>
-      {% endfor %}
-    </div>
-    <div class="result" id="result-{{ module.id }}" hidden></div>
-  </section>
-  {% endfor %}
-</div>
 {% endblock %}

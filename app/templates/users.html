@@ -1,19 +1,22 @@
 {% extends "base.html" %}
+{% from "_macros.html" import live_switch %}
 {% block title %}MedServ — Users{% endblock %}
 {% block content %}
 <h1>Users</h1>
-<p class="muted">Jellyfin users and their watch activity. Click a user to see their view statistics.</p>
+<p class="muted">Jellyfin users and their watch activity. Hover a title for details; click a user to see their view statistics.</p>
 
 <div class="page-head">
-  <button id="users-refresh" class="primary">Refresh</button>
   <span id="users-updated" class="muted"></span>
+  <span class="spacer"></span>
+  {{ live_switch("users-live") }}
 </div>
 
 <section class="card">
+  <h2>Watch activity</h2>
   <div class="table-wrap">
     <table id="users-table">
       <thead><tr><th>User</th><th>Last login</th><th>Last watched</th><th>Currently watching</th></tr></thead>
-      <tbody id="users-body"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+      <tbody id="users-body"><tr><td colspan="4" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
     </table>
   </div>
 </section>

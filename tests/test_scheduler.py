@@ -84,3 +84,10 @@ def test_public_job_running_flag(monkeypatch):
     assert sch._public_job("j3")["running"] is True
     monkeypatch.setattr(sch, "_running", set())
     assert sch._public_job("j3")["running"] is False
+
+
+def test_refresh_users_is_not_a_scheduler_operation():
+    # Users refresh now runs on page load instead of via the Scheduler.
+    assert "refresh_users" not in sch._OP_BY_ID
+    assert "refresh_users" not in sch._DEFAULT_SCHEDULES
+    assert "refresh_users" not in sch._ACTIVE_BY_DEFAULT

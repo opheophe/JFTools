@@ -1,0 +1,8 @@
+{# Shared template macros. Import with: {% from "_macros.html" import live_switch %} #}
+{% macro live_switch(id, title="Auto-refresh while this page is open") %}
+<label class="switch" title="{{ title }}">
+  <input type="checkbox" id="{{ id }}">
+  <span class="switch-track"></span>
+  <span class="switch-text">Live</span>
+</label>
+{% endmacro %}
