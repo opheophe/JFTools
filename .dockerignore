@@ -1,4 +1,5 @@
 .git
+.github
 .gitignore
 .gitattributes
 .env
@@ -13,3 +14,6 @@ data
 tests
 *.md
 LICENSE
+docker-compose*.yml
+release.ps1
+release.sh

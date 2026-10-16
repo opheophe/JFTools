@@ -3,25 +3,34 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    MEDSERV_DATA_DIR=/data
+    MEDSERV_DATA_DIR=/data \
+    TZ=Europe/Stockholm
 
 WORKDIR /app
+
+# gosu drops privileges in the entrypoint; tzdata gives the OS real time zones.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gosu tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY resources ./resources
-
-RUN useradd --create-home --uid 1000 medserv \
-    && mkdir -p /data \
-    && chown -R medserv:medserv /data
-
-USER medserv
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && useradd --create-home --uid 1000 medserv \
+    && mkdir -p /data
 
 EXPOSE 8099
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8099/healthz', timeout=3).status == 200 else 1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8099"]
+# Starts as root so the entrypoint can align medserv with PUID/PGID, then drops
+# to that user before running the app. MedServ keeps state in memory, so it must
+# run as a single process (no multiple uvicorn workers / replicas).
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8099", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]

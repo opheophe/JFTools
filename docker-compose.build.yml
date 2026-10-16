@@ -1,0 +1,19 @@
+# Build the image locally (on the NAS or a dev machine) instead of pulling it.
+# Same service definition as docker-compose.yml, but with `build: .`.
+#
+#   docker compose -f docker-compose.build.yml up -d --build
+services:
+  medserv:
+    build: .
+    image: ghcr.io/opheophe/medserv:local
+    container_name: medserv
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      MEDSERV_DATA_DIR: /data
+    ports:
+      - "8099:8099"
+    volumes:
+      - ${MEDSERV_DATA_PATH:-./data}:/data

@@ -1,13 +1,23 @@
+# Pull the prebuilt multi-arch image from GitHub Container Registry.
+# Recommended for the NAS: it only downloads, no build toolchain needed.
+#
+#   1. copy .env.example to .env and edit it
+#   2. docker compose pull
+#   3. docker compose up -d
 services:
   medserv:
-    build: .
+    image: ghcr.io/opheophe/medserv:latest
     container_name: medserv
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Own the data files as this user/group (match your NAS folder owner).
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      MEDSERV_DATA_DIR: /data
     ports:
       - "8099:8099"
     volumes:
-      - medserv-data:/data
-
-volumes:
-  medserv-data:
+      # Left side is the folder on the NAS/disk. Set MEDSERV_DATA_PATH in .env
+      # (e.g. /volume1/docker/medserv) or edit it here. Defaults to ./data.
+      - ${MEDSERV_DATA_PATH:-./data}:/data
