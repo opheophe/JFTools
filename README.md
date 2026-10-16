@@ -174,7 +174,8 @@ push to `main` and on every pull request.
 
 Images are built and published by `.github/workflows/docker-publish.yml`:
 
-- **Stable release** — run the release script, which tests, tags and pushes:
+- **Stable release** — run the release script, which tests, tags, pushes and
+  creates the GitHub release (requires an authenticated [`gh`](https://cli.github.com/)):
   ```powershell
   .\release.ps1 1.0.0        # Windows
   ```
