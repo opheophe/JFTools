@@ -206,5 +206,35 @@ class Config:
         self._settings.timezone = timezone.strip()
         self._persist()
 
+    # ---- backup / restore ---------------------------------------------------
+
+    _EXPORT_FIELDS = (
+        "jellyfin_url",
+        "jellyfin_api_key",
+        "username",
+        "password_hash",
+        "radarr_url",
+        "sonarr_url",
+        "timezone",
+    )
+
+    def export_settings(self) -> dict:
+        """Return every persisted setting as a plain JSON-serialisable dict."""
+        data = {"schema": 1, "app": "medserv"}
+        for field in self._EXPORT_FIELDS:
+            data[field] = getattr(self._settings, field)
+        return data
+
+    def import_settings(self, data: dict) -> None:
+        """Apply settings from an exported dict and persist them.
+
+        Unknown keys are ignored and missing keys leave the current value
+        untouched, so partial files still work.
+        """
+        for field in self._EXPORT_FIELDS:
+            if field in data and data[field] is not None:
+                setattr(self._settings, field, str(data[field]).strip())
+        self._persist()
+
 
 config = Config()

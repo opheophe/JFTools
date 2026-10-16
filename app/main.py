@@ -1,11 +1,12 @@
 """MedServ web dashboard application."""
 from __future__ import annotations
 
+import json
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -266,6 +267,51 @@ async def settings_timezone_save(
     set_timezone(tz)
     log("Jellyfin", "INFO", f"Time zone set to {tz}")
     return JSONResponse({"ok": True, "message": "Time zone saved."})
+
+
+@app.get("/settings/export")
+async def settings_export(request: Request, user: str = Depends(require_login)):
+    payload = config.export_settings()
+    body = json.dumps(payload, indent=2)
+    log("Jellyfin", "INFO", "Settings exported")
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="medserv-settings.json"'},
+    )
+
+
+@app.post("/settings/import")
+async def settings_import(
+    request: Request,
+    user: str = Depends(require_login),
+    file: UploadFile = File(...),
+):
+    raw = await file.read()
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return JSONResponse({"ok": False, "error": "File is not valid JSON."}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse(
+            {"ok": False, "error": "Settings file must be a JSON object."}, status_code=400
+        )
+
+    new_tz = str(data.get("timezone") or "").strip()
+    if new_tz:
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(new_tz)
+        except Exception:
+            return JSONResponse({"ok": False, "error": "Invalid time zone in file."}, status_code=400)
+
+    config.import_settings(data)
+    if new_tz:
+        set_timezone(config.settings.timezone)
+    request.session["user"] = config.resolved_username
+    log("Jellyfin", "INFO", "Settings imported")
+    return JSONResponse({"ok": True, "message": "Settings imported."})
 
 
 # ---- API --------------------------------------------------------------------

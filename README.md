@@ -16,6 +16,8 @@ existing server over the API.
   lockout included.
 - Settings page to change the Jellyfin connection **and** the dashboard login at
   runtime (persisted to a volume; the password is stored as a scrypt hash).
+- Backup: export all settings to a JSON file and import them back on another
+  instance.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans.
 - Single small container image, published to GitHub Container Registry for both
@@ -213,6 +215,8 @@ docker-entrypoint.sh PUID/PGID handling
   gitignored) and treat it as a secret. No secrets are committed to this
   repository — runtime state (including the API key and login hash) lives only in
   the mounted data directory.
+- The Settings page's **Export settings** file contains your Jellyfin API key and
+  login hash. Treat it as a secret.
 - If you expose the dashboard publicly, serve it over `https://` (reverse proxy +
   TLS) and set `MEDSERV_COOKIE_SECURE=true`.
 - The dashboard is LAN-only by default. For remote access, prefer

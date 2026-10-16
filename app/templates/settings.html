@@ -97,4 +97,16 @@
   </form>
   <div class="result" id="auth-result" hidden></div>
 </section>
+
+<section class="card">
+  <h2>Backup</h2>
+  <p class="muted">Export every setting above to a JSON file, or restore them from a previously exported file.</p>
+  <div class="row">
+    <button type="button" id="export-btn" class="primary">Export settings</button>
+    <button type="button" id="import-btn" class="btn-edit">Import settings</button>
+    <input type="file" id="import-file" accept="application/json,.json" hidden>
+  </div>
+  <p class="hint">The exported file contains your Jellyfin API key and login hash, so keep it private.</p>
+  <div class="result" id="backup-result" hidden></div>
+</section>
 {% endblock %}

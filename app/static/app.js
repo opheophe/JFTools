@@ -219,6 +219,7 @@ function bindSettings() {
   bindFormSubmit("auth-form", "/settings/auth", "auth-result");
   bindFormSubmit("integrations-form", "/settings/integrations", "integrations-result");
   bindFormSubmit("timezone-form", "/settings/timezone", "timezone-result");
+  bindSettingsBackup();
 
   const testBtn = document.getElementById("test-btn");
   const resultEl = document.getElementById("jellyfin-result");
@@ -237,6 +238,43 @@ function bindSettings() {
       resultEl.appendChild(el("p", { class: "error", text: String(err) }));
     } finally {
       testBtn.disabled = false;
+    }
+  });
+}
+
+function bindSettingsBackup() {
+  const exportBtn = document.getElementById("export-btn");
+  const importBtn = document.getElementById("import-btn");
+  const fileInput = document.getElementById("import-file");
+  const resultEl = document.getElementById("backup-result");
+  if (!exportBtn || !importBtn || !fileInput || !resultEl) return;
+
+  exportBtn.addEventListener("click", () => {
+    window.location.href = "/settings/export";
+  });
+
+  importBtn.addEventListener("click", () => fileInput.click());
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    const body = new FormData();
+    body.append("file", file);
+    showSpinner(resultEl);
+    try {
+      const resp = await fetch("/settings/import", { method: "POST", body });
+      if (resp.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const data = await resp.json();
+      showMessage(resultEl, data);
+      if (data.ok) setTimeout(() => window.location.reload(), 1200);
+    } catch (err) {
+      resultEl.innerHTML = "";
+      resultEl.appendChild(el("p", { class: "error", text: String(err) }));
+    } finally {
+      fileInput.value = "";
     }
   });
 }
