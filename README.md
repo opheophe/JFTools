@@ -38,8 +38,28 @@ docker compose up -d
 Open `http://<host>:8099` and follow the first-run setup, then set your Jellyfin
 URL and API key on the Settings page (or prefill them in `.env`).
 
-> The compose file mounts `${MEDSERV_DATA_PATH}` (default `./data`) to `/data`
-> and runs as `PUID:PGID`. See **Data & permissions**.
+The included `docker-compose.yml`:
+
+```yaml
+services:
+  medserv:
+    image: ghcr.io/opheophe/medserv:latest
+    container_name: medserv
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PUID: ${PUID:-1000}      # own the data files as this user/group
+      PGID: ${PGID:-1000}
+      MEDSERV_DATA_DIR: /data
+    ports:
+      - "8099:8099"
+    volumes:
+      - ${MEDSERV_DATA_PATH:-./data}:/data   # host folder -> container data dir
+```
+
+Pin a specific version instead of `latest` (e.g. `ghcr.io/opheophe/medserv:1.2.3`)
+for reproducible deployments. The compose file mounts `${MEDSERV_DATA_PATH}`
+(default `./data`) to `/data` and runs as `PUID:PGID`. See **Data & permissions**.
 
 ### Tags
 
