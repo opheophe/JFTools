@@ -2,9 +2,9 @@ from app.config import Config
 
 
 def test_needs_setup_until_local_login_created(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEDSERV_USERNAME", raising=False)
-    monkeypatch.delenv("MEDSERV_PASSWORD", raising=False)
-    monkeypatch.setenv("MEDSERV_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("JFTOOLS_USERNAME", raising=False)
+    monkeypatch.delenv("JFTOOLS_PASSWORD", raising=False)
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
 
     cfg = Config()
     assert cfg.needs_setup
@@ -18,7 +18,7 @@ def test_needs_setup_until_local_login_created(tmp_path, monkeypatch):
 def test_jellyfin_configured_requires_url_and_key(tmp_path, monkeypatch):
     monkeypatch.delenv("JELLYFIN_URL", raising=False)
     monkeypatch.delenv("JELLYFIN_API_KEY", raising=False)
-    monkeypatch.setenv("MEDSERV_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
 
     cfg = Config()
     assert not cfg.jellyfin_configured
@@ -31,9 +31,9 @@ def test_jellyfin_configured_requires_url_and_key(tmp_path, monkeypatch):
 
 
 def test_env_credentials_skip_setup(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEDSERV_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("MEDSERV_USERNAME", "admin")
-    monkeypatch.setenv("MEDSERV_PASSWORD", "change-me")
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("JFTOOLS_USERNAME", "admin")
+    monkeypatch.setenv("JFTOOLS_PASSWORD", "change-me")
 
     cfg = Config()
     assert not cfg.needs_setup

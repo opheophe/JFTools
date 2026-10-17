@@ -1,5 +1,5 @@
 # Tag a release, push it, and create the GitHub release. GitHub Actions then
-# builds and publishes the multi-arch image to ghcr.io/opheophe/medserv
+# builds and publishes the multi-arch image to ghcr.io/opheophe/jftools
 # (:X.Y.Z, :X.Y, :latest).
 #
 #   .\release.ps1 1.0.0
@@ -38,5 +38,5 @@ if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
 
 Write-Host ""
 Write-Host "Released $tag. GitHub Actions will publish:"
-Write-Host "  ghcr.io/opheophe/medserv:$Version"
-Write-Host "  ghcr.io/opheophe/medserv:latest"
+Write-Host "  ghcr.io/opheophe/jftools:$Version"
+Write-Host "  ghcr.io/opheophe/jftools:latest"

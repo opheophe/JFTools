@@ -70,20 +70,20 @@ class Settings:
 
 class Config:
     def __init__(self) -> None:
-        self.host = _env("MEDSERV_HOST", "0.0.0.0")
-        self.port = int(_env("MEDSERV_PORT", "8099"))
-        self.cookie_secure = _env("MEDSERV_COOKIE_SECURE", "false").lower() in (
+        self.host = _env("JFTOOLS_HOST", "0.0.0.0")
+        self.port = int(_env("JFTOOLS_PORT", "8099"))
+        self.cookie_secure = _env("JFTOOLS_COOKIE_SECURE", "false").lower() in (
             "1", "true", "yes", "on",
         )
-        self.data_dir = Path(_env("MEDSERV_DATA_DIR", "./data"))
+        self.data_dir = Path(_env("JFTOOLS_DATA_DIR", "./data"))
         self.settings_file = self.data_dir / "config.json"
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        self._env_username = _env("MEDSERV_USERNAME", "admin")
-        self._env_password = _env("MEDSERV_PASSWORD", "")
+        self._env_username = _env("JFTOOLS_USERNAME", "admin")
+        self._env_password = _env("JFTOOLS_PASSWORD", "")
         # When both are supplied explicitly, first-run setup is skipped.
         self._env_creds_set = (
-            "MEDSERV_USERNAME" in os.environ and "MEDSERV_PASSWORD" in os.environ
+            "JFTOOLS_USERNAME" in os.environ and "JFTOOLS_PASSWORD" in os.environ
         )
 
         self.secret_key = self._load_or_create_secret()
@@ -92,7 +92,7 @@ class Config:
     # ---- secret key ---------------------------------------------------------
 
     def _load_or_create_secret(self) -> str:
-        env_key = _env("MEDSERV_SECRET_KEY", "")
+        env_key = _env("JFTOOLS_SECRET_KEY", "")
         if env_key:
             return env_key
         path = self.data_dir / ".secret_key"
@@ -112,9 +112,9 @@ class Config:
         settings = Settings(
             jellyfin_url=_env("JELLYFIN_URL", ""),
             jellyfin_api_key=_env("JELLYFIN_API_KEY", ""),
-            radarr_url=_env("MEDSERV_RADARR_URL", ""),
-            sonarr_url=_env("MEDSERV_SONARR_URL", ""),
-            timezone=_env("MEDSERV_TIMEZONE", "Europe/Stockholm"),
+            radarr_url=_env("JFTOOLS_RADARR_URL", ""),
+            sonarr_url=_env("JFTOOLS_SONARR_URL", ""),
+            timezone=_env("JFTOOLS_TIMEZONE", "Europe/Stockholm"),
         )
         try:
             if self.settings_file.exists():
@@ -170,8 +170,8 @@ class Config:
     def needs_setup(self) -> bool:
         """True on first run until a local login exists.
 
-        A persisted username + password hash, or both MEDSERV_USERNAME and
-        MEDSERV_PASSWORD in the environment, count as an existing login.
+        A persisted username + password hash, or both JFTOOLS_USERNAME and
+        JFTOOLS_PASSWORD in the environment, count as an existing login.
         """
         if self._settings.username and self._settings.password_hash:
             return False
@@ -220,7 +220,7 @@ class Config:
 
     def export_settings(self) -> dict:
         """Return every persisted setting as a plain JSON-serialisable dict."""
-        data = {"schema": 1, "app": "medserv"}
+        data = {"schema": 1, "app": "jftools"}
         for field in self._EXPORT_FIELDS:
             data[field] = getattr(self._settings, field)
         return data

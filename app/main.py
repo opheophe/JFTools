@@ -1,4 +1,4 @@
-"""MedServ web dashboard application."""
+"""JFTools web dashboard application."""
 from __future__ import annotations
 
 import json
@@ -30,7 +30,7 @@ async def lifespan(app):
     await close_shared_client()
 
 
-app = FastAPI(title="MedServ", lifespan=lifespan)
+app = FastAPI(title="JFTools", lifespan=lifespan)
 
 app.add_middleware(
     SessionMiddleware,
@@ -277,7 +277,7 @@ async def settings_export(request: Request, user: str = Depends(require_login)):
     return Response(
         content=body,
         media_type="application/json",
-        headers={"Content-Disposition": 'attachment; filename="medserv-settings.json"'},
+        headers={"Content-Disposition": 'attachment; filename="jftools-settings.json"'},
     )
 
 

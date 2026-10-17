@@ -43,7 +43,7 @@ class JellyfinClient:
         return httpx.AsyncClient(timeout=self.timeout, transport=self._transport), True
 
     def _headers(self, with_token: bool = True) -> dict[str, str]:
-        auth = 'MediaBrowser Client="MedServ", Device="MedServ", DeviceId="medserv", Version="1.0.0"'
+        auth = 'MediaBrowser Client="JFTools", Device="JFTools", DeviceId="jftools", Version="1.0.0"'
         if with_token:
             auth += f', Token="{self.api_key}"'
         return {"Authorization": auth, "Accept": "application/json"}

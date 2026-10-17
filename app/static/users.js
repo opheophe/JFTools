@@ -188,7 +188,7 @@ async function toggleHistory(u) {
 
 // ---- live polling ----------------------------------------------------------
 
-const usersLive = LiveToggle("users-live", "medserv.users.live", 5000, () => {
+const usersLive = LiveToggle("users-live", "jftools.users.live", 5000, () => {
   if (statusTimer || LOADING) return;  // don't fight the refresh-status poll
   loadUsers();
 });

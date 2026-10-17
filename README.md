@@ -1,9 +1,9 @@
-# MedServ
+# JFTools
 
 A self-hosted web dashboard that sits next to your media stack and drives
 Jellyfin over its HTTP API.
 
-Jellyfin itself is **not** part of this repository — MedServ only talks to your
+Jellyfin itself is **not** part of this repository — JFTools only talks to your
 existing server over the API.
 
 ## Features
@@ -26,12 +26,12 @@ existing server over the API.
 
 ## Quick start (Docker)
 
-The image is built and published to **ghcr.io/opheophe/medserv** by GitHub
+The image is built and published to **ghcr.io/opheophe/jftools** by GitHub
 Actions. Pulling it needs no login.
 
 ```bash
-git clone https://github.com/opheophe/MedServ.git
-cd MedServ
+git clone https://github.com/opheophe/JFTools.git
+cd JFTools
 cp .env.example .env      # then edit .env (see Configuration below)
 docker compose pull
 docker compose up -d
@@ -44,23 +44,23 @@ The included `docker-compose.yml`:
 
 ```yaml
 services:
-  medserv:
-    image: ghcr.io/opheophe/medserv:latest
-    container_name: medserv
+  jftools:
+    image: ghcr.io/opheophe/jftools:latest
+    container_name: jftools
     restart: unless-stopped
     env_file: .env
     environment:
       PUID: ${PUID:-1000}      # own the data files as this user/group
       PGID: ${PGID:-1000}
-      MEDSERV_DATA_DIR: /data
+      JFTOOLS_DATA_DIR: /data
     ports:
       - "8099:8099"
     volumes:
-      - ${MEDSERV_DATA_PATH:-./data}:/data   # host folder -> container data dir
+      - ${JFTOOLS_DATA_PATH:-./data}:/data   # host folder -> container data dir
 ```
 
-Pin a specific version instead of `latest` (e.g. `ghcr.io/opheophe/medserv:1.2.3`)
-for reproducible deployments. The compose file mounts `${MEDSERV_DATA_PATH}`
+Pin a specific version instead of `latest` (e.g. `ghcr.io/opheophe/jftools:1.2.3`)
+for reproducible deployments. The compose file mounts `${JFTOOLS_DATA_PATH}`
 (default `./data`) to `/data` and runs as `PUID:PGID`. See **Data & permissions**.
 
 ### Tags
@@ -72,7 +72,7 @@ for reproducible deployments. The compose file mounts `${MEDSERV_DATA_PATH}`
 | `edge` | Latest build from `main` (for testing) |
 | `sha-xxxxxxx` | A specific commit |
 
-Pin a version in compose (`image: ghcr.io/opheophe/medserv:1.2.3`) if you prefer
+Pin a version in compose (`image: ghcr.io/opheophe/jftools:1.2.3`) if you prefer
 reproducible deployments.
 
 ## TerraMaster
@@ -81,13 +81,13 @@ TerraMaster TOS ships **Docker Manager** and SSH access.
 
 1. Copy the project onto the NAS (or just copy `docker-compose.yml` and
    `.env`).
-2. Create `.env` from `.env.example`. Set `MEDSERV_DATA_PATH` to a real NAS
-   folder, e.g. `/volume1/docker/medserv`, and set `PUID`/`PGID` to the owner of
+2. Create `.env` from `.env.example`. Set `JFTOOLS_DATA_PATH` to a real NAS
+   folder, e.g. `/volume1/docker/jftools`, and set `PUID`/`PGID` to the owner of
    that folder (see **Data & permissions**).
 3. In **Docker Manager → Project/Compose**, import `docker-compose.yml`, or over
    SSH run:
    ```bash
-   cd MedServ
+   cd JFTools
    docker compose pull && docker compose up -d
    ```
 4. Open `http://<nas-ip>:8099`.
@@ -102,21 +102,21 @@ docker compose -f docker-compose.build.yml up -d --build
 
 Copy `.env.example` to `.env` and set real values. Values in `.env` are the
 **initial defaults**; anything changed later on the Settings page is persisted
-to `${MEDSERV_DATA_DIR}/config.json` and takes precedence.
+to `${JFTOOLS_DATA_DIR}/config.json` and takes precedence.
 
 | Variable | Description |
 | --- | --- |
 | `JELLYFIN_URL` | Jellyfin API root. A trailing `/web` is stripped automatically. |
 | `JELLYFIN_API_KEY` | Created in Jellyfin → Dashboard → API Keys. |
-| `MEDSERV_USERNAME` / `MEDSERV_PASSWORD` | Optional. If both are set, first-run setup is skipped and these become the local login (LAN/localhost only); changeable later on the Settings page (stored hashed). Jellyfin admin accounts can always log in. |
-| `MEDSERV_SECRET_KEY` | Signs session cookies. Auto-generated and persisted to the data dir if unset. |
-| `MEDSERV_COOKIE_SECURE` | Set `true` when serving over HTTPS. |
-| `MEDSERV_DATA_DIR` | Where settings/state are persisted (`/data` in Docker). |
-| `MEDSERV_RADARR_URL` / `MEDSERV_SONARR_URL` | Default Radarr/Sonarr URLs for Movie Match's "Open" links. |
-| `MEDSERV_TIMEZONE` / `TZ` | Time zone for logs and scheduled jobs (default `Europe/Stockholm`). |
+| `JFTOOLS_USERNAME` / `JFTOOLS_PASSWORD` | Optional. If both are set, first-run setup is skipped and these become the local login (LAN/localhost only); changeable later on the Settings page (stored hashed). Jellyfin admin accounts can always log in. |
+| `JFTOOLS_SECRET_KEY` | Signs session cookies. Auto-generated and persisted to the data dir if unset. |
+| `JFTOOLS_COOKIE_SECURE` | Set `true` when serving over HTTPS. |
+| `JFTOOLS_DATA_DIR` | Where settings/state are persisted (`/data` in Docker). |
+| `JFTOOLS_RADARR_URL` / `JFTOOLS_SONARR_URL` | Default Radarr/Sonarr URLs for Movie Match's "Open" links. |
+| `JFTOOLS_TIMEZONE` / `TZ` | Time zone for logs and scheduled jobs (default `Europe/Stockholm`). |
 | `PUID` / `PGID` | Container user/group that owns the data files (Docker only). |
-| `MEDSERV_DATA_PATH` | Host folder bind-mounted to `/data` (Docker only). |
-| `MEDSERV_HOST` / `MEDSERV_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
+| `JFTOOLS_DATA_PATH` | Host folder bind-mounted to `/data` (Docker only). |
+| `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
 
 ## Data & permissions
 
@@ -124,14 +124,14 @@ All runtime state lives in the data directory (`/data` in the container):
 `config.json` (Jellyfin connection + login hash), `.secret_key`, `schedules.json`,
 `users.json`, `libraries.json`, `jellyfin_id.json`, and `logs/`.
 
-- **Bind mount:** set `MEDSERV_DATA_PATH` to a NAS folder. The container starts as
+- **Bind mount:** set `JFTOOLS_DATA_PATH` to a NAS folder. The container starts as
   root only to align its internal user with `PUID`/`PGID` and `chown` the data
   folder, then drops privileges with `gosu` before running the app. Set
   `PUID`/`PGID` to the folder's owner (`id -u` / `id -g` over SSH) to avoid
   permission errors.
 - **Named volume:** if you prefer, replace the bind mount with
-  `medserv-data:/data` and keep `PUID`/`PGID` at `1000`.
-- **Single process:** MedServ keeps state in memory (scheduler, caches), so run
+  `jftools-data:/data` and keep `PUID`/`PGID` at `1000`.
+- **Single process:** JFTools keeps state in memory (scheduler, caches), so run
   **one container, one uvicorn worker**. Do not scale replicas.
 
 ## Updating
@@ -219,7 +219,7 @@ docker-entrypoint.sh PUID/PGID handling
 - The Settings page's **Export settings** file contains your Jellyfin API key and
   login hash. Treat it as a secret.
 - If you expose the dashboard publicly, serve it over `https://` (reverse proxy +
-  TLS) and set `MEDSERV_COOKIE_SECURE=true`.
+  TLS) and set `JFTOOLS_COOKIE_SECURE=true`.
 - The dashboard is LAN-only by default. For remote access, prefer
   Tailscale/WireGuard or a TLS reverse proxy.
 

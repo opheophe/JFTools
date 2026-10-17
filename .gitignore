@@ -180,6 +180,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-# MedServ local runtime state (settings.json, generated secret key)
+# JFTools local runtime state (settings.json, generated secret key)
 data/
 *.db

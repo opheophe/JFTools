@@ -7,8 +7,8 @@ const ID = {
   ms: {},
 };
 
-const LS_KEY = "medserv.moviematch.filters";
-const SORT_KEY = "medserv.moviematch.sort";
+const LS_KEY = "jftools.moviematch.filters";
+const SORT_KEY = "jftools.moviematch.sort";
 const PAGE_SIZE = 50;
 
 // ---- helpers ---------------------------------------------------------------

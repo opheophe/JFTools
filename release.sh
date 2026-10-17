@@ -1,6 +1,6 @@
 #!/bin/sh
 # Tag a release, push it, and create the GitHub release. GitHub Actions then
-# builds and publishes the multi-arch image to ghcr.io/opheophe/medserv
+# builds and publishes the multi-arch image to ghcr.io/opheophe/jftools
 # (:X.Y.Z, :X.Y, :latest).
 #
 #   ./release.sh 1.0.0
@@ -42,5 +42,5 @@ gh release create "$tag" --title "Release $tag" --generate-notes
 
 echo ""
 echo "Released $tag. GitHub Actions will publish:"
-echo "  ghcr.io/opheophe/medserv:$version"
-echo "  ghcr.io/opheophe/medserv:latest"
+echo "  ghcr.io/opheophe/jftools:$version"
+echo "  ghcr.io/opheophe/jftools:latest"

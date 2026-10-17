@@ -5,19 +5,19 @@
 #   2. docker compose pull
 #   3. docker compose up -d
 services:
-  medserv:
-    image: ghcr.io/opheophe/medserv:latest
-    container_name: medserv
+  jftools:
+    image: ghcr.io/opheophe/jftools:latest
+    container_name: jftools
     restart: unless-stopped
     env_file: .env
     environment:
       # Own the data files as this user/group (match your NAS folder owner).
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
-      MEDSERV_DATA_DIR: /data
+      JFTOOLS_DATA_DIR: /data
     ports:
       - "8099:8099"
     volumes:
-      # Left side is the folder on the NAS/disk. Set MEDSERV_DATA_PATH in .env
-      # (e.g. /volume1/docker/medserv) or edit it here. Defaults to ./data.
-      - ${MEDSERV_DATA_PATH:-./data}:/data
+      # Left side is the folder on the NAS/disk. Set JFTOOLS_DATA_PATH in .env
+      # (e.g. /volume1/docker/jftools) or edit it here. Defaults to ./data.
+      - ${JFTOOLS_DATA_PATH:-./data}:/data

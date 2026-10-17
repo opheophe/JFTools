@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 echo.
 echo  ============================================
-echo   MedServ launcher
+echo   JFTools launcher
 echo  ============================================
 echo.
 
@@ -24,7 +24,7 @@ echo Using existing virtual environment .venv.
 
 :run
 echo.
-echo Starting MedServ at  http://localhost:8099
+echo Starting JFTools at  http://localhost:8099
 echo Press Ctrl+C to stop.
 echo.
 

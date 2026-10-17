@@ -1,7 +1,7 @@
 name: Build and publish image
 
 # Publishes a public image to GitHub Container Registry:
-#   ghcr.io/opheophe/medserv
+#   ghcr.io/opheophe/jftools
 #
 #   - push a tag like v1.2.3  -> tags 1.2.3, 1.2, latest, sha-xxxxxxx
 #   - push to main            -> tag  edge, sha-xxxxxxx
@@ -39,7 +39,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/opheophe/medserv
+          images: ghcr.io/opheophe/jftools
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

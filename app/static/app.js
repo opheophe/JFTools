@@ -368,7 +368,7 @@ async function refreshActivity() {
   }
 }
 
-const activityLive = LiveToggle("activity-live", "medserv.activity.live", 3000, refreshActivity);
+const activityLive = LiveToggle("activity-live", "jftools.activity.live", 3000, refreshActivity);
 
 document.addEventListener("DOMContentLoaded", () => {
   highlightNav();
