@@ -181,6 +181,12 @@ input[type="text"], input[type="password"] {
 input:focus { outline: none; border-color: var(--accent); }
 .row { display: flex; gap: 0.75rem; margin-top: 1.25rem; }
 
+/* media-path mapping rows (Settings) */
+.paths-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+.paths-row input[type="text"] { flex: 0 0 240px; width: auto; margin-top: 0; }
+.path-arrow { color: var(--muted); }
+.path-test { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+
 /* login */
 .login-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
 .login-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; width: 100%; max-width: 380px; }

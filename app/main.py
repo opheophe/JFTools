@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -19,6 +20,7 @@ from .jellyfin_id import router as jellyfin_id_router
 from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .media import router as media_router
+from .paths import resolve_path
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
 from .users import router as users_router
 from .web import BASE_DIR, require_login, templates
@@ -209,6 +211,7 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "radarr_url": config.settings.radarr_url,
             "sonarr_url": config.settings.sonarr_url,
             "timezone": config.settings.timezone,
+            "path_maps": config.settings.path_maps,
         },
     )
 
@@ -271,6 +274,45 @@ async def settings_timezone_save(
     set_timezone(tz)
     log("Jellyfin", "INFO", f"Time zone set to {tz}")
     return JSONResponse({"ok": True, "message": "Time zone saved."})
+
+
+@app.post("/settings/paths")
+async def settings_paths_save(request: Request, user: str = Depends(require_login)):
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON."}, status_code=400)
+    if not isinstance(data, dict) or "maps" not in data:
+        return JSONResponse({"ok": False, "error": "Missing 'maps'."}, status_code=400)
+    config.save_path_maps(data["maps"])
+    log("Jellyfin", "INFO", "Media path mappings saved")
+    return JSONResponse({"ok": True, "message": "Media paths saved."})
+
+
+@app.post("/api/paths/test")
+async def paths_test(request: Request, user: str = Depends(require_login)):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    path = str((data or {}).get("path") or "").strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No path supplied."}, status_code=400)
+
+    resolved = resolve_path(path, config.settings.path_maps)
+    result = {"ok": True, "path": path, "resolved": resolved}
+    try:
+        st = os.stat(resolved)
+        result["exists"] = True
+        result["is_dir"] = os.path.isdir(resolved)
+        result["readable"] = os.access(resolved, os.R_OK)
+        result["writable"] = os.access(resolved, os.W_OK)
+    except OSError:
+        result["exists"] = False
+        result["is_dir"] = False
+        result["readable"] = False
+        result["writable"] = False
+    return JSONResponse(result)
 
 
 @app.get("/settings/export")

@@ -292,6 +292,7 @@ function bindSettings() {
   bindFormSubmit("integrations-form", "/settings/integrations", "integrations-result");
   bindFormSubmit("timezone-form", "/settings/timezone", "timezone-result");
   bindSettingsBackup();
+  bindPathMaps();
 
   const testBtn = document.getElementById("test-btn");
   const resultEl = document.getElementById("jellyfin-result");
@@ -349,6 +350,101 @@ function bindSettingsBackup() {
       fileInput.value = "";
     }
   });
+}
+
+function bindPathMaps() {
+  const rowsEl = document.getElementById("paths-rows");
+  const addBtn = document.getElementById("paths-add");
+  const saveBtn = document.getElementById("paths-save");
+  const resultEl = document.getElementById("paths-result");
+  if (!rowsEl || !addBtn || !saveBtn || !resultEl) return;
+
+  let maps = [];
+  const dataEl = document.getElementById("paths-data");
+  if (dataEl) {
+    try { maps = JSON.parse(dataEl.textContent) || []; } catch (e) { maps = []; }
+  }
+
+  function rowEl(m) {
+    const div = el("div", { class: "paths-row" });
+    const fromInput = el("input", { type: "text", placeholder: "/Filmer", value: (m && m.from) || "" });
+    const toInput = el("input", { type: "text", placeholder: "\\\\NAS\\Filmer", value: (m && m.to) || "" });
+    const testBtn = el("button", { type: "button", class: "btn-edit", text: "Test" });
+    const testOut = el("span", { class: "path-test" });
+    const rmBtn = el("button", { type: "button", class: "btn-edit", text: "Remove" });
+
+    testBtn.addEventListener("click", async () => {
+      const path = fromInput.value.trim();
+      if (!path) { testOut.textContent = "Set a Jellyfin path first."; return; }
+      testOut.textContent = "…";
+      try {
+        const resp = await fetch("/api/paths/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: path }),
+        });
+        if (resp.status === 401) { window.location.href = "/login"; return; }
+        const d = await resp.json();
+        if (d.error) { testOut.textContent = d.error; return; }
+        const bits = [d.exists ? "exists" : "missing"];
+        if (d.exists) {
+          bits.push(d.is_dir ? "directory" : "file");
+          bits.push(d.readable ? "readable" : "not readable");
+          bits.push(d.writable ? "writable" : "not writable");
+        }
+        testOut.textContent = "→ " + (d.resolved || "") + "  (" + bits.join(", ") + ")";
+      } catch (err) {
+        testOut.textContent = String(err);
+      }
+    });
+
+    rmBtn.addEventListener("click", () => div.remove());
+
+    div.appendChild(fromInput);
+    div.appendChild(el("span", { class: "path-arrow", text: "→" }));
+    div.appendChild(toInput);
+    div.appendChild(testBtn);
+    div.appendChild(testOut);
+    div.appendChild(rmBtn);
+    return div;
+  }
+
+  function render() {
+    rowsEl.innerHTML = "";
+    (maps.length ? maps : [null]).forEach((m) => rowsEl.appendChild(rowEl(m)));
+  }
+
+  addBtn.addEventListener("click", () => {
+    maps.push({ from: "", to: "" });
+    render();
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    const collected = [];
+    rowsEl.querySelectorAll(".paths-row").forEach((row) => {
+      const inputs = row.querySelectorAll("input");
+      const from = inputs[0].value.trim();
+      const to = inputs[1].value.trim();
+      if (from && to) collected.push({ from: from, to: to });
+    });
+    showSpinner(resultEl);
+    try {
+      const resp = await fetch("/settings/paths", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maps: collected }),
+      });
+      if (resp.status === 401) { window.location.href = "/login"; return; }
+      const d = await resp.json();
+      showMessage(resultEl, d);
+      if (d.ok) { maps = collected; render(); }
+    } catch (err) {
+      resultEl.innerHTML = "";
+      resultEl.appendChild(el("p", { class: "error", text: String(err) }));
+    }
+  });
+
+  render();
 }
 
 function renderRecentScans(body, scans) {

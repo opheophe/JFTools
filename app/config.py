@@ -14,7 +14,7 @@ import hmac
 import json
 import os
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -26,6 +26,37 @@ load_dotenv()
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
+
+
+def _sanitize_path_maps(value) -> list[dict]:
+    """Normalise raw path-map input into a list of {"from", "to"} pairs."""
+    out: list[dict] = []
+    if not isinstance(value, list):
+        return out
+    for m in value:
+        if not isinstance(m, dict):
+            continue
+        src = str(m.get("from") or "").strip()
+        dst = str(m.get("to") or "").strip()
+        if src and dst:
+            out.append({"from": src, "to": dst})
+    return out
+
+
+def _parse_path_map_env(raw: str) -> list[dict]:
+    """Parse ``JFTOOLS_PATH_MAP`` (``/from=/to;/from2=/to2``)."""
+    if not raw:
+        return []
+    out: list[dict] = []
+    for entry in raw.split(";"):
+        entry = entry.strip()
+        if not entry or "=" not in entry:
+            continue
+        src, dst = entry.split("=", 1)
+        src, dst = src.strip(), dst.strip()
+        if src and dst:
+            out.append({"from": src, "to": dst})
+    return out
 
 
 def hash_password(password: str) -> str:
@@ -66,6 +97,7 @@ class Settings:
     radarr_url: str = ""
     sonarr_url: str = ""
     timezone: str = "Europe/Stockholm"
+    path_maps: list[dict] = field(default_factory=list)
 
 
 class Config:
@@ -115,6 +147,7 @@ class Config:
             radarr_url=_env("JFTOOLS_RADARR_URL", ""),
             sonarr_url=_env("JFTOOLS_SONARR_URL", ""),
             timezone=_env("JFTOOLS_TIMEZONE", "Europe/Stockholm"),
+            path_maps=_parse_path_map_env(_env("JFTOOLS_PATH_MAP", "")),
         )
         try:
             if self.settings_file.exists():
@@ -133,6 +166,8 @@ class Config:
                     settings.sonarr_url = data["sonarr_url"]
                 if data.get("timezone"):
                     settings.timezone = data["timezone"]
+                if "path_maps" in data:
+                    settings.path_maps = _sanitize_path_maps(data["path_maps"])
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -148,6 +183,7 @@ class Config:
             "radarr_url": s.radarr_url,
             "sonarr_url": s.sonarr_url,
             "timezone": s.timezone,
+            "path_maps": s.path_maps,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -206,6 +242,10 @@ class Config:
         self._settings.timezone = timezone.strip()
         self._persist()
 
+    def save_path_maps(self, maps) -> None:
+        self._settings.path_maps = _sanitize_path_maps(maps)
+        self._persist()
+
     # ---- backup / restore ---------------------------------------------------
 
     _EXPORT_FIELDS = (
@@ -216,6 +256,7 @@ class Config:
         "radarr_url",
         "sonarr_url",
         "timezone",
+        "path_maps",
     )
 
     def export_settings(self) -> dict:
@@ -233,7 +274,10 @@ class Config:
         """
         for field in self._EXPORT_FIELDS:
             if field in data and data[field] is not None:
-                setattr(self._settings, field, str(data[field]).strip())
+                if field == "path_maps":
+                    self._settings.path_maps = _sanitize_path_maps(data[field])
+                else:
+                    setattr(self._settings, field, str(data[field]).strip())
         self._persist()
 
 

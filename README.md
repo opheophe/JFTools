@@ -113,6 +113,7 @@ values.
 | `JFTOOLS_DATA_DIR` | Where settings/state are persisted (`/data` in Docker). |
 | `JFTOOLS_RADARR_URL` / `JFTOOLS_SONARR_URL` | Default Radarr/Sonarr URLs for Movie Match's "Open" links. |
 | `JFTOOLS_TIMEZONE` / `TZ` | Time zone for logs and scheduled jobs (default `Europe/Stockholm`). |
+| `JFTOOLS_PATH_MAP` | Optional. Semicolon-separated `from=to` path mappings, e.g. `/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`. Maps Jellyfin's container paths to paths this machine can open. Also editable in-app (Settings → Media paths). |
 | `PUID` / `PGID` | Container user/group that owns the data files. Set in `docker-compose.yml`. |
 | `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
 
@@ -131,6 +132,50 @@ All runtime state lives in the data directory (`/data` in the container):
   `jftools-data:/data` and keep `PUID`/`PGID` at `1000`.
 - **Single process:** JFTools keeps state in memory (scheduler, caches), so run
   **one container, one uvicorn worker**. Do not scale replicas.
+
+## Media paths
+
+By default JFTools only talks to the Jellyfin **API** and never touches your
+media files. To let it read (and write) the real files — for example to run
+`ffmpeg` — it needs to be able to find them, because Jellyfin reports each
+item's path from *inside its own container* (e.g. `/Filmer/Movie/movie.mkv`).
+
+Two ways to make those paths work:
+
+**1. Match Jellyfin's mounts (Docker).** Add the same `source:`/`target:` pairs
+Jellyfin uses to the JFTools service in `docker-compose.yml`, and the reported
+paths resolve as-is:
+
+```yaml
+services:
+  jftools:
+    volumes:
+      - /path/to/jftools/data:/data            # existing
+      - /Volume2/Media/Filmer:/Filmer          # same target Jellyfin uses
+      - /Volume2/Media/Serier:/Serier
+      # append :ro to mount read-only, e.g.  - /Volume2/Media/Filmer:/Filmer:ro
+```
+
+**2. Remap paths in Settings.** Add a mapping for each library on the
+**Settings → Media paths** page: the path Jellyfin reports on the left, and the
+path *this* machine can open on the right. This is what you want when running
+JFTools on a different box (e.g. Windows) than Jellyfin:
+
+```
+/Filmer  →  \\NAS\Filmer     (or Z:\Filmer)
+```
+
+The same mappings can be supplied headless via `JFTOOLS_PATH_MAP`
+(`/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`).
+
+Notes:
+- **Permissions:** the app runs as `PUID:PGID` in Docker (or your user when run
+  locally); those credentials need read (and, for writes, write) access to the
+  mapped folders.
+- **Spaces / special characters** in a path: quote it, or use the long form in
+  compose (`type: bind` / `source:` / `target:`).
+- **Verify:** use the **Test** button on a mapping, or in Docker
+  `docker exec jftools ls "/Filmer"`.
 
 ## Updating
 
