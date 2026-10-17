@@ -355,6 +355,7 @@ function bindSettingsBackup() {
 function bindPathMaps() {
   const rowsEl = document.getElementById("paths-rows");
   const addBtn = document.getElementById("paths-add");
+  const prefillBtn = document.getElementById("paths-prefill");
   const saveBtn = document.getElementById("paths-save");
   const resultEl = document.getElementById("paths-result");
   if (!rowsEl || !addBtn || !saveBtn || !resultEl) return;
@@ -418,6 +419,51 @@ function bindPathMaps() {
     maps.push({ from: "", to: "" });
     render();
   });
+
+  if (prefillBtn) {
+    prefillBtn.addEventListener("click", async () => {
+      prefillBtn.disabled = true;
+      showSpinner(resultEl);
+      try {
+        let data = await getJSON("/api/libraries");
+        let libs = (data && data.libraries) || [];
+        if (!libs.length) {
+          // No cached data yet: kick a refresh and wait for it to finish.
+          try { await postJSON("/api/libraries/refresh", null); } catch (e) {}
+          await new Promise((resolve) => {
+            startStatusPoll("/api/libraries/status", () => {}, () => resolve(), 800);
+          });
+          data = await getJSON("/api/libraries");
+          libs = (data && data.libraries) || [];
+        }
+        const locations = [];
+        libs.forEach((lib) => (lib.locations || []).forEach((loc) => {
+          if (loc && !locations.includes(loc)) locations.push(loc);
+        }));
+        if (!locations.length) {
+          showMessage(resultEl, { ok: false, error: "No library folders found." });
+          return;
+        }
+        const existing = new Set(maps.map((m) => m.from));
+        let added = 0;
+        locations.forEach((loc) => {
+          if (!existing.has(loc)) { maps.push({ from: loc, to: "" }); existing.add(loc); added++; }
+        });
+        render();
+        showMessage(resultEl, {
+          ok: true,
+          message: added
+            ? "Added " + added + " library folder(s). Fill in the local path for each and save."
+            : "All library folders are already listed.",
+        });
+      } catch (err) {
+        resultEl.innerHTML = "";
+        resultEl.appendChild(el("p", { class: "error", text: String(err) }));
+      } finally {
+        prefillBtn.disabled = false;
+      }
+    });
+  }
 
   saveBtn.addEventListener("click", async () => {
     const collected = [];
