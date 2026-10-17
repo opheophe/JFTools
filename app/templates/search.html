@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}JFTools — Search{% endblock %}
+{% block content %}
+<h1>Search</h1>
+<p class="muted">Search the fetched library by filename or Jellyfin title.</p>
+
+<div class="page-head">
+  <button id="se-fetch" class="primary">Fetch</button>
+  <span id="se-sync-age" class="muted"></span>
+  <span id="se-count" class="muted"></span>
+</div>
+<div class="progress" id="se-progress" hidden><div class="progress-fill" id="se-progress-fill"></div></div>
+<div id="se-status" class="muted id-status"></div>
+
+<section class="card">
+  <h2>Media items</h2>
+  <div class="id-controls">
+    <label>Library <div class="ms" id="se-lib"></div></label>
+    <label>Type <div class="ms" id="se-type"></div></label>
+    <label>Search file <input type="text" id="se-search-file" placeholder="regex"></label>
+    <label>Search Jellyfin <input type="text" id="se-search-jf" placeholder="regex"></label>
+  </div>
+
+  <div class="table-wrap">
+    <table id="se-table">
+      <thead>
+        <tr><th data-sort="type" class="sortable">Type<span class="sort-arrow"></span></th><th data-sort="path" class="sortable">Full path<span class="sort-arrow"></span></th><th data-sort="file" class="sortable">Item on disc<span class="sort-arrow"></span></th><th data-sort="display" class="sortable">Jellyfin name<span class="sort-arrow"></span></th><th>Actions</th></tr>
+      </thead>
+      <tbody id="se-body"><tr><td colspan="5" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div id="se-pager" class="pager" hidden></div>
+  <div id="se-error" class="error" hidden></div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/search.js"></script>{% endblock %}

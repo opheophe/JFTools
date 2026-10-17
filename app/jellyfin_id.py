@@ -325,6 +325,11 @@ async def jellyfin_id_page(request: Request, user: str = Depends(require_login))
     return templates.TemplateResponse(request, "jellyfin_id.html", {"request": request})
 
 
+@router.get("/search", response_class=HTMLResponse)
+async def search_page(request: Request, user: str = Depends(require_login)):
+    return templates.TemplateResponse(request, "search.html", {"request": request})
+
+
 @router.get("/api/jellyfin-id/items")
 async def jellyfin_id_items(request: Request, user: str = Depends(require_login)):
     return JSONResponse(

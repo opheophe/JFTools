@@ -143,6 +143,78 @@ function highlightNav() {
   });
 }
 
+// ---- multi-select dropdown (shared by Movie Match + Search filters) ---------
+
+function MultiSelect(container, options, onChange) {
+  let opts = options || [];
+  const selected = new Set();
+  const btn = el("button", { type: "button", class: "ms-btn", text: "All" });
+  const menu = el("div", { class: "ms-menu" });
+  menu.hidden = true;
+  container.appendChild(btn);
+  container.appendChild(menu);
+
+  const labelFor = (v) => {
+    const o = opts.find((x) => x.value === v);
+    return o ? o.label : v;
+  };
+
+  function renderButton() {
+    if (selected.size === 0 || selected.size === opts.length) {
+      btn.textContent = "All";
+    } else if (selected.size <= 2) {
+      btn.textContent = [...selected].map(labelFor).join(", ");
+    } else {
+      btn.textContent = selected.size + " selected";
+    }
+  }
+
+  function renderMenu() {
+    menu.innerHTML = "";
+    opts.forEach((o) => {
+      const row = el("label", { class: "ms-item" });
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = selected.has(o.value);
+      cb.addEventListener("change", () => {
+        if (cb.checked) selected.add(o.value); else selected.delete(o.value);
+        renderButton();
+        onChange([...selected]);
+      });
+      row.appendChild(cb);
+      row.appendChild(el("span", { text: o.label }));
+      menu.appendChild(row);
+    });
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!container.contains(e.target)) menu.hidden = true;
+  });
+
+  function setOptions(newOptions) {
+    opts = newOptions || [];
+    const valid = new Set(opts.map((o) => o.value));
+    [...selected].forEach((v) => { if (!valid.has(v)) selected.delete(v); });
+    renderButton();
+    renderMenu();
+  }
+
+  function setValues(vals) {
+    selected.clear();
+    (vals || []).forEach((v) => { if (opts.some((o) => o.value === v)) selected.add(v); });
+    renderButton();
+    renderMenu();
+  }
+
+  renderButton();
+  renderMenu();
+  return { setOptions, setValues, getValue: () => [...selected] };
+}
+
 let statusTimer = null;
 
 // Poll a "/status" endpoint until it reports no longer "running".
