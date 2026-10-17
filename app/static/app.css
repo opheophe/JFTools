@@ -349,6 +349,8 @@ section.card { margin-top: 1.25rem; }
 .sch-fields input[type="text"] { width: 140px; }
 .sch-fields label.sch-enabled { flex-direction: row; align-items: center; gap: 0.5rem; }
 .sch-running { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--ok); white-space: nowrap; }
+.sch-progress { max-width: 180px; margin-top: 0.3rem; }
+.sch-progress-label { font-size: 0.8rem; margin-top: 0.1rem; }
 .sch-actions { white-space: nowrap; }
 .sch-actions .mini { margin-right: 0.4rem; }
 #sch-table td.sch-desc { max-width: 360px; white-space: normal; }

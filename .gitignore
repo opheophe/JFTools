@@ -189,3 +189,6 @@ data/
 Tools/
 tools/
 
+# Local dev helper script.
+Rebuild JFTools.bat
+

@@ -73,6 +73,14 @@ function renderJobs() {
       wrap.appendChild(el("span", { class: "spinner" }));
       wrap.appendChild(el("span", { text: "Running" }));
       std.appendChild(wrap);
+      const p = j.progress;
+      if (p && typeof p.done === "number" && p.total > 0) {
+        const pct = Math.round(100 * p.done / p.total);
+        const bar = el("div", { class: "progress sch-progress" });
+        bar.appendChild(el("div", { class: "progress-fill", style: "width:" + pct + "%" }));
+        std.appendChild(bar);
+        std.appendChild(el("div", { class: "muted sch-progress-label", text: p.done + " / " + p.total }));
+      }
     } else {
       std.appendChild(el("span", { class: "muted", text: "Idle" }));
     }
@@ -198,7 +206,7 @@ function startSchPolling() {
   if (schTimer) return;
   schTimer = setInterval(() => {
     if (!document.hidden) schLoad(false);
-  }, 5000);
+  }, 2000);
 }
 
 document.addEventListener("DOMContentLoaded", () => {

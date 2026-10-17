@@ -76,9 +76,28 @@ async def _op_subtitle_scan_changed() -> None:
     await run_scan("changed")
 
 
+def _subtitle_scan_progress() -> dict | None:
+    """Live progress (done/total) for the running subtitle scans."""
+    from .subtitles import _fetch
+
+    if _fetch.get("status") != "running":
+        return None
+    return {"done": _fetch.get("scanned", 0), "total": _fetch.get("total", 0)}
+
+
+def _jellyfin_id_progress() -> dict | None:
+    """Live progress (done/total) for the Movie Match fetch."""
+    from .jellyfin_id import _fetch
+
+    if _fetch.get("status") != "running":
+        return None
+    return {"done": _fetch.get("fetched", 0), "total": _fetch.get("total", 0)}
+
+
 OPERATIONS = [
     {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
-     "description": "Fetch all media items, re-score their name/year match, and record each user's favorites."},
+     "description": "Fetch all media items, re-score their name/year match, and record each user's favorites.",
+     "progress": _jellyfin_id_progress},
     {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all,
      "description": "Start a full library scan in Jellyfin."},
     {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs,
@@ -90,9 +109,11 @@ OPERATIONS = [
     {"id": "check_updates", "label": "Check for updates", "tab": "System", "handler": _op_check_updates,
      "description": "Query GitHub for the latest JFTools release."},
     {"id": "subtitle_scan_full", "label": "Subtitle scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
-     "description": "Probe every media file for subtitle tracks with ffprobe and refresh the whole subtitle store."},
+     "description": "Probe every media file for subtitle tracks with ffprobe and refresh the whole subtitle store.",
+     "progress": _subtitle_scan_progress},
     {"id": "subtitle_scan_changed", "label": "Subtitle scan (changed)", "tab": "Search", "handler": _op_subtitle_scan_changed,
-     "description": "Probe only files that are new or whose size/modified time changed since the last scan."},
+     "description": "Probe only files that are new or whose size/modified time changed since the last scan.",
+     "progress": _subtitle_scan_progress},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
 OPERATIONS_PUBLIC = [
@@ -312,6 +333,14 @@ def _next_run_label(job_id: str) -> str | None:
 def _public_job(job_id: str) -> dict:
     job = _jobs[job_id]
     op = _OP_BY_ID.get(job.get("operation"), {})
+    progress = None
+    if job["id"] in _running:
+        getter = op.get("progress")
+        if getter:
+            try:
+                progress = getter()
+            except Exception:  # noqa: BLE001
+                progress = None
     return {
         "id": job["id"],
         "operation": job.get("operation"),
@@ -321,6 +350,7 @@ def _public_job(job_id: str) -> dict:
         "schedule": _describe_schedule(job.get("trigger", {})),
         "enabled": bool(job.get("enabled", True)),
         "running": job["id"] in _running,
+        "progress": progress,
         "next_run": _next_run_label(job_id),
         "last_run": job.get("last_run"),
         "last_status": job.get("last_status"),
