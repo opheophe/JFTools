@@ -447,6 +447,8 @@ async def search_page(request: Request, user: str = Depends(require_login)):
 
 @router.get("/api/jellyfin-id/items")
 async def jellyfin_id_items(request: Request, user: str = Depends(require_login)):
+    from .subtitles import subtitles_map, subtitles_ok
+
     return JSONResponse(
         {
             "ok": True,
@@ -457,6 +459,8 @@ async def jellyfin_id_items(request: Request, user: str = Depends(require_login)
             "jellyfin_url": config.settings.jellyfin_url,
             "radarr_url": config.settings.radarr_url,
             "sonarr_url": config.settings.sonarr_url,
+            "subtitles": subtitles_map(),
+            "subtitles_ok": subtitles_ok(),
         }
     )
 

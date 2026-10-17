@@ -357,7 +357,7 @@ function renderIdTable() {
     const marked = ID.marks.has(idMarkKey(r));
     const okTd = el("td");
     const markBtn = el("button", { class: "mark-btn", text: marked ? "✔" : "○" });
-    markBtn.title = marked ? "Remove ok mark" : "Mark as ok";
+    markBtn.title = marked ? "Remove mismatch ok mark" : "Mark as mismatch ok";
     markBtn.addEventListener("click", () => idToggleMark(idMarkKey(r), !marked));
     okTd.appendChild(markBtn);
     tr.appendChild(okTd);

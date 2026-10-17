@@ -2,8 +2,9 @@
 
 const SE = {
   rows: [], jellyfin: "", radarr: "", sonarr: "",
+  subtitles: {}, subtitlesOk: new Set(),
   fetched: false, page: 1, sort: { col: null, dir: 1 },
-  filters: { lib: [], type: [], file: "", jf: "", fav: [] },
+  filters: { lib: [], type: [], file: "", jf: "", fav: [], subs: [], subsok: [] },
   ms: {},
 };
 
@@ -14,6 +15,24 @@ const PAGE_SIZE = 50;
 // Sentinel values for the "Favorited by" dropdown.
 const FAV_ANY = "__any__";
 const FAV_NONE = "__none__";
+
+// Subtitle "Show" filter options (same as Subber's Movie List).
+const SUBS_OPTIONS = ["Acceptable", "AI Sub", "No acceptable", "No acceptable (inc. AI)", "Forced", "Foreign", "No subs"]
+  .map((v) => ({ value: v, label: v }));
+const SUBSOK_OPTIONS = [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }];
+const SUBS_PREDS = {
+  "Acceptable": (f) => !!f.acceptable,
+  "AI Sub": (f) => !!f.ai,
+  "No acceptable": (f) => !f.acceptable,
+  "No acceptable (inc. AI)": (f) => !f.acceptable && !f.ai,
+  "Forced": (f) => !!f.forced,
+  "Foreign": (f) => !!f.foreign,
+  "No subs": (f) => !!f.nosubs,
+};
+
+function seSubsEntry(r) { return SE.subtitles[r.path] || null; }
+function seFlags(r) { const e = seSubsEntry(r); return e && e.flags ? e.flags : null; }
+function seSubsOk(r) { return SE.subtitlesOk.has(r.path); }
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -73,6 +92,14 @@ function seBuildActions(r) {
   return td;
 }
 
+async function seToggleSubsOk(path, marked) {
+  try {
+    await postJSON("/api/subtitles/ok", "path=" + encodeURIComponent(path) + "&marked=" + (marked ? "true" : "false"));
+    if (marked) SE.subtitlesOk.add(path); else SE.subtitlesOk.delete(path);
+    renderSeTable();
+  } catch (e) {}
+}
+
 // ---- filtering -------------------------------------------------------------
 
 function seVisible() {
@@ -90,6 +117,15 @@ function seVisible() {
         return favSet.has(v);
       });
       if (!ok) return false;
+    }
+    if (f.subs.length) {
+      const flags = seFlags(r);
+      if (!flags) return false;
+      if (!f.subs.some((v) => SUBS_PREDS[v](flags))) return false;
+    }
+    if (f.subsok.length) {
+      const ok = seSubsOk(r) ? "yes" : "no";
+      if (!f.subsok.includes(ok)) return false;
     }
     if (fileRe && !fileRe.test(r.file)) return false;
     if (jfRe && !jfRe.test(r.display || r.name)) return false;
@@ -114,6 +150,8 @@ function loadFilters() {
       SE.filters.file = typeof f.file === "string" ? f.file : "";
       SE.filters.jf = typeof f.jf === "string" ? f.jf : "";
       SE.filters.fav = Array.isArray(f.fav) ? f.fav : [];
+      SE.filters.subs = Array.isArray(f.subs) ? f.subs : [];
+      SE.filters.subsok = Array.isArray(f.subsok) ? f.subsok : [];
     }
   } catch (e) {}
 }
@@ -126,6 +164,8 @@ const SORTABLE = {
   file: (r) => r.file || "",
   display: (r) => r.display || r.name || "",
   fav: (r) => (r.favorited_by || []).join(", "),
+  subsok: (r) => (seSubsOk(r) ? 1 : 0),
+  subs: (r) => { const e = seSubsEntry(r); return (e && e.subs || []).join(", "); },
 };
 
 function saveSort() {
@@ -194,13 +234,13 @@ function renderSeTable() {
   updateSortIndicators();
 
   if (!SE.fetched) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "6", text: "Not fetched yet — click Fetch." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "Not fetched yet — click Fetch." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
   }
   if (visible.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "6", text: "No items match the filters." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "No items match the filters." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
@@ -216,6 +256,16 @@ function renderSeTable() {
 
   pageRows.forEach((r) => {
     const tr = el("tr");
+
+    // Subtitle Ok — a manual, per-row checkbox.
+    const okTd = el("td");
+    const okCb = el("input", { type: "checkbox" });
+    okCb.checked = seSubsOk(r);
+    okCb.title = seSubsOk(r) ? "Remove subtitle ok mark" : "Mark as subtitle ok";
+    okCb.addEventListener("change", () => seToggleSubsOk(r.path, okCb.checked));
+    okTd.appendChild(okCb);
+    tr.appendChild(okTd);
+
     tr.appendChild(el("td", { text: r.type }));
     const parent = r.path ? r.path.replace(/[\\/][^\\/]*$/, "") : "";
     tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
@@ -223,6 +273,12 @@ function renderSeTable() {
     tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
     const fav = (r.favorited_by || []).join(", ");
     tr.appendChild(el("td", { class: "muted", text: fav, title: fav }));
+
+    const e = seSubsEntry(r);
+    let subsText = "";
+    if (e) subsText = e.error ? e.error : ((e.subs || []).join(", "));
+    tr.appendChild(el("td", { class: "muted", text: subsText, title: subsText }));
+
     tr.appendChild(seBuildActions(r));
     body.appendChild(tr);
     if (r.id) registerPopup(tr, { key: r.id, itemId: r.id });
@@ -265,6 +321,8 @@ function applyFilterUI() {
   SE.ms.lib.setValues(SE.filters.lib);
   SE.ms.type.setValues(SE.filters.type);
   SE.ms.fav.setValues(SE.filters.fav);
+  SE.ms.subs.setValues(SE.filters.subs);
+  SE.ms.subsok.setValues(SE.filters.subsok);
   document.getElementById("se-search-file").value = SE.filters.file;
   document.getElementById("se-search-jf").value = SE.filters.jf;
 }
@@ -291,6 +349,8 @@ async function seLoad() {
     SE.jellyfin = data.jellyfin_url || "";
     SE.radarr = data.radarr_url || "";
     SE.sonarr = data.sonarr_url || "";
+    SE.subtitles = data.subtitles || {};
+    SE.subtitlesOk = new Set(data.subtitles_ok || []);
     SE.fetched = !!data.fetched;
     document.getElementById("se-sync-age").textContent = fmtAgo(data.last_sync);
     populateOptions();
@@ -337,6 +397,41 @@ async function seFetch() {
   );
 }
 
+async function seScan() {
+  const btn = document.getElementById("se-scan");
+  const prog = document.getElementById("se-progress");
+  const fill = document.getElementById("se-progress-fill");
+  const statusEl = document.getElementById("se-status");
+  btn.disabled = true;
+  prog.hidden = false;
+  try {
+    await postJSON("/api/subtitles/scan", "mode=changed");
+  } catch (e) {
+    prog.hidden = true;
+    btn.disabled = false;
+    statusEl.textContent = String(e);
+    return;
+  }
+  startStatusPoll(
+    "/api/subtitles/status",
+    (s) => {
+      if (s.status === "running") {
+        const pct = s.total ? Math.round(100 * s.scanned / s.total) : 0;
+        fill.style.width = pct + "%";
+        statusEl.textContent = "Scanning… " + s.scanned + "/" + (s.total || "?") + " (" + pct + "%)";
+      } else {
+        statusEl.textContent = s.status === "error" ? "Scan failed: " + (s.error || "") : "Subtitle scan complete.";
+      }
+    },
+    async (s) => {
+      prog.hidden = true;
+      btn.disabled = false;
+      if (s.status !== "error") await seLoad();
+    },
+    600
+  );
+}
+
 // ---- init ------------------------------------------------------------------
 
 function bindSeControls() {
@@ -351,6 +446,12 @@ function bindSeControls() {
   SE.ms.fav = MultiSelect(document.getElementById("se-fav"), [], (vals) => {
     SE.filters.fav = vals; onFilter();
   });
+  SE.ms.subs = MultiSelect(document.getElementById("se-subs"), SUBS_OPTIONS, (vals) => {
+    SE.filters.subs = vals; onFilter();
+  });
+  SE.ms.subsok = MultiSelect(document.getElementById("se-subsok"), SUBSOK_OPTIONS, (vals) => {
+    SE.filters.subsok = vals; onFilter();
+  });
 
   document.getElementById("se-search-file").addEventListener("input", () => {
     SE.filters.file = document.getElementById("se-search-file").value;
@@ -362,6 +463,7 @@ function bindSeControls() {
   });
 
   document.getElementById("se-fetch").addEventListener("click", seFetch);
+  document.getElementById("se-scan").addEventListener("click", seScan);
 }
 
 document.addEventListener("DOMContentLoaded", () => {

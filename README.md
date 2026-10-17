@@ -121,7 +121,7 @@ values.
 
 All runtime state lives in the data directory (`/data` in the container):
 `config.json` (Jellyfin connection + login hash), `.secret_key`, `schedules.json`,
-`users.json`, `libraries.json`, `jellyfin_id.json`, and `logs/`.
+`users.json`, `libraries.json`, `jellyfin_id.json`, `subtitles.json`, and `logs/`.
 
 - **Bind mount:** point the `volumes` path at a NAS folder. The container starts
   as root only to align its internal user with `PUID`/`PGID` and `chown` the data
@@ -177,6 +177,31 @@ Notes:
   compose (`type: bind` / `source:` / `target:`).
 - **Verify:** use the **Test** button on a mapping, or in Docker
   `docker exec jftools ls "/Filmer"`.
+
+## Subtitle scan
+
+JFTools can probe every media file with **ffprobe** and list its subtitle
+tracks — embedded streams plus external `.srt`/`.ass`/… files next to the video.
+Results are cached to `subtitles.json` and shown in the **Search** tab (a
+**Subtitles** column, a **Subtitles** filter, and a manual **Subtitle Ok**
+mark/filter).
+
+Two scheduler jobs do the work:
+
+- **Subtitle scan (full)** — re-probes every file and rewrites the whole store.
+- **Subtitle scan (changed)** — probes only files that are new or whose
+  size/modified time changed; entries for removed files are purged.
+
+**Requirements:**
+
+- **Media paths must be set** (see above) so JFTools can open the real files.
+- **ffprobe** must be available:
+  - **Docker:** installed automatically (the image includes `ffmpeg`).
+  - **Windows:** drop `ffprobe.exe` into a `Tools/` folder next to the app, or
+    set `JFTOOLS_FFPROBE` to its path.
+
+Classification matches Subber's Movie List: `acceptable` (English/Swedish/
+Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
 
 ## Updating
 

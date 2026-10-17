@@ -11,9 +11,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# gosu drops privileges in the entrypoint; tzdata gives the OS real time zones.
+# gosu drops privileges in the entrypoint; tzdata gives the OS real time zones;
+# ffmpeg provides ffprobe for the subtitle scans.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gosu tzdata \
+    && apt-get install -y --no-install-recommends gosu tzdata ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

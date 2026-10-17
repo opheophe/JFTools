@@ -64,6 +64,18 @@ async def _op_check_updates() -> None:
     await check_for_updates()
 
 
+async def _op_subtitle_scan_full() -> None:
+    from .subtitles import run_scan
+
+    await run_scan("full")
+
+
+async def _op_subtitle_scan_changed() -> None:
+    from .subtitles import run_scan
+
+    await run_scan("changed")
+
+
 OPERATIONS = [
     {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
      "description": "Fetch all media items, re-score their name/year match, and record each user's favorites."},
@@ -77,6 +89,10 @@ OPERATIONS = [
      "description": "Refresh the cached library list from Jellyfin."},
     {"id": "check_updates", "label": "Check for updates", "tab": "System", "handler": _op_check_updates,
      "description": "Query GitHub for the latest JFTools release."},
+    {"id": "subtitle_scan_full", "label": "Subtitle scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
+     "description": "Probe every media file for subtitle tracks with ffprobe and refresh the whole subtitle store."},
+    {"id": "subtitle_scan_changed", "label": "Subtitle scan (changed)", "tab": "Search", "handler": _op_subtitle_scan_changed,
+     "description": "Probe only files that are new or whose size/modified time changed since the last scan."},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
 OPERATIONS_PUBLIC = [
@@ -94,6 +110,8 @@ _DEFAULT_SCHEDULES = {
     "clear_cache": {"kind": "interval", "minutes": 720},
     "refresh_libraries": {"kind": "interval", "minutes": 30},
     "check_updates": {"kind": "interval", "minutes": 60},
+    "subtitle_scan_full": {"kind": "cron", "hour": 3, "minute": 0},
+    "subtitle_scan_changed": {"kind": "interval", "minutes": 720},
 }
 _ACTIVE_BY_DEFAULT = {"refresh_libraries", "check_updates"}
 

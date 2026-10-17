@@ -6,6 +6,7 @@
 
 <div class="page-head">
   <button id="se-fetch" class="primary">Fetch</button>
+  <button id="se-scan" class="btn-edit">Scan subtitles</button>
   <span id="se-sync-age" class="muted"></span>
   <span id="se-count" class="muted"></span>
 </div>
@@ -18,6 +19,8 @@
     <label>Library <div class="ms" id="se-lib"></div></label>
     <label>Type <div class="ms" id="se-type"></div></label>
     <label>Favorited by <div class="ms" id="se-fav"></div></label>
+    <label>Subtitles <div class="ms" id="se-subs"></div></label>
+    <label>Subtitle Ok <div class="ms" id="se-subsok"></div></label>
     <label>Search file <input type="text" id="se-search-file" placeholder="regex"></label>
     <label>Search Jellyfin <input type="text" id="se-search-jf" placeholder="regex"></label>
   </div>
@@ -25,9 +28,9 @@
   <div class="table-wrap">
     <table id="se-table">
       <thead>
-        <tr><th data-sort="type" class="sortable">Type<span class="sort-arrow"></span></th><th data-sort="path" class="sortable">Full path<span class="sort-arrow"></span></th><th data-sort="file" class="sortable">Item on disc<span class="sort-arrow"></span></th><th data-sort="display" class="sortable">Jellyfin name<span class="sort-arrow"></span></th><th data-sort="fav" class="sortable">Favorites<span class="sort-arrow"></span></th><th>Actions</th></tr>
+        <tr><th data-sort="subsok" class="ok-col sortable">Subtitle Ok<span class="sort-arrow"></span></th><th data-sort="type" class="sortable">Type<span class="sort-arrow"></span></th><th data-sort="path" class="sortable">Full path<span class="sort-arrow"></span></th><th data-sort="file" class="sortable">Item on disc<span class="sort-arrow"></span></th><th data-sort="display" class="sortable">Jellyfin name<span class="sort-arrow"></span></th><th data-sort="fav" class="sortable">Favorites<span class="sort-arrow"></span></th><th data-sort="subs" class="sortable">Subtitles<span class="sort-arrow"></span></th><th>Actions</th></tr>
       </thead>
-      <tbody id="se-body"><tr><td colspan="6" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
+      <tbody id="se-body"><tr><td colspan="8" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
     </table>
   </div>
   <div id="se-pager" class="pager" hidden></div>
