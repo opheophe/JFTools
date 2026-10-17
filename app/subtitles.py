@@ -499,7 +499,7 @@ async def subtitles_status(request: Request, user: str = Depends(require_login))
 
 
 @router.post("/api/subtitles/ok")
-async def subtitles_ok(
+async def subtitles_ok_set(
     request: Request,
     user: str = Depends(require_login),
     path: str = Form(...),

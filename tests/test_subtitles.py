@@ -170,3 +170,11 @@ def test_resolve_ffprobe_env(tmp_path, monkeypatch):
     exe.write_bytes(b"")
     monkeypatch.setenv("JFTOOLS_FFPROBE", str(exe))
     assert resolve_ffprobe() == str(exe)
+
+
+def test_subtitles_ok_getter_is_callable():
+    # Regression: the getter must not be shadowed by the /api/subtitles/ok route.
+    from app.subtitles import subtitles_map, subtitles_ok
+
+    assert isinstance(subtitles_ok(), list)
+    assert isinstance(subtitles_map(), dict)
