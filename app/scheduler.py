@@ -274,6 +274,14 @@ def set_timezone(tz: str) -> None:
         scheduler.start()
 
 
+def _next_run_label(job_id: str) -> str | None:
+    """Next scheduled run time formatted in the scheduler's time zone."""
+    aps_job = scheduler.get_job(job_id)
+    if aps_job is None or aps_job.next_run_time is None:
+        return None
+    return aps_job.next_run_time.strftime("%Y-%m-%d %H:%M")
+
+
 def _public_job(job_id: str) -> dict:
     job = _jobs[job_id]
     op = _OP_BY_ID.get(job.get("operation"), {})
@@ -286,6 +294,7 @@ def _public_job(job_id: str) -> dict:
         "schedule": _describe_schedule(job.get("trigger", {})),
         "enabled": bool(job.get("enabled", True)),
         "running": job["id"] in _running,
+        "next_run": _next_run_label(job_id),
         "last_run": job.get("last_run"),
         "last_status": job.get("last_status"),
         "last_error": job.get("last_error"),
