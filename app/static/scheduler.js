@@ -90,12 +90,16 @@ function renderJobs() {
 
     let last = "—";
     if (j.last_run) {
-      last = fmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : ""));
+      last = fmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : (j.last_status === "cancelled" ? " ⚠" : "")));
     }
     tr.appendChild(el("td", { class: "muted", text: last }));
 
     const atd = el("td", { class: "sch-actions" });
-    atd.appendChild(schBtn("Run now", () => schRun(j.id), "btn-run"));
+    if (j.running) {
+      atd.appendChild(schBtn("Abort", () => schAbort(j.id), "btn-danger"));
+    } else {
+      atd.appendChild(schBtn("Run now", () => schRun(j.id), "btn-run"));
+    }
     atd.appendChild(schBtn("Edit", () => schEdit(j), "btn-edit"));
     atd.appendChild(schBtn("Delete", () => schDelete(j.id), "btn-danger"));
     tr.appendChild(atd);
@@ -105,6 +109,11 @@ function renderJobs() {
 
 async function schRun(id) {
   await postJSON("/api/scheduler/jobs/" + id + "/run", null);
+  schLoad();
+}
+
+async function schAbort(id) {
+  await postJSON("/api/scheduler/jobs/" + id + "/abort", null);
   schLoad();
 }
 

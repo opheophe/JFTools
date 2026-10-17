@@ -144,6 +144,9 @@ _jobs: dict[str, dict] = {}
 # Job ids currently executing (in-memory only; resets on restart).
 _running: set[str] = set()
 
+# Live asyncio tasks for running jobs, so they can be aborted.
+_tasks: dict[str, asyncio.Task] = {}
+
 
 def _load_jobs() -> None:
     try:
@@ -262,13 +265,24 @@ async def _run_job(job_id: str) -> None:
         job["last_status"] = "ok"
         job["last_error"] = None
         log(op["tab"], "INFO", f"Scheduled run: {op['label']} OK")
+    except asyncio.CancelledError:
+        job["last_status"] = "cancelled"
+        job["last_error"] = "Aborted by user"
+        log(op["tab"], "WARN", f"Scheduled run: {op['label']} aborted")
     except Exception as exc:  # noqa: BLE001
         job["last_status"] = "error"
         job["last_error"] = str(exc)
         log(op["tab"], "ERROR", f"Scheduled run: {op['label']} failed: {exc}")
     finally:
         _running.discard(job_id)
-    _save_jobs()
+        _save_jobs()
+
+
+def _spawn(job_id: str) -> None:
+    """Start a job run in the background and track its task so it can be aborted."""
+    task = asyncio.create_task(_run_job(job_id))
+    _tasks[job_id] = task
+    task.add_done_callback(lambda _t: _tasks.pop(job_id, None))
 
 
 def _remove_job(job_id: str) -> None:
@@ -430,8 +444,19 @@ async def run_job(job_id: str, request: Request, user: str = Depends(require_log
         return JSONResponse({"ok": False, "error": "Job not found."}, status_code=404)
     if job_id in _running:
         return JSONResponse({"ok": True, "message": "Already running."})
-    asyncio.create_task(_run_job(job_id))
+    _spawn(job_id)
     return JSONResponse({"ok": True, "message": "Run started."})
+
+
+@router.post("/api/scheduler/jobs/{job_id}/abort")
+async def abort_job(job_id: str, request: Request, user: str = Depends(require_login)):
+    if job_id not in _jobs:
+        return JSONResponse({"ok": False, "error": "Job not found."}, status_code=404)
+    task = _tasks.get(job_id)
+    if task is None:
+        return JSONResponse({"ok": True, "message": "Job is not running."})
+    task.cancel()
+    return JSONResponse({"ok": True, "message": "Abort requested."})
 
 
 def trigger_operation(operation: str) -> tuple[bool, bool]:
@@ -448,7 +473,7 @@ def trigger_operation(operation: str) -> tuple[bool, bool]:
     if job_id is not None:
         if job_id in _running:
             return False, True
-        asyncio.create_task(_run_job(job_id))
+        _spawn(job_id)
         return True, True
     op = _OP_BY_ID.get(operation)
     if op is None:

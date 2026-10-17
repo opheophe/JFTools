@@ -178,3 +178,20 @@ def test_subtitles_ok_getter_is_callable():
 
     assert isinstance(subtitles_ok(), list)
     assert isinstance(subtitles_map(), dict)
+
+
+def test_build_worklist(tmp_path):
+    from app.subtitles import _build_worklist
+
+    f = tmp_path / "movie.mkv"
+    f.write_bytes(b"")
+    rows = [{"path": str(f)}]
+
+    # Full scan always includes the file.
+    work = _build_worklist(rows, {}, "full")
+    assert [w[0] for w in work] == [str(f)]
+
+    # Changed scan skips an unchanged file (matching size/mtime).
+    st = f.stat()
+    files = {str(f): {"size": st.st_size, "mtime": st.st_mtime}}
+    assert _build_worklist(rows, files, "changed") == []

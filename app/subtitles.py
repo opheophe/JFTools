@@ -362,6 +362,22 @@ def _needs_scan(entry: dict | None, st, mode: str) -> bool:
     return entry.get("size") != st.st_size or entry.get("mtime") != st.st_mtime
 
 
+def _build_worklist(rows: list[dict], files: dict, mode: str) -> list[tuple[str, str, object]]:
+    """Resolve + stat every path and return the (key, local, st) triples to probe.
+
+    Runs in a worker thread: os.stat over SMB/NFS can be slow, and doing it on
+    the event loop would freeze the app during a large scan.
+    """
+    to_scan = []
+    for r in rows:
+        key = r["path"]
+        local = resolve_path(key, config.settings.path_maps)
+        st = _stat_path(local)
+        if _needs_scan(files.get(key), st, mode):
+            to_scan.append((key, local, st))
+    return to_scan
+
+
 def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
     entry = {
         "path": key,
@@ -437,20 +453,16 @@ async def run_scan(mode: str) -> None:
         _state["files"] = files
         _state["ok"] = ok
 
-        # Resolve + stat each path, then decide what still needs probing.
-        to_scan = []
-        for r in rows:
-            key = r["path"]
-            local = resolve_path(key, config.settings.path_maps)
-            st = _stat_path(local)
-            if _needs_scan(files.get(key), st, mode):
-                to_scan.append((key, local, st))
+        # Resolve + stat each path off the event loop — os.stat over SMB/NFS can
+        # be slow, and doing it inline would freeze the app during a big scan.
+        to_scan = await asyncio.to_thread(_build_worklist, rows, files, mode)
 
         _fetch["total"] = len(to_scan)
         if to_scan:
             loop = asyncio.get_running_loop()
             done = 0
-            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="subscan") as pool:
+            pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="subscan")
+            try:
                 futures = [
                     loop.run_in_executor(pool, _probe_one, ffprobe, key, local, st)
                     for key, local, st in to_scan
@@ -460,6 +472,11 @@ async def run_scan(mode: str) -> None:
                     _state["files"][key] = entry
                     done += 1
                     _fetch["scanned"] = done
+            finally:
+                # On abort (or completion) stop queueing probes and drop pending
+                # work without waiting for it; in-flight ffprobe calls finish on
+                # their own within their timeout.
+                pool.shutdown(wait=False, cancel_futures=True)
 
         if mode == "full":
             _state["full_scan_at"] = time.time()
@@ -468,6 +485,11 @@ async def run_scan(mode: str) -> None:
         _save_state()
         _fetch["status"] = "done"
         log("Search", "INFO", f"Subtitle {mode} scan complete: {len(to_scan)} probed")
+    except asyncio.CancelledError:
+        _fetch["status"] = "cancelled"
+        _fetch["error"] = None
+        log("Search", "WARN", f"Subtitle {mode} scan aborted")
+        raise
     except Exception as exc:  # noqa: BLE001
         _fetch["status"] = "error"
         _fetch["error"] = f"Unexpected error: {exc}"
