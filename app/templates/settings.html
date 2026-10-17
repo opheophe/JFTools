@@ -81,7 +81,9 @@
 
 <section class="card">
   <h2>Media paths</h2>
-  <p class="muted">Map the folder paths Jellyfin reports (e.g. <code>/Filmer</code>) to the paths this machine can open (e.g. <code>\\NAS\Filmer</code> or <code>Z:\Filmer</code>), so JFTools can read the real files. Leave this empty when the paths already match — e.g. when the container mounts the same folders Jellyfin uses.</p>
+  <p class="muted">Jellyfin reports every file's path from inside its own container (e.g. <code>/Filmer/Movie/movie.mkv</code>). Add a row per library so JFTools can open the real file: the <strong>Jellyfin path</strong> on the left, and the <strong>path on this machine</strong> on the right.</p>
+  <p class="muted">If the paths already match — e.g. the container mounts the same folders Jellyfin uses — you don't need any rows; leave this empty. Otherwise click <strong>Fill with library paths</strong>, adjust the right-hand path where it differs, then <strong>Save</strong>.</p>
+  <div class="paths-head"><span>Jellyfin path</span><span class="paths-head-arrow">→</span><span>Path on this machine</span></div>
   <div id="paths-rows"></div>
   <div class="row">
     <button type="button" id="paths-add" class="btn-edit">Add mapping</button>

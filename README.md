@@ -140,11 +140,11 @@ media files. To let it read (and write) the real files — for example to run
 `ffmpeg` — it needs to be able to find them, because Jellyfin reports each
 item's path from *inside its own container* (e.g. `/Filmer/Movie/movie.mkv`).
 
-Two ways to make those paths work:
+There are two situations:
 
-**1. Match Jellyfin's mounts (Docker).** Add the same `source:`/`target:` pairs
-Jellyfin uses to the JFTools service in `docker-compose.yml`, and the reported
-paths resolve as-is:
+**1. JFTools and Jellyfin mount the same folders (Docker).** If the JFTools
+container mounts the *same* `source:`/`target:` pairs Jellyfin uses, the paths
+already resolve as-is — **leave Media paths empty**. Example `docker-compose.yml`:
 
 ```yaml
 services:
@@ -156,16 +156,17 @@ services:
       # append :ro to mount read-only, e.g.  - /Volume2/Media/Filmer:/Filmer:ro
 ```
 
-**2. Remap paths in Settings.** Add a mapping for each library on the
-**Settings → Media paths** page: the path Jellyfin reports on the left, and the
-path *this* machine can open on the right. This is what you want when running
-JFTools on a different box (e.g. Windows) than Jellyfin:
+**2. JFTools runs elsewhere (e.g. Windows, or with different mounts).** Add a
+mapping per library on the **Settings → Media paths** page: the **Jellyfin path**
+on the left, and the **path on this machine** on the right.
 
 ```
 /Filmer  →  \\NAS\Filmer     (or Z:\Filmer)
 ```
 
-The same mappings can be supplied headless via `JFTOOLS_PATH_MAP`
+Click **Fill with library paths** to add your libraries (both sides pre-filled
+with the Jellyfin path); then edit the right-hand path where it differs and
+**Save**. The same mappings can be supplied headless via `JFTOOLS_PATH_MAP`
 (`/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`).
 
 Notes:

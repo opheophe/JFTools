@@ -184,6 +184,8 @@ input:focus { outline: none; border-color: var(--accent); }
 /* media-path mapping rows (Settings) */
 .paths-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
 .paths-row input[type="text"] { flex: 0 0 240px; width: auto; margin-top: 0; }
+.paths-head { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.paths-head > span:first-child, .paths-head > span:last-child { flex: 0 0 240px; }
 .path-arrow { color: var(--muted); }
 .path-test { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
 

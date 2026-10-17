@@ -416,6 +416,15 @@ function bindPathMaps() {
     (maps.length ? maps : [null]).forEach((m) => rowsEl.appendChild(rowEl(m)));
   }
 
+  function readRows() {
+    const out = [];
+    rowsEl.querySelectorAll(".paths-row").forEach((row) => {
+      const inputs = row.querySelectorAll("input");
+      out.push({ from: inputs[0].value.trim(), to: inputs[1].value.trim() });
+    });
+    return out;
+  }
+
   addBtn.addEventListener("click", () => {
     maps.push({ from: "", to: "" });
     render();
@@ -445,17 +454,31 @@ function bindPathMaps() {
           showMessage(resultEl, { ok: false, error: "No library folders found." });
           return;
         }
-        const existing = new Set(maps.map((m) => m.from));
+        // Keep whatever is typed already (drop fully empty rows), then fill both
+        // sides from the library so the rows are complete and saveable.
+        maps = readRows().filter((m) => m.from || m.to);
+        const index = new Map(maps.map((m, i) => [m.from, i]));
         let added = 0;
+        let filled = 0;
         locations.forEach((loc) => {
-          if (!existing.has(loc)) { maps.push({ from: loc, to: "" }); existing.add(loc); added++; }
+          if (index.has(loc)) {
+            const row = maps[index.get(loc)];
+            if (!row.to) { row.to = loc; filled += 1; }
+          } else {
+            maps.push({ from: loc, to: loc });
+            index.set(loc, maps.length - 1);
+            added += 1;
+          }
         });
         render();
+        const parts = [];
+        if (added) parts.push("added " + added);
+        if (filled) parts.push("filled in " + filled);
         showMessage(resultEl, {
           ok: true,
-          message: added
-            ? "Added " + added + " library folder(s). Fill in the local path for each and save."
-            : "All library folders are already listed.",
+          message: parts.length
+            ? "Library paths " + parts.join(", ") + ". Edit the right-hand path if it differs, then save."
+            : "All library paths are already listed and set.",
         });
       } catch (err) {
         resultEl.innerHTML = "";
