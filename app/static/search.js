@@ -3,7 +3,7 @@
 const SE = {
   rows: [], jellyfin: "", radarr: "", sonarr: "",
   fetched: false, page: 1, sort: { col: null, dir: 1 },
-  filters: { lib: [], type: [], file: "", jf: "" },
+  filters: { lib: [], type: [], file: "", jf: "", fav: [], favMode: "any" },
   ms: {},
 };
 
@@ -78,6 +78,13 @@ function seVisible() {
   return SE.rows.filter((r) => {
     if (f.lib.length && !f.lib.includes(r.library)) return false;
     if (f.type.length && !f.type.includes(r.type)) return false;
+    if (f.fav.length) {
+      const favSet = new Set(r.favorited_by || []);
+      const ok = f.favMode === "all"
+        ? f.fav.every((n) => favSet.has(n))
+        : f.fav.some((n) => favSet.has(n));
+      if (!ok) return false;
+    }
     if (fileRe && !fileRe.test(r.file)) return false;
     if (jfRe && !jfRe.test(r.display || r.name)) return false;
     return true;
@@ -100,6 +107,8 @@ function loadFilters() {
       SE.filters.type = Array.isArray(f.type) ? f.type : [];
       SE.filters.file = typeof f.file === "string" ? f.file : "";
       SE.filters.jf = typeof f.jf === "string" ? f.jf : "";
+      SE.filters.fav = Array.isArray(f.fav) ? f.fav : [];
+      SE.filters.favMode = f.favMode === "all" ? "all" : "any";
     }
   } catch (e) {}
 }
@@ -250,15 +259,20 @@ function renderPager(total) {
 function applyFilterUI() {
   SE.ms.lib.setValues(SE.filters.lib);
   SE.ms.type.setValues(SE.filters.type);
+  SE.ms.fav.setValues(SE.filters.fav);
   document.getElementById("se-search-file").value = SE.filters.file;
   document.getElementById("se-search-jf").value = SE.filters.jf;
+  document.getElementById("se-fav-mode").value = SE.filters.favMode;
 }
 
 function populateOptions() {
   const libs = [...new Set(SE.rows.map((r) => r.library).filter(Boolean))].sort();
   const types = [...new Set(SE.rows.map((r) => r.type).filter(Boolean))].sort();
+  const favs = [...new Set(SE.rows.flatMap((r) => r.favorited_by || []))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   SE.ms.lib.setOptions(libs.map((v) => ({ value: v, label: v })));
   SE.ms.type.setOptions(types.map((v) => ({ value: v, label: v })));
+  SE.ms.fav.setOptions(favs.map((v) => ({ value: v, label: v })));
 }
 
 async function seLoad() {
@@ -326,6 +340,9 @@ function bindSeControls() {
   SE.ms.type = MultiSelect(document.getElementById("se-type"), [], (vals) => {
     SE.filters.type = vals; onFilter();
   });
+  SE.ms.fav = MultiSelect(document.getElementById("se-fav"), [], (vals) => {
+    SE.filters.fav = vals; onFilter();
+  });
 
   document.getElementById("se-search-file").addEventListener("input", () => {
     SE.filters.file = document.getElementById("se-search-file").value;
@@ -333,6 +350,10 @@ function bindSeControls() {
   });
   document.getElementById("se-search-jf").addEventListener("input", () => {
     SE.filters.jf = document.getElementById("se-search-jf").value;
+    onFilter();
+  });
+  document.getElementById("se-fav-mode").addEventListener("change", () => {
+    SE.filters.favMode = document.getElementById("se-fav-mode").value;
     onFilter();
   });
 
