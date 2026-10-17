@@ -3,7 +3,7 @@
 {% block title %}JFTools — Users{% endblock %}
 {% block content %}
 <h1>Users</h1>
-<p class="muted">Jellyfin users and their watch activity. Hover a title for details; click a user to see their view statistics.</p>
+<p class="muted">Jellyfin users and their watch activity. Hover a title for details; click a user to see their view statistics and favorites.</p>
 
 <div class="page-head">
   <span id="users-updated" class="muted"></span>
@@ -29,6 +29,19 @@
       <tbody id="history-body"></tbody>
     </table>
   </div>
+</section>
+
+<section class="card" id="user-favorites-card" hidden>
+  <h2 id="user-favorites-title">Favorites</h2>
+  <div class="table-wrap">
+    <table id="fav-table">
+      <thead>
+        <tr><th data-sort="type" class="sortable">Type<span class="sort-arrow"></span></th><th data-sort="title" class="sortable">Title<span class="sort-arrow"></span></th><th data-sort="year" class="sortable">Year<span class="sort-arrow"></span></th></tr>
+      </thead>
+      <tbody id="fav-body"></tbody>
+    </table>
+  </div>
+  <div id="fav-pager" class="pager" hidden></div>
 </section>
 {% endblock %}
 {% block scripts %}<script src="/static/users.js"></script>{% endblock %}

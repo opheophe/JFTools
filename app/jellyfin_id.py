@@ -34,9 +34,13 @@ def _load_state() -> dict:
         data = json.loads(_ID_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
+    favorites = data.get("favorites")
+    if not isinstance(favorites, dict):
+        favorites = {}
     return {
         "rows": data.get("rows") or [],
         "marks": set(data.get("marks") or []),
+        "favorites": favorites,
         "last_sync": data.get("last_sync"),
     }
 
@@ -45,6 +49,7 @@ def _save_state() -> None:
     payload = {
         "rows": _state["rows"],
         "marks": sorted(_state["marks"]),
+        "favorites": _state["favorites"],
         "last_sync": _state["last_sync"],
     }
     try:
@@ -57,11 +62,22 @@ def _save_state() -> None:
 
 
 def clear_cache() -> None:
-    """Reset the Movie Match cache (rows, marks and last-sync)."""
+    """Reset the Movie Match cache (rows, marks, favorites and last-sync)."""
     _state["rows"] = []
     _state["marks"] = set()
+    _state["favorites"] = {}
     _state["last_sync"] = None
     _save_state()
+
+
+def favorites_for_user(user_id: str) -> list[dict]:
+    """Cached favorites for one Jellyfin user (populated by the fetch job)."""
+    return _state["favorites"].get(user_id) or []
+
+
+def favorites_fetched() -> bool:
+    """Whether favorites have been produced by a fetch (even if all are empty)."""
+    return bool(_state["favorites"])
 
 
 _state = _load_state()
@@ -247,7 +263,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
     params = {
         "Recursive": "true",
         "IncludeItemTypes": "Movie,Episode,Series,MusicVideo,Video",
-        "Fields": "Path,ProductionYear,ProviderIds,SeriesName",
+        "Fields": "Path,ProductionYear,ProviderIds,SeriesName,SeriesId",
         "Limit": "500",
         "StartIndex": "0",
         "SortBy": "SortName",
@@ -274,6 +290,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
                     "file": Path(path).name,
                     "name": it.get("Name") or "",
                     "series": it.get("SeriesName") or "",
+                    "series_id": it.get("SeriesId") or "",
                     "display": _item_display(it),
                     "year": it.get("ProductionYear"),
                     "library": _library_for_path(path, locations),
@@ -290,6 +307,82 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
     return rows
 
 
+_FAV_TYPES = "Movie,Episode,Series,Video,MusicVideo"
+
+
+async def _fetch_favorites(client: JellyfinClient) -> tuple[dict, dict]:
+    """Fetch every user's favorites (one request per user, run concurrently).
+
+    Returns ``(favorites_by_user, fav_by_id)``:
+      * ``favorites_by_user``: ``{user_id: [item summary, ...]}`` for the Users page.
+      * ``fav_by_id``: ``{item_id: {username, ...}}`` for annotating rows.
+    """
+    users = await client.get_users()
+    uid_name = {u.get("Id"): (u.get("Name") or "?") for u in users if u.get("Id")}
+    sem = asyncio.Semaphore(8)
+
+    async def one(uid: str) -> tuple[str, list[dict]] | None:
+        base = {
+            "Recursive": "true",
+            "IncludeItemTypes": _FAV_TYPES,
+            "Filters": "IsFavorite",
+            "Fields": "ProductionYear,SeriesName",
+            "SortBy": "SortName",
+            "Limit": "500",
+        }
+        items: list[dict] = []
+        start = 0
+        try:
+            while True:
+                async with sem:
+                    data = await client.get_user_items(uid, {**base, "StartIndex": str(start)})
+                batch = data.get("Items") or []
+                for it in batch:
+                    iid = it.get("Id")
+                    if not iid:
+                        continue
+                    items.append(
+                        {
+                            "id": iid,
+                            "type": it.get("Type") or "",
+                            "name": it.get("Name") or "",
+                            "series": it.get("SeriesName") or "",
+                            "year": it.get("ProductionYear"),
+                            "display": _item_display(it),
+                        }
+                    )
+                total = int(data.get("TotalRecordCount", 0) or 0)
+                start += len(batch)
+                if not batch or start >= total:
+                    break
+        except JellyfinError:
+            return None
+        return uid, items
+
+    results = await asyncio.gather(*(one(uid) for uid in uid_name))
+
+    favorites_by_user: dict[str, list[dict]] = {uid: [] for uid in uid_name}
+    fav_by_id: dict[str, set[str]] = {}
+    for r in results:
+        if not r:
+            continue
+        uid, items = r
+        favorites_by_user[uid] = items
+        uname = uid_name.get(uid, "?")
+        for it in items:
+            fav_by_id.setdefault(it["id"], set()).add(uname)
+    return favorites_by_user, fav_by_id
+
+
+def _favorited_by(row: dict, fav_by_id: dict) -> list[str]:
+    """Usernames favoring this row — its own favorites plus its series' (episodes)."""
+    names = set(fav_by_id.get(row.get("id"), ()))
+    series_id = row.get("series_id")
+    if series_id:
+        names.update(fav_by_id.get(series_id, ()))
+    return sorted(names, key=str.lower)
+
+
 async def _run_fetch() -> None:
     _fetch.update({"status": "running", "fetched": 0, "total": 0, "error": None})
     log("Movie Match", "INFO", "Fetch started")
@@ -301,8 +394,30 @@ async def _run_fetch() -> None:
             _fetch["total"] = total
 
         rows = await _fetch_items(client, _progress)
+
+        # Favorites: one request per user, fetched alongside the items. A failure
+        # here must not sink the whole fetch — keep the previous annotations and
+        # cached favorites and carry on with the fresh rows.
+        favorites_by_user: dict = {}
+        fav_by_id: dict = {}
+        fav_ok = False
+        try:
+            favorites_by_user, fav_by_id = await _fetch_favorites(client)
+            fav_ok = True
+        except Exception as exc:  # noqa: BLE001
+            log("Movie Match", "WARN", f"Favorites fetch failed: {exc}")
+
+        prev_fav = {r.get("id"): (r.get("favorited_by") or []) for r in _state["rows"]}
+        for r in rows:
+            if fav_ok:
+                r["favorited_by"] = _favorited_by(r, fav_by_id)
+            else:
+                r["favorited_by"] = prev_fav.get(r.get("id"), [])
+
         rows.sort(key=lambda r: r["file"].lower())
         _state["rows"] = rows
+        if fav_ok:
+            _state["favorites"] = favorites_by_user
         _state["last_sync"] = time.time()
         _save_state()
         _fetch["status"] = "done"

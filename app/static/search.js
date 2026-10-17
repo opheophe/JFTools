@@ -111,6 +111,7 @@ const SORTABLE = {
   path: (r) => r.path || "",
   file: (r) => r.file || "",
   display: (r) => r.display || r.name || "",
+  fav: (r) => (r.favorited_by || []).join(", "),
 };
 
 function saveSort() {
@@ -179,13 +180,13 @@ function renderSeTable() {
   updateSortIndicators();
 
   if (!SE.fetched) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "5", text: "Not fetched yet — click Fetch." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "6", text: "Not fetched yet — click Fetch." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
   }
   if (visible.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "5", text: "No items match the filters." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "6", text: "No items match the filters." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
@@ -206,6 +207,8 @@ function renderSeTable() {
     tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
     tr.appendChild(el("td", { text: r.file, title: r.file }));
     tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
+    const fav = (r.favorited_by || []).join(", ");
+    tr.appendChild(el("td", { class: "muted", text: fav, title: fav }));
     tr.appendChild(seBuildActions(r));
     body.appendChild(tr);
     if (r.id) registerPopup(tr, { key: r.id, itemId: r.id });

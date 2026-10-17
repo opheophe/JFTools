@@ -292,3 +292,15 @@ async def api_user_history(user_id: str, request: Request, user: str = Depends(r
 
     rows.sort(key=lambda r: r.get("date") or "", reverse=True)
     return JSONResponse({"ok": True, "items": rows})
+
+
+@router.get("/api/users/{user_id}/favorites")
+async def api_user_favorites(user_id: str, request: Request, user: str = Depends(require_login)):
+    # Cached during the Movie Match/Search fetch job (see jellyfin_id._run_fetch).
+    from .jellyfin_id import favorites_fetched, favorites_for_user
+
+    return JSONResponse({
+        "ok": True,
+        "items": favorites_for_user(user_id),
+        "fetched": favorites_fetched(),
+    })

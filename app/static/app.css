@@ -261,15 +261,20 @@ section.card { margin-top: 1.25rem; }
 #se-table { width: 100%; table-layout: fixed; }
 #se-table th, #se-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #se-table th:nth-child(1), #se-table td:nth-child(1) { width: 80px; }
-#se-table th:nth-child(5), #se-table td:nth-child(5) { width: 240px; }
+#se-table th:nth-child(5), #se-table td:nth-child(5) { width: 150px; }
+#se-table th:nth-child(6), #se-table td:nth-child(6) { width: 240px; }
 #se-table td:nth-child(2),
 #se-table td:nth-child(3),
-#se-table td:nth-child(4) {
+#se-table td:nth-child(4),
+#se-table td:nth-child(5) {
   white-space: normal;
   overflow-wrap: anywhere;
   vertical-align: top;
 }
 #se-table td.id-actions { overflow: visible; }
+#se-table th.sortable { cursor: pointer; user-select: none; }
+#se-table th.sortable:hover { color: var(--text); }
+#se-table th .sort-arrow { margin-left: 0.3rem; color: var(--accent); }
 
 /* multi-select dropdowns */
 .ms { position: relative; }
@@ -332,6 +337,15 @@ button.btn-danger:hover { border-color: var(--danger); background: rgba(255, 107
 .user-row { cursor: pointer; }
 .user-row:hover td { background: var(--inset); }
 #user-history-card .progress { margin-top: 0.2rem; }
+#user-favorites-card { margin-top: 1rem; }
+#fav-table { width: 100%; table-layout: fixed; }
+#fav-table th, #fav-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#fav-table th:nth-child(1), #fav-table td:nth-child(1) { width: 90px; }
+#fav-table th:nth-child(3), #fav-table td:nth-child(3) { width: 80px; }
+#fav-table td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+#fav-table th.sortable { cursor: pointer; user-select: none; }
+#fav-table th.sortable:hover { color: var(--text); }
+#fav-table th .sort-arrow { margin-left: 0.3rem; color: var(--accent); }
 .now-watching { display: flex; align-items: center; gap: 0.6rem; cursor: default; }
 .now-poster { width: 52px; height: 78px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: var(--inset); }
 .now-info { flex: 1; min-width: 140px; }

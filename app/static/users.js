@@ -144,14 +144,23 @@ function renderLastWatched(u) {
 
 async function toggleHistory(u) {
   const card = document.getElementById("user-history-card");
+  const favCard = document.getElementById("user-favorites-card");
   if (selectedUserId === u.id) {
     card.hidden = true;
+    favCard.hidden = true;
     selectedUserId = null;
     return;
   }
   selectedUserId = u.id;
   document.getElementById("user-history-title").textContent = "View statistics — " + u.name;
+  document.getElementById("user-favorites-title").textContent = "Favorites — " + u.name;
   card.hidden = false;
+  favCard.hidden = false;
+  loadHistory(u);
+  loadFavorites(u);
+}
+
+async function loadHistory(u) {
   const body = document.getElementById("history-body");
   body.innerHTML = "";
   body.appendChild(el("tr", {}, [el("td", { colspan: "3", class: "muted", text: "Loading…" })]));
@@ -186,6 +195,154 @@ async function toggleHistory(u) {
   }
 }
 
+// ---- per-user favorites (cached by the Movie Match/Search fetch) ------------
+
+const FAV = { items: [], fetched: false, page: 1, sort: { col: null, dir: 1 } };
+const FAV_PAGE_SIZE = 50;
+const FAV_SORT_KEY = "jftools.users.favsort";
+
+const FAV_SORTABLE = {
+  type: (r) => r.type || "",
+  title: (r) => r.display || r.name || "",
+  year: (r) => r.year || 0,
+};
+
+function loadFavSort() {
+  try {
+    const o = JSON.parse(localStorage.getItem(FAV_SORT_KEY));
+    if (o && typeof o === "object" && FAV_SORTABLE[o.col]) {
+      FAV.sort = { col: o.col, dir: o.dir === -1 ? -1 : 1 };
+    }
+  } catch (e) {}
+}
+
+function saveFavSort() {
+  try { localStorage.setItem(FAV_SORT_KEY, JSON.stringify(FAV.sort)); } catch (e) {}
+}
+
+function favCompare(a, b, col, dir) {
+  const get = FAV_SORTABLE[col];
+  if (!get) return 0;
+  const va = get(a);
+  const vb = get(b);
+  const aEmpty = va === "" || va === null || va === undefined || va === 0;
+  const bEmpty = vb === "" || vb === null || vb === undefined || vb === 0;
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;   // empties always sort last
+  if (bEmpty) return -1;
+  if (col === "year") return (Number(va) - Number(vb)) * dir;
+  return String(va).localeCompare(String(vb), undefined, { sensitivity: "base" }) * dir;
+}
+
+function updateFavSortIndicators() {
+  document.querySelectorAll("#fav-table th[data-sort]").forEach((th) => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (arrow) {
+      arrow.textContent = th.dataset.sort === FAV.sort.col ? (FAV.sort.dir === 1 ? "▲" : "▼") : "";
+    }
+  });
+}
+
+function setFavSort(col) {
+  if (FAV.sort.col === col) FAV.sort.dir = -FAV.sort.dir;
+  else FAV.sort = { col: col, dir: 1 };
+  FAV.page = 1;
+  saveFavSort();
+  renderFavTable();
+}
+
+function bindFavSortHeaders() {
+  document.querySelectorAll("#fav-table th[data-sort]").forEach((th) => {
+    th.addEventListener("click", () => setFavSort(th.dataset.sort));
+  });
+}
+
+function renderFavTable() {
+  const body = document.getElementById("fav-body");
+  body.innerHTML = "";
+  updateFavSortIndicators();
+  let items = FAV.items;
+  if (FAV.sort.col) {
+    items = items.slice().sort((a, b) => favCompare(a, b, FAV.sort.col, FAV.sort.dir));
+  }
+  if (items.length === 0) {
+    const msg = FAV.fetched
+      ? "No favorites."
+      : "Not fetched yet — favorites load with the Movie Match/Search fetch.";
+    body.appendChild(el("tr", {}, [el("td", { colspan: "3", class: "muted", text: msg })]));
+    renderFavPager(0);
+    return;
+  }
+
+  const pages = Math.max(1, Math.ceil(items.length / FAV_PAGE_SIZE));
+  if (FAV.page > pages) FAV.page = pages;
+  if (FAV.page < 1) FAV.page = 1;
+  const start = (FAV.page - 1) * FAV_PAGE_SIZE;
+
+  items.slice(start, start + FAV_PAGE_SIZE).forEach((it) => {
+    const tr = el("tr");
+    tr.appendChild(el("td", { text: it.type }));
+    const titleTd = el("td", { text: it.display || it.name });
+    tr.appendChild(titleTd);
+    tr.appendChild(el("td", { class: "muted", text: it.year || "" }));
+    body.appendChild(tr);
+    if (it.id) {
+      registerPopup(titleTd, { key: selectedUserId + ":fav:" + it.id, itemId: it.id, userId: selectedUserId });
+    }
+  });
+
+  renderFavPager(items.length);
+}
+
+function renderFavPager(total) {
+  const box = document.getElementById("fav-pager");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!total) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const pages = Math.max(1, Math.ceil(total / FAV_PAGE_SIZE));
+
+  const mkBtn = (label, disabled, onClick) => {
+    const b = el("button", { type: "button", class: "page-btn", text: label });
+    b.disabled = disabled;
+    b.addEventListener("click", onClick);
+    return b;
+  };
+
+  box.appendChild(mkBtn("« First", FAV.page === 1, () => { FAV.page = 1; renderFavTable(); }));
+  box.appendChild(mkBtn("‹ Prev", FAV.page === 1, () => { FAV.page -= 1; renderFavTable(); }));
+  box.appendChild(el("span", { class: "muted page-info", text: "Page " + FAV.page + " of " + pages }));
+  box.appendChild(mkBtn("Next ›", FAV.page === pages, () => { FAV.page += 1; renderFavTable(); }));
+  box.appendChild(mkBtn("Last »", FAV.page === pages, () => { FAV.page = pages; renderFavTable(); }));
+}
+
+async function loadFavorites(u) {
+  FAV.items = [];
+  FAV.page = 1;
+  const body = document.getElementById("fav-body");
+  body.innerHTML = "";
+  body.appendChild(el("tr", {}, [el("td", { colspan: "3", class: "muted", text: "Loading…" })]));
+  try {
+    const data = await getJSON("/api/users/" + encodeURIComponent(u.id) + "/favorites");
+    if (selectedUserId !== u.id) return;  // selection changed while loading
+    if (!data.ok) {
+      body.innerHTML = "";
+      body.appendChild(el("tr", {}, [el("td", { colspan: "3", class: "error", text: data.error })]));
+      return;
+    }
+    FAV.items = data.items || [];
+    FAV.fetched = !!data.fetched;
+    renderFavTable();
+  } catch (err) {
+    if (selectedUserId !== u.id) return;
+    body.innerHTML = "";
+    body.appendChild(el("tr", {}, [el("td", { colspan: "3", class: "error", text: String(err) })]));
+  }
+}
+
 // ---- live polling ----------------------------------------------------------
 
 const usersLive = LiveToggle("users-live", "jftools.users.live", 5000, () => {
@@ -198,6 +355,8 @@ function isLiveEnabled() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  loadFavSort();
+  bindFavSortHeaders();
   loadUsers();
   const live = document.getElementById("users-live");
   if (live) live.addEventListener("change", renderUpdatedLabel);

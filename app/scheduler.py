@@ -66,7 +66,7 @@ async def _op_check_updates() -> None:
 
 OPERATIONS = [
     {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
-     "description": "Fetch all media items and re-score their name/year match against Jellyfin."},
+     "description": "Fetch all media items, re-score their name/year match, and record each user's favorites."},
     {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all,
      "description": "Start a full library scan in Jellyfin."},
     {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs,
