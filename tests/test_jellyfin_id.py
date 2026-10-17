@@ -23,6 +23,12 @@ def test_name_match_mismatch_is_low():
     assert score < 50
 
 
+def test_name_match_title_is_a_release_token():
+    # "Cam" is both a movie title and a release tag; it must not be stripped.
+    cleaned = clean_release_tags("Cam (2018) [WEBRip] [1080p] [YTS] [YIFY].mp4")
+    assert name_match_score(cleaned, "Cam", 2018) == 100
+
+
 def test_year_match_correct():
     # exact year present in the path
     assert year_match_category("/Filmer/The Matrix (1999)/The Matrix 1999 1080p.mkv", 1999) == "Correct"

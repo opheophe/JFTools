@@ -72,7 +72,7 @@ _fetch = {"status": "idle", "fetched": 0, "total": 0, "error": None}
 _RELEASE_TOKENS = re.compile(
     r"\b("
     r"2160p|1080p|720p|480p|4k|uhd|hdr10\+?|hdr|dv|dolby\s?vision|sdr|"
-    r"bluray|blu-?ray|brrip|bdrip|bd-?remux|remux|webrip|web-?dl|webdl|web|hdrip|dvdrip|dvd|hdtv|cam|"
+    r"bluray|blu-?ray|brrip|bdrip|bd-?remux|remux|webrip|web-?dl|webdl|web|hdrip|dvdrip|dvd|hdtv|camrip|"
     r"x264|x265|h\.?264|h\.?265|hevc|avc|xvid|divx|10bit|8bit|hi10p|"
     r"aac|ac3|eac3|ddp?\d?(?:\.\d)?|dd\+|dts(?:-hd)?(?:\s?ma)?|truehd|atmos|flac|mp3|"
     r"\d+ch|5\.1|7\.1|2\.0|"

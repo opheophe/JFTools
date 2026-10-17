@@ -59,14 +59,22 @@ async def _op_refresh_libraries() -> None:
 
 
 OPERATIONS = [
-    {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id},
-    {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all},
-    {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs},
-    {"id": "clear_cache", "label": "Clear local cache", "tab": "Movie Match", "handler": _op_clear_cache},
-    {"id": "refresh_libraries", "label": "Refresh libraries", "tab": "Jellyfin", "handler": _op_refresh_libraries},
+    {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
+     "description": "Fetch all media items and re-score their name/year match against Jellyfin."},
+    {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all,
+     "description": "Start a full library scan in Jellyfin."},
+    {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs,
+     "description": "Delete all stored logs."},
+    {"id": "clear_cache", "label": "Clear local cache", "tab": "Movie Match", "handler": _op_clear_cache,
+     "description": "Reset Movie Match — removes saved Ok marks, fetched rows and last-sync time."},
+    {"id": "refresh_libraries", "label": "Refresh libraries", "tab": "Jellyfin", "handler": _op_refresh_libraries,
+     "description": "Refresh the cached library list from Jellyfin."},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
-OPERATIONS_PUBLIC = [{"id": op["id"], "label": op["label"]} for op in OPERATIONS]
+OPERATIONS_PUBLIC = [
+    {"id": op["id"], "label": op["label"], "description": op.get("description", "")}
+    for op in OPERATIONS
+]
 
 # Default schedule + enabled flag used when seeding a first job for an
 # operation. Everything seeds disabled so a fresh install shows every operation
@@ -273,6 +281,7 @@ def _public_job(job_id: str) -> dict:
         "id": job["id"],
         "operation": job.get("operation"),
         "operation_label": op.get("label", job.get("operation", "")),
+        "operation_description": op.get("description", ""),
         "trigger": job.get("trigger", {}),
         "schedule": _describe_schedule(job.get("trigger", {})),
         "enabled": bool(job.get("enabled", True)),

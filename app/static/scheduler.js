@@ -32,7 +32,7 @@ async function schLoad(refreshOps = true) {
     renderJobs();
   } catch (err) {
     body.innerHTML = "";
-    body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "error", text: String(err) })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "error", text: String(err) })]));
   }
 }
 
@@ -52,12 +52,13 @@ function renderJobs() {
   const body = document.getElementById("sch-body");
   body.innerHTML = "";
   if (SCH.jobs.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No schedules yet — click '+ New schedule'." })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "muted", text: "No schedules yet — click '+ New schedule'." })]));
     return;
   }
   SCH.jobs.forEach((j) => {
     const tr = el("tr");
     tr.appendChild(el("td", { text: j.operation_label }));
+    tr.appendChild(el("td", { class: "muted sch-desc", text: j.operation_description || "" }));
     tr.appendChild(el("td", { text: j.schedule }));
 
     const td = el("td");

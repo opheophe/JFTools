@@ -145,7 +145,7 @@ input:focus { outline: none; border-color: var(--accent); }
 section.card { margin-top: 1.25rem; }
 
 .card table { border-collapse: collapse; width: 100%; margin-top: 0.75rem; }
-.card th, .card td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+.card th, .card td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .card th { color: var(--muted); font-weight: 600; }
 .card td.nowrap { white-space: nowrap; }
 
@@ -187,6 +187,30 @@ section.card { margin-top: 1.25rem; }
 .id-actions .id-link:hover { text-decoration: underline; }
 .id-actions .mini { margin-left: 0.4rem; }
 
+/* Movie Match: Google search dropdown (distinct from the plain text links) */
+.id-google { display: inline-block; margin-right: 0.6rem; }
+.id-google-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.05rem 0.5rem; font-size: 0.8rem; line-height: 1.6;
+  color: var(--accent); background: transparent;
+  border: 1px solid var(--accent); border-radius: 999px;
+  cursor: pointer;
+}
+.id-google-btn:hover { background: rgba(79, 140, 255, 0.14); }
+.id-google-btn:disabled { opacity: 0.5; cursor: default; }
+.id-google-caret { font-size: 0.7rem; }
+.id-google-menu {
+  position: fixed; z-index: 60; min-width: 180px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.3rem; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+.id-google-item {
+  display: block; padding: 0.3rem 0.5rem; border-radius: 6px;
+  color: var(--text); text-decoration: none; font-size: 0.82rem; white-space: nowrap;
+}
+.id-google-item:hover { background: var(--inset); color: var(--accent); }
+
+
 /* table: fill width, truncate long cells */
 #id-table { width: 100%; table-layout: fixed; }
 #id-table th, #id-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -196,6 +220,15 @@ section.card { margin-top: 1.25rem; }
 #id-table th:nth-child(6), #id-table td:nth-child(6) { width: 100px; }
 #id-table th:nth-child(8), #id-table td:nth-child(8) { width: 280px; }
 #id-table td.id-actions { overflow: visible; }
+
+/* wrap long names instead of truncating them */
+#id-table td:nth-child(3),
+#id-table td:nth-child(4),
+#id-table td:nth-child(7) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
 
 /* multi-select dropdowns */
 .ms { position: relative; }
@@ -239,6 +272,7 @@ section.card { margin-top: 1.25rem; }
 .sch-running { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--ok); white-space: nowrap; }
 .sch-actions { white-space: nowrap; }
 .sch-actions .mini { margin-right: 0.4rem; }
+#sch-table td.sch-desc { max-width: 360px; white-space: normal; }
 .toggle { min-width: 46px; padding: 0.1rem 0.6rem; font-size: 0.85rem; }
 .toggle.on { color: var(--ok); border-color: var(--ok); background: rgba(62, 207, 142, 0.12); }
 .toggle.off { color: var(--muted); border-color: var(--border); }
