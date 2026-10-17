@@ -127,7 +127,7 @@ a.btn:hover { border-color: var(--accent); }
 
 .result .kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; }
 .result .kv .k { color: var(--muted); }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 2rem; }
 .kv .k { color: var(--muted); }
 
 .spinner {
