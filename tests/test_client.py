@@ -176,3 +176,39 @@ async def test_get_item_sends_fields():
     assert seen["path"] == "/Users/u1/Items/i1"
     assert seen["params"]["Fields"] == "Name,Overview"
 
+
+async def test_get_retries_transient_503_then_succeeds(monkeypatch):
+    import app.jellyfin.client as client_module
+
+    monkeypatch.setattr(client_module, "_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, json={"ServerName": "Test"})
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    info = await client.get_system_info()
+
+    assert info["ServerName"] == "Test"
+    assert calls["n"] == 2  # one 503, then success
+
+
+async def test_get_raises_after_transient_retries_exhausted(monkeypatch):
+    import app.jellyfin.client as client_module
+
+    monkeypatch.setattr(client_module, "_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(503)
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    with pytest.raises(JellyfinError, match="503"):
+        await client.get_system_info()
+
+    assert calls["n"] == client_module._RETRY_ATTEMPTS
+

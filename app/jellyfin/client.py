@@ -6,7 +6,17 @@ longer accept the legacy ``X-Emby-Token`` header.)
 """
 from __future__ import annotations
 
+import asyncio
+
 import httpx
+
+
+# Transient statuses worth a quick retry before surfacing an error: Jellyfin
+# returns 503 (starting up / mid-scan), 502/504 (proxy/gateway blips) and 429
+# (rate limited) for brief moments. One extra attempt is usually enough.
+_TRANSIENT_STATUSES = {429, 502, 503, 504}
+_RETRY_ATTEMPTS = 3  # total attempts (initial + 2 retries)
+_RETRY_DELAY = 0.6   # seconds before the first retry; doubles each retry
 
 
 def normalize_base_url(url: str) -> str:
@@ -58,19 +68,25 @@ class JellyfinClient:
         self._check()
         client, close = self._use()
         try:
-            resp = await client.get(
-                self.base_url + path,
-                headers=self._headers(),
-                params=params,
-            )
+            for attempt in range(_RETRY_ATTEMPTS):
+                resp = await client.get(
+                    self.base_url + path,
+                    headers=self._headers(),
+                    params=params,
+                )
+                if resp.status_code == 401:
+                    raise JellyfinError("Unauthorized — check the Jellyfin API key.")
+                if resp.status_code >= 400:
+                    if resp.status_code in _TRANSIENT_STATUSES and attempt < _RETRY_ATTEMPTS - 1:
+                        await asyncio.sleep(_RETRY_DELAY * (attempt + 1))
+                        continue
+                    raise JellyfinError(f"Jellyfin returned HTTP {resp.status_code} for {path}.")
+                return resp.json()
         finally:
             if close:
                 await client.aclose()
-        if resp.status_code == 401:
-            raise JellyfinError("Unauthorized — check the Jellyfin API key.")
-        if resp.status_code >= 400:
-            raise JellyfinError(f"Jellyfin returned HTTP {resp.status_code} for {path}.")
-        return resp.json()
+        # Unreachable — the loop above always returns or raises.
+        raise JellyfinError(f"Jellyfin returned HTTP 500 for {path}.")
 
     async def _post(self, path: str, json: dict | None = None) -> dict | None:
         self._check()
