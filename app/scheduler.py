@@ -76,6 +76,12 @@ async def _op_subtitle_scan_changed() -> None:
     await run_scan("changed")
 
 
+async def _op_users_watching() -> None:
+    from .users import check_watching
+
+    await check_watching()
+
+
 def _subtitle_scan_progress() -> dict | None:
     """Live progress (done/total) for the running subtitle scans."""
     from .subtitles import _fetch
@@ -114,6 +120,9 @@ OPERATIONS = [
     {"id": "subtitle_scan_changed", "label": "Subtitle scan (changed)", "tab": "Search", "handler": _op_subtitle_scan_changed,
      "description": "Probe only files that are new or whose size/modified time changed since the last scan.",
      "progress": _subtitle_scan_progress},
+    {"id": "users_watching", "label": "User watching", "tab": "Jellyfin", "handler": _op_users_watching,
+     "description": "Check Jellyfin sessions for an actively-watching user (powers the Users nav dot).",
+     "quiet": True},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
 OPERATIONS_PUBLIC = [
@@ -133,8 +142,9 @@ _DEFAULT_SCHEDULES = {
     "check_updates": {"kind": "interval", "minutes": 60},
     "subtitle_scan_full": {"kind": "cron", "hour": 3, "minute": 0},
     "subtitle_scan_changed": {"kind": "interval", "minutes": 720},
+    "users_watching": {"kind": "interval", "seconds": 30},
 }
-_ACTIVE_BY_DEFAULT = {"refresh_libraries", "check_updates"}
+_ACTIVE_BY_DEFAULT = {"refresh_libraries", "check_updates", "users_watching"}
 
 # ---- persistence ------------------------------------------------------------
 
@@ -211,6 +221,8 @@ scheduler = AsyncIOScheduler(timezone=_scheduler_tz())
 def _make_trigger(spec: dict):
     kind = spec.get("kind")
     if kind == "interval":
+        if spec.get("seconds"):
+            return IntervalTrigger(seconds=max(1, int(spec["seconds"])))
         return IntervalTrigger(minutes=max(1, int(spec.get("minutes", 60))))
     if kind == "cron":
         kwargs = {}
@@ -231,6 +243,8 @@ def _make_trigger(spec: dict):
 def _describe_schedule(spec: dict) -> str:
     kind = spec.get("kind")
     if kind == "interval":
+        if spec.get("seconds"):
+            return f"Every {max(1, int(spec['seconds']))} seconds"
         m = max(1, int(spec.get("minutes", 60)))
         if m < 60:
             return f"Every {m} minutes"
@@ -260,19 +274,23 @@ async def _run_job(job_id: str) -> None:
         return
     _running.add(job_id)
     job["last_run"] = time.time()
+    quiet = bool(op.get("quiet"))
     try:
         await op["handler"]()
         job["last_status"] = "ok"
         job["last_error"] = None
-        log(op["tab"], "INFO", f"Scheduled run: {op['label']} OK")
+        if not quiet:
+            log(op["tab"], "INFO", f"Scheduled run: {op['label']} OK")
     except asyncio.CancelledError:
         job["last_status"] = "cancelled"
         job["last_error"] = "Aborted by user"
-        log(op["tab"], "WARN", f"Scheduled run: {op['label']} aborted")
+        if not quiet:
+            log(op["tab"], "WARN", f"Scheduled run: {op['label']} aborted")
     except Exception as exc:  # noqa: BLE001
         job["last_status"] = "error"
         job["last_error"] = str(exc)
-        log(op["tab"], "ERROR", f"Scheduled run: {op['label']} failed: {exc}")
+        if not quiet:
+            log(op["tab"], "ERROR", f"Scheduled run: {op['label']} failed: {exc}")
     finally:
         _running.discard(job_id)
         _save_jobs()
@@ -457,6 +475,14 @@ async def abort_job(job_id: str, request: Request, user: str = Depends(require_l
         return JSONResponse({"ok": True, "message": "Job is not running."})
     task.cancel()
     return JSONResponse({"ok": True, "message": "Abort requested."})
+
+
+def operation_active(operation: str) -> bool:
+    """True when the operation has at least one enabled job (i.e. it will run)."""
+    return any(
+        j.get("operation") == operation and bool(j.get("enabled", True))
+        for j in _jobs.values()
+    )
 
 
 def trigger_operation(operation: str) -> tuple[bool, bool]:

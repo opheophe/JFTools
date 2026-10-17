@@ -620,6 +620,34 @@ async function checkUpdateDot() {
   }
 }
 
+// Users nav dot: green = watching, orange = paused, red = idle. Hidden entirely
+// when the "User watching" job is disabled (the dot would be pointless).
+function applyWatchDot(data) {
+  const dot = document.getElementById("watch-dot");
+  if (!dot) return;
+  if (!data || !data.active) {
+    dot.hidden = true;
+    return;
+  }
+  dot.hidden = false;
+  dot.className = "watch-dot " + (data.status === "watching" ? "watching"
+    : data.status === "paused" ? "paused" : "idle");
+}
+
+async function pollWatchDot() {
+  try {
+    applyWatchDot(await getJSON("/api/users/watching"));
+  } catch (e) {
+    /* ignore — leave the dot as-is */
+  }
+}
+
+function startWatchDot() {
+  if (!document.getElementById("watch-dot")) return;
+  pollWatchDot();
+  setInterval(() => { if (!document.hidden) pollWatchDot(); }, 15000);
+}
+
 // ---- collapsible cards (shared by every page) -------------------------------
 
 const CARDS_KEY = "jftools.cards";
@@ -683,6 +711,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("resize", hidePopup);
   window.addEventListener("scroll", hidePopup, true);
   checkUpdateDot();
+  startWatchDot();
   if (document.getElementById("activity-body")) {
     refreshActivity();  // always load once when the page opens
     activityLive.apply(activityLive.stored(), false);

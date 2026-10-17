@@ -203,6 +203,17 @@ Two scheduler jobs do the work:
 Classification matches Subber's Movie List: `acceptable` (English/Swedish/
 Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
 
+## User watching
+
+A **User watching** scheduler job (every 30 s, enabled by default) checks
+Jellyfin's live sessions and drives a status dot next to the **Users** nav link:
+
+- **green** — someone is watching
+- **orange** — a session is paused
+- **red** — nobody watching
+
+Disable the job in the Scheduler to hide the dot entirely.
+
 ## Updating
 
 ```bash

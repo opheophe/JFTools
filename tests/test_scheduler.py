@@ -97,3 +97,49 @@ def test_check_updates_runs_hourly_by_default():
     assert "check_updates" in sch._OP_BY_ID
     assert sch._DEFAULT_SCHEDULES["check_updates"] == {"kind": "interval", "minutes": 60}
     assert "check_updates" in sch._ACTIVE_BY_DEFAULT
+
+
+def test_describe_seconds_interval():
+    assert _describe_schedule({"kind": "interval", "seconds": 30}) == "Every 30 seconds"
+
+
+def test_make_trigger_seconds_interval():
+    t = _make_trigger({"kind": "interval", "seconds": 30})
+    assert isinstance(t, IntervalTrigger)
+    assert t.interval.total_seconds() == 30
+
+
+def test_users_watching_defaults():
+    assert "users_watching" in sch._OP_BY_ID
+    assert sch._DEFAULT_SCHEDULES["users_watching"] == {"kind": "interval", "seconds": 30}
+    assert "users_watching" in sch._ACTIVE_BY_DEFAULT
+
+
+def test_operation_active(monkeypatch):
+    monkeypatch.setattr(sch, "_jobs", {
+        "a": {"operation": "users_watching", "enabled": True},
+        "b": {"operation": "users_watching", "enabled": False},
+        "c": {"operation": "other", "enabled": True},
+    })
+    assert sch.operation_active("users_watching") is True
+    sch._jobs["a"]["enabled"] = False
+    assert sch.operation_active("users_watching") is False
+
+
+async def test_quiet_operation_skips_logs(monkeypatch):
+    logged = []
+    monkeypatch.setattr(sch, "log", lambda tab, lvl, msg: logged.append((tab, lvl, msg)))
+    monkeypatch.setattr(sch, "_save_jobs", lambda: None)
+    monkeypatch.setattr(sch, "_running", set())
+
+    async def handler():
+        return None
+
+    monkeypatch.setitem(sch._OP_BY_ID, "quiet_op",
+        {"id": "quiet_op", "label": "Quiet Op", "tab": "Test", "handler": handler, "quiet": True})
+    monkeypatch.setitem(sch._jobs, "jq",
+        {"id": "jq", "operation": "quiet_op", "trigger": {}, "enabled": True})
+
+    await sch._run_job("jq")
+    assert logged == []
+    assert sch._jobs["jq"]["last_status"] == "ok"

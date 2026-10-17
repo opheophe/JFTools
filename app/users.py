@@ -82,6 +82,10 @@ _state = _load_state()
 _fetch = {"status": "idle", "error": None}
 _in_flight = False
 
+# Cached "is anyone watching right now" state, refreshed by the scheduler's
+# ``users_watching`` job (every 30 s) and read by the Users nav dot.
+_watching = {"status": "idle", "users": [], "at": None}
+
 
 # ---- fetching ---------------------------------------------------------------
 
@@ -160,6 +164,47 @@ def _maybe_start_fetch() -> None:
     if _in_flight:
         return
     asyncio.create_task(_run_fetch())
+
+
+async def check_watching() -> None:
+    """Refresh the cached "is anyone watching" state from Jellyfin sessions.
+
+    One ``GET /Sessions`` is enough: each session carries its user, its
+    now-playing item and its play state, so no per-user calls are needed. The
+    resulting status is one of ``watching`` / ``paused`` / ``idle``.
+    """
+    if not config.jellyfin_configured:
+        return
+    sessions = await get_client().get_sessions()
+    watching: list[dict] = []
+    paused: list[dict] = []
+    for s in sessions or []:
+        np = s.get("NowPlayingItem") or {}
+        if not np.get("Name"):
+            continue
+        play = s.get("PlayState") or {}
+        rec = {
+            "user": s.get("UserName") or s.get("UserId") or "?",
+            "title": _item_label(np),
+        }
+        (paused if play.get("IsPaused") else watching).append(rec)
+
+    status = "watching" if watching else ("paused" if paused else "idle")
+    old = _watching.get("status")
+    _watching["status"] = status
+    _watching["users"] = watching + paused
+    _watching["at"] = time.time()
+
+    # Log only on transitions so a 30 s heartbeat doesn't flood the logs.
+    if status != old:
+        if status == "watching":
+            who = ", ".join(f"{r['user']} ({r['title']})" for r in watching)
+            log("Jellyfin", "INFO", f"Watching: {who}")
+        elif status == "paused":
+            who = ", ".join(f"{r['user']} ({r['title']})" for r in paused)
+            log("Jellyfin", "INFO", f"Watching paused: {who}")
+        else:
+            log("Jellyfin", "INFO", "Watching stopped")
 
 
 # ---- routes -----------------------------------------------------------------
@@ -247,6 +292,21 @@ async def api_users_status(request: Request, user: str = Depends(require_login))
             "status": _fetch["status"],
             "error": _fetch["error"],
             "last_sync": _state["last_sync"],
+        }
+    )
+
+
+@router.get("/api/users/watching")
+async def api_users_watching(request: Request, user: str = Depends(require_login)):
+    from .scheduler import operation_active
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "active": operation_active("users_watching"),
+            "status": _watching.get("status"),
+            "users": _watching.get("users"),
+            "at": _watching.get("at"),
         }
     )
 

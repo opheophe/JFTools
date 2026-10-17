@@ -53,6 +53,19 @@ body {
 }
 .update-dot[hidden] { display: none; }
 
+.watch-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 5px;
+  vertical-align: 1px;
+}
+.watch-dot.watching { background: var(--ok); }
+.watch-dot.paused   { background: var(--warn); }
+.watch-dot.idle     { background: var(--danger); }
+.watch-dot[hidden]  { display: none; }
+
 main { margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
 
 h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }

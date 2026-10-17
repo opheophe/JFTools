@@ -147,6 +147,7 @@ function schNew() {
 
 function freqFromTrigger(t) {
   if (t.kind === "interval") {
+    if (t.seconds) return "every30s";
     const map = { 15: "every15m", 30: "every30m", 60: "every1h", 180: "every3h", 360: "every6h", 720: "every12h" };
     return map[t.minutes] || "every1h";
   }
@@ -180,6 +181,7 @@ function buildTrigger() {
   const freq = document.getElementById("sch-freq").value;
   const { h, m } = getTime();
   const day = document.getElementById("sch-day").value;
+  if (freq === "every30s") return { kind: "interval", seconds: 30 };
   if (freq === "every15m") return { kind: "interval", minutes: 15 };
   if (freq === "every30m") return { kind: "interval", minutes: 30 };
   if (freq === "every1h") return { kind: "interval", minutes: 60 };
