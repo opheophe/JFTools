@@ -42,6 +42,16 @@ body {
 .topbar nav a { color: var(--muted); text-decoration: none; }
 .topbar nav a:hover { color: var(--text); }
 .topbar nav a.active { color: var(--text); font-weight: 600; }
+.update-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  margin-left: 5px;
+  vertical-align: 1px;
+}
+.update-dot[hidden] { display: none; }
 
 main { margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
 
@@ -80,6 +90,19 @@ button.link {
 }
 button.link:hover { color: var(--text); }
 
+a.btn {
+  display: inline-block;
+  font: inherit;
+  color: var(--text);
+  background: var(--btn);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.45rem 0.8rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+a.btn:hover { border-color: var(--accent); }
+
 .inline { display: inline; margin: 0; }
 
 .result {
@@ -104,6 +127,8 @@ button.link:hover { color: var(--text); }
 
 .result .kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; }
 .result .kv .k { color: var(--muted); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; }
+.kv .k { color: var(--muted); }
 
 .spinner {
   display: inline-block;
@@ -118,6 +143,7 @@ button.link:hover { color: var(--text); }
 
 .error { color: var(--danger); }
 .ok { color: var(--ok); }
+.warn { color: var(--warn); }
 
 /* forms */
 form { margin-top: 1rem; max-width: 520px; }

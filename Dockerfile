@@ -1,10 +1,13 @@
 FROM python:3.12-slim
 
+ARG VERSION=dev
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     JFTOOLS_DATA_DIR=/data \
-    TZ=Europe/Stockholm
+    TZ=Europe/Stockholm \
+    JFTOOLS_VERSION=$VERSION
 
 WORKDIR /app
 

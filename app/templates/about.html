@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}JFTools — About{% endblock %}
+{% block content %}
+<h1>About</h1>
+<p class="muted">Build information and project links.</p>
+
+<section class="card">
+  <h2>Version</h2>
+  <div class="kv">
+    <span class="k">Installed</span><span id="about-version" class="muted">…</span>
+    <span class="k">Latest release</span><span id="about-latest" class="muted">…</span>
+    <span class="k">Status</span><span id="about-status" class="muted">…</span>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Project</h2>
+  <p class="muted">JFTools is a self-hosted dashboard that sits next to your media stack and drives Jellyfin over its HTTP API.</p>
+  <div class="row">
+    <a id="about-github" class="btn" href="https://github.com/opheophe/JFTools" target="_blank" rel="noopener">
+      <img src="/resources/github.svg" alt="" width="16" height="16" style="vertical-align:-3px; filter:invert(1) opacity(.8)"> View on GitHub
+    </a>
+    <a id="about-releases" class="btn" href="https://github.com/opheophe/JFTools/releases" target="_blank" rel="noopener">Releases</a>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/about.js"></script>{% endblock %}

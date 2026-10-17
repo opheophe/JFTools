@@ -442,11 +442,24 @@ async function refreshActivity() {
 
 const activityLive = LiveToggle("activity-live", "jftools.activity.live", 3000, refreshActivity);
 
+// Show a red dot on the About nav link when a newer release is available.
+async function checkUpdateDot() {
+  const dot = document.getElementById("update-dot");
+  if (!dot) return;
+  try {
+    const data = await getJSON("/api/about");
+    if (data && data.update_available) dot.hidden = false;
+  } catch (e) {
+    /* ignore — leave the dot hidden */
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   highlightNav();
   bindSettings();
   window.addEventListener("resize", hidePopup);
   window.addEventListener("scroll", hidePopup, true);
+  checkUpdateDot();
   if (document.getElementById("activity-body")) {
     refreshActivity();  // always load once when the page opens
     activityLive.apply(activityLive.stored(), false);

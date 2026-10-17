@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from .about import router as about_router
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError, close_shared_client, get_client
@@ -42,6 +43,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.mount("/resources", StaticFiles(directory=str(BASE_DIR.parent / "resources")), name="resources")
 
+app.include_router(about_router)
 app.include_router(jellyfin_id_router)
 app.include_router(libraries_router)
 app.include_router(logs_router)
