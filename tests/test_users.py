@@ -1,4 +1,16 @@
+from types import SimpleNamespace
+
+import pytest
+
 import app.users as users
+
+
+@pytest.fixture(autouse=True)
+def _jellyfin_configured(monkeypatch):
+    # check_watching() short-circuits unless Jellyfin is configured. CI is a
+    # fresh checkout with no settings/env, so stub the config to keep the tests
+    # deterministic regardless of the local environment.
+    monkeypatch.setattr(users, "config", SimpleNamespace(jellyfin_configured=True))
 
 
 class _FakeClient:
