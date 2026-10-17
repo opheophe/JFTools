@@ -350,20 +350,24 @@ def _stat_path(local: str):
         return None
 
 
-def _needs_scan(entry: dict | None, st, mode: str) -> bool:
-    if mode == "full":
-        return True
-    if entry is None:
-        return True
-    if entry.get("error"):
-        return True
-    if st is None:
-        return True
-    return entry.get("size") != st.st_size or entry.get("mtime") != st.st_mtime
+def _stub(path: str) -> dict:
+    """A minimal store entry for a library item that has not been probed yet."""
+    return {"path": path, "file": Path(path).name, "scanned": False}
 
 
-def _build_worklist(rows: list[dict], files: dict, mode: str) -> list[tuple[str, str, object]]:
-    """Resolve + stat every path and return the (key, local, st) triples to probe.
+def _reconcile(files: dict, ok: list[str], current_paths: set[str]) -> tuple[dict, list[str]]:
+    """Sync the store with the library list: add unscanned stubs for new items,
+    drop entries (and ok marks) whose path is no longer listed."""
+    for p in current_paths:
+        if p not in files:
+            files[p] = _stub(p)
+    files = {k: v for k, v in files.items() if k in current_paths}
+    ok = [k for k in ok if k in current_paths]
+    return files, ok
+
+
+def _build_worklist(rows: list[dict], files: dict) -> list[tuple[str, str, object]]:
+    """Return the (key, local, st) triples to probe — every entry not yet scanned.
 
     Runs in a worker thread: os.stat over SMB/NFS can be slow, and doing it on
     the event loop would freeze the app during a large scan.
@@ -371,10 +375,11 @@ def _build_worklist(rows: list[dict], files: dict, mode: str) -> list[tuple[str,
     to_scan = []
     for r in rows:
         key = r["path"]
+        if files.get(key, {}).get("scanned"):
+            continue
         local = resolve_path(key, config.settings.path_maps)
         st = _stat_path(local)
-        if _needs_scan(files.get(key), st, mode):
-            to_scan.append((key, local, st))
+        to_scan.append((key, local, st))
     return to_scan
 
 
@@ -385,7 +390,8 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
         "resolved": local,
         "size": st.st_size if st else None,
         "mtime": st.st_mtime if st else None,
-        "scanned": time.time(),
+        "scanned": False,
+        "scanned_at": time.time(),
         "duration": 0.0,
         "internal": [],
         "external": [],
@@ -412,22 +418,21 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
     entry["external"] = external
     entry["subs"] = _display_lines(internal, external)
     entry["flags"] = _classify_tracks(internal, external)
+    entry["scanned"] = True
     return key, entry
 
 
-def _prune_files(files: dict, ok: list[str], current_paths: set[str]) -> tuple[dict, list[str]]:
-    """Drop entries (and ok marks) whose path is no longer in the item list."""
-    files = {k: v for k, v in files.items() if k in current_paths}
-    ok = [k for k in ok if k in current_paths]
-    return files, ok
-
-
 async def run_scan(mode: str) -> None:
-    """Probe the Movie Match items for subtitle tracks and refresh the store."""
+    """Probe the Movie Match items for subtitle tracks and refresh the store.
+
+    ``mode`` is ``"scan"`` (reconcile, then probe every unscanned file) or
+    ``"full"`` (mark everything unscanned first, then the same scan).
+    """
     if _fetch["status"] == "running":
         return
+    label = "Subtitle scan (full)" if mode == "full" else "Subtitle scan"
     _fetch.update({"status": "running", "scanned": 0, "total": 0, "error": None})
-    log("Search", "INFO", f"Subtitle {mode} scan started")
+    log("Search", "INFO", f"{label} started")
     try:
         ffprobe = resolve_ffprobe()
         if not ffprobe:
@@ -449,13 +454,16 @@ async def run_scan(mode: str) -> None:
             return
 
         current_paths = {r["path"] for r in rows}
-        files, ok = _prune_files(dict(_state["files"]), list(_state["ok"]), current_paths)
+        files, ok = _reconcile(dict(_state["files"]), list(_state["ok"]), current_paths)
+        if mode == "full":
+            for entry in files.values():
+                entry["scanned"] = False
         _state["files"] = files
         _state["ok"] = ok
 
         # Resolve + stat each path off the event loop — os.stat over SMB/NFS can
         # be slow, and doing it inline would freeze the app during a big scan.
-        to_scan = await asyncio.to_thread(_build_worklist, rows, files, mode)
+        to_scan = await asyncio.to_thread(_build_worklist, rows, files)
 
         _fetch["total"] = len(to_scan)
         if to_scan:
@@ -492,17 +500,47 @@ async def run_scan(mode: str) -> None:
         log(
             "Search",
             "INFO",
-            f"Subtitle {mode} scan complete: {len(to_scan)} probed, {len(rows) - len(to_scan)} skipped",
+            f"{label} complete: {len(to_scan)} probed, {len(rows) - len(to_scan)} skipped",
         )
     except asyncio.CancelledError:
         _fetch["status"] = "cancelled"
         _fetch["error"] = None
-        log("Search", "WARN", f"Subtitle {mode} scan aborted")
+        log("Search", "WARN", f"{label} aborted")
         raise
     except Exception as exc:  # noqa: BLE001
         _fetch["status"] = "error"
         _fetch["error"] = f"Unexpected error: {exc}"
-        log("Search", "ERROR", f"Subtitle {mode} scan failed: {exc}")
+        log("Search", "ERROR", f"{label} failed: {exc}")
+
+
+async def rescan_one(path: str) -> dict:
+    """Force a re-probe of one library item and update the store.
+
+    Used by the "Rescan sub" popup action: it ignores the ``scanned`` flag and
+    probes the file now, marking it scanned only on a definitive result.
+    """
+    ffprobe = resolve_ffprobe()
+    if not ffprobe:
+        return {
+            "path": path,
+            "file": Path(path).name,
+            "scanned": False,
+            "error": (
+                "ffprobe not found. Install ffmpeg (Docker) or drop ffprobe.exe "
+                "into a Tools/ folder next to the app, or set JFTOOLS_FFPROBE."
+            ),
+        }
+    local = resolve_path(path, config.settings.path_maps)
+    st = await asyncio.to_thread(_stat_path, local)
+    key, entry = await asyncio.to_thread(_probe_one, ffprobe, path, local, st)
+    _state["files"][key] = entry
+    _save_state()
+    if entry.get("error"):
+        log("Search", "WARN", f"Rescanned {entry['file']}: {entry['error']}")
+    else:
+        summary = ", ".join(entry.get("subs") or []) or "no subs"
+        log("Search", "INFO", f"Rescanned {entry['file']}: {summary}")
+    return entry
 
 
 # ---- routes -----------------------------------------------------------------
@@ -512,16 +550,36 @@ async def run_scan(mode: str) -> None:
 async def subtitles_scan(
     request: Request,
     user: str = Depends(require_login),
-    mode: str = Form("changed"),
+    mode: str = Form("scan"),
 ):
-    if mode not in ("full", "changed"):
+    if mode not in ("full", "scan"):
         return JSONResponse({"ok": False, "error": "Unknown scan mode."}, status_code=400)
     from .scheduler import trigger_operation
 
-    started, _ = trigger_operation(f"subtitle_scan_{mode}")
+    op = "subtitle_scan_full" if mode == "full" else "subtitle_scan"
+    started, _ = trigger_operation(op)
     return JSONResponse(
         {"ok": True, "message": "Scan started." if started else "Already scanning."}
     )
+
+
+@router.post("/api/subtitles/rescan")
+async def subtitles_rescan(
+    request: Request,
+    user: str = Depends(require_login),
+    path: str = Form(""),
+):
+    path = path.strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    from .jellyfin_id import _state as id_state
+
+    if not any(r.get("path") == path for r in (id_state.get("rows") or [])):
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    entry = await rescan_one(path)
+    return JSONResponse({"ok": True, "entry": entry})
 
 
 @router.get("/api/subtitles/status")

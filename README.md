@@ -183,14 +183,20 @@ Notes:
 JFTools can probe every media file with **ffprobe** and list its subtitle
 tracks — embedded streams plus external `.srt`/`.ass`/… files next to the video.
 Results are cached to `subtitles.json` and shown in the **Search** tab (a
-**Subtitles** column, a **Subtitles** filter, and a manual **Subtitle Ok**
-mark/filter).
+**Subtitles** column with a **Not scanned** state, a **Subtitles** filter, and a
+manual **Subtitle Ok** mark/filter). Each file carries a `scanned` flag:
+probing sets it to `true` only when the result is definitive (subs found or
+none); errors leave it `false` and are retried.
 
 Two scheduler jobs do the work:
 
-- **Subtitle scan (full)** — re-probes every file and rewrites the whole store.
-- **Subtitle scan (changed)** — probes only files that are new or whose
-  size/modified time changed; entries for removed files are purged.
+- **Subtitle scan (full)** — marks every file unscanned, then re-probes them all.
+- **Subtitle scan** — syncs the store with the library (adds new files as
+  unscanned, drops removed ones), then probes every file not yet scanned.
+
+You can also re-probe a single file from its hover popup (**Rescan sub**),
+which ignores the `scanned` flag — handy after dropping a new `.srt` next to a
+movie.
 
 **Requirements:**
 

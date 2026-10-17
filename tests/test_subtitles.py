@@ -7,8 +7,7 @@ import pytest
 from app.subtitles import (
     _classify_tracks,
     _external_subtitles,
-    _needs_scan,
-    _prune_files,
+    _reconcile,
     _subtitle_lang_name,
     resolve_ffprobe,
 )
@@ -121,45 +120,80 @@ def test_external_subtitles(tmp_path):
     assert entries["Movie (2020).tiny.srt"]["tiny"] is True
 
 
-# ---- change-scan skip rule --------------------------------------------------
+# ---- reconcile --------------------------------------------------------------
 
 
-def _st(size=100, mtime=1.0):
-    return SimpleNamespace(st_size=size, st_mtime=mtime)
-
-
-def test_needs_scan_full_always():
-    entry = {"size": 100, "mtime": 1.0}
-    assert _needs_scan(entry, _st(100, 1.0), "full") is True
-
-
-def test_needs_scan_changed_missing():
-    assert _needs_scan(None, _st(), "changed") is True
-
-
-def test_needs_scan_changed_with_error():
-    assert _needs_scan({"error": "unreachable"}, _st(), "changed") is True
-
-
-def test_needs_scan_changed_unchanged_skips():
-    entry = {"size": 100, "mtime": 1.0}
-    assert _needs_scan(entry, _st(100, 1.0), "changed") is False
-
-
-def test_needs_scan_changed_size_differs():
-    entry = {"size": 100, "mtime": 1.0}
-    assert _needs_scan(entry, _st(200, 1.0), "changed") is True
-
-
-# ---- prune ------------------------------------------------------------------
-
-
-def test_prune_removes_stale_entries_and_ok():
-    files = {"/a": {"path": "/a"}, "/b": {"path": "/b"}}
-    ok = ["/a", "/b"]
-    files, ok = _prune_files(files, ok, {"/a"})
-    assert files == {"/a": {"path": "/a"}}
+def test_reconcile_adds_new_as_unscanned_and_drops_stale():
+    files = {"/a": {"path": "/a", "scanned": True}, "/gone": {"path": "/gone", "scanned": True}}
+    ok = ["/a", "/gone"]
+    files, ok = _reconcile(files, ok, {"/a", "/b"})
+    assert set(files) == {"/a", "/b"}
+    assert files["/a"]["scanned"] is True
+    assert files["/b"]["scanned"] is False
+    assert files["/b"]["file"] == "b"
     assert ok == ["/a"]
+
+
+def test_reconcile_preserves_existing_scanned():
+    files = {"/a": {"path": "/a", "scanned": False}}
+    files, ok = _reconcile(files, [], {"/a"})
+    assert files["/a"]["scanned"] is False
+
+
+# ---- worklist (flag-based) --------------------------------------------------
+
+
+def test_build_worklist_probes_only_unscanned(tmp_path):
+    from app.subtitles import _build_worklist
+
+    f = tmp_path / "movie.mkv"
+    f.write_bytes(b"")
+    g = tmp_path / "new.mkv"
+    g.write_bytes(b"")
+    rows = [{"path": str(f)}, {"path": str(g)}]
+    files = {
+        str(f): {"path": str(f), "scanned": True},
+        str(g): {"path": str(g), "scanned": False},
+    }
+    work = _build_worklist(rows, files)
+    assert [w[0] for w in work] == [str(g)]
+
+    # A missing entry (shouldn't happen post-reconcile) is also probed.
+    assert [w[0] for w in _build_worklist([{"path": str(f)}], {})] == [str(f)]
+
+
+# ---- probe scanned flag -----------------------------------------------------
+
+
+def test_probe_one_unreachable_not_scanned():
+    from app.subtitles import _probe_one
+
+    key, entry = _probe_one("ffprobe", "/x/y.mkv", "/x/y.mkv", None)
+    assert entry["scanned"] is False
+    assert entry["error"] == "unreachable"
+
+
+def test_probe_one_not_a_file_not_scanned():
+    import stat as statmod
+
+    from app.subtitles import _probe_one
+
+    st = SimpleNamespace(st_size=0, st_mtime=0.0, st_mode=statmod.S_IFDIR)
+    key, entry = _probe_one("ffprobe", "/x", "/x", st)
+    assert entry["scanned"] is False
+    assert entry["error"] == "not a file"
+
+
+def test_probe_one_success_marks_scanned(monkeypatch, tmp_path):
+    import app.subtitles as sub
+
+    f = tmp_path / "movie.mkv"
+    f.write_bytes(b"")
+    monkeypatch.setattr(sub, "_probe_subtitles", lambda ff, local: ([], 0.0, None))
+    monkeypatch.setattr(sub, "_external_subtitles", lambda local: [])
+    key, entry = sub._probe_one("ffprobe", str(f), str(f), f.stat())
+    assert entry["scanned"] is True
+    assert entry["flags"]["nosubs"] is True
 
 
 # ---- ffprobe resolution -----------------------------------------------------
@@ -180,18 +214,10 @@ def test_subtitles_ok_getter_is_callable():
     assert isinstance(subtitles_map(), dict)
 
 
-def test_build_worklist(tmp_path):
-    from app.subtitles import _build_worklist
+async def test_rescan_one_without_ffprobe(monkeypatch):
+    import app.subtitles as sub
 
-    f = tmp_path / "movie.mkv"
-    f.write_bytes(b"")
-    rows = [{"path": str(f)}]
-
-    # Full scan always includes the file.
-    work = _build_worklist(rows, {}, "full")
-    assert [w[0] for w in work] == [str(f)]
-
-    # Changed scan skips an unchanged file (matching size/mtime).
-    st = f.stat()
-    files = {str(f): {"size": st.st_size, "mtime": st.st_mtime}}
-    assert _build_worklist(rows, files, "changed") == []
+    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: None)
+    entry = await sub.rescan_one("/x/y.mkv")
+    assert entry["scanned"] is False
+    assert entry["error"]

@@ -70,10 +70,10 @@ async def _op_subtitle_scan_full() -> None:
     await run_scan("full")
 
 
-async def _op_subtitle_scan_changed() -> None:
+async def _op_subtitle_scan() -> None:
     from .subtitles import run_scan
 
-    await run_scan("changed")
+    await run_scan("scan")
 
 
 async def _op_users_watching() -> None:
@@ -117,8 +117,8 @@ OPERATIONS = [
     {"id": "subtitle_scan_full", "label": "Subtitle scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
      "description": "Probe every media file for subtitle tracks with ffprobe and refresh the whole subtitle store.",
      "progress": _subtitle_scan_progress},
-    {"id": "subtitle_scan_changed", "label": "Subtitle scan (changed)", "tab": "Search", "handler": _op_subtitle_scan_changed,
-     "description": "Probe only files that are new or whose size/modified time changed since the last scan.",
+    {"id": "subtitle_scan", "label": "Subtitle scan", "tab": "Search", "handler": _op_subtitle_scan,
+     "description": "Sync the store with the library, then probe every file not yet scanned.",
      "progress": _subtitle_scan_progress},
     {"id": "users_watching", "label": "User watching", "tab": "Jellyfin", "handler": _op_users_watching,
      "description": "Check Jellyfin sessions for an actively-watching user (powers the Users nav dot).",
@@ -141,7 +141,7 @@ _DEFAULT_SCHEDULES = {
     "refresh_libraries": {"kind": "interval", "minutes": 30},
     "check_updates": {"kind": "interval", "minutes": 60},
     "subtitle_scan_full": {"kind": "cron", "hour": 3, "minute": 0},
-    "subtitle_scan_changed": {"kind": "interval", "minutes": 720},
+    "subtitle_scan": {"kind": "interval", "minutes": 720},
     "users_watching": {"kind": "interval", "seconds": 30},
 }
 _ACTIVE_BY_DEFAULT = {"refresh_libraries", "check_updates", "users_watching"}

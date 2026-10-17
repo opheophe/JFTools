@@ -895,7 +895,12 @@ function renderPopup(resp, desc) {
       ev.preventDefault();
       rescanFile(rescan, item.path);
     });
-    inner.appendChild(el("div", { class: "pop-links" }, [rescan]));
+    const rescanSub = el("a", { class: "pop-rescan pop-sub", href: "#", text: "Rescan sub" });
+    rescanSub.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      rescanSubtitle(rescanSub, item.path);
+    });
+    inner.appendChild(el("div", { class: "pop-links" }, [rescan, rescanSub]));
   }
 
   popupNode.appendChild(inner);
@@ -911,6 +916,27 @@ async function rescanFile(node, path) {
     node.textContent = data.ok ? "✓ Rescan started" : "Rescan failed";
   } catch (err) {
     node.textContent = "Rescan failed";
+  }
+  setTimeout(() => { node.textContent = prev; delete node.dataset.busy; }, 2500);
+}
+
+async function rescanSubtitle(node, path) {
+  if (node.dataset.busy) return;
+  node.dataset.busy = "1";
+  const prev = node.textContent;
+  node.textContent = "Scanning…";
+  try {
+    const data = await postJSON("/api/subtitles/rescan", "path=" + encodeURIComponent(path));
+    if (data.ok) {
+      const e = data.entry || {};
+      node.textContent = e.error
+        ? "Subtitle scan failed"
+        : ("✓ " + ((e.subs || []).join(", ") || "no subs"));
+    } else {
+      node.textContent = data.error || "Subtitle scan failed";
+    }
+  } catch (err) {
+    node.textContent = "Subtitle scan failed";
   }
   setTimeout(() => { node.textContent = prev; delete node.dataset.busy; }, 2500);
 }

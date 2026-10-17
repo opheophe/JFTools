@@ -17,7 +17,7 @@ const FAV_ANY = "__any__";
 const FAV_NONE = "__none__";
 
 // Subtitle "Show" filter options (same as Subber's Movie List).
-const SUBS_OPTIONS = ["Acceptable", "AI Sub", "No acceptable", "No acceptable (inc. AI)", "Forced", "Foreign", "No subs"]
+const SUBS_OPTIONS = ["Not scanned", "Acceptable", "AI Sub", "No acceptable", "No acceptable (inc. AI)", "Forced", "Foreign", "No subs"]
   .map((v) => ({ value: v, label: v }));
 const SUBSOK_OPTIONS = [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }];
 const SUBS_PREDS = {
@@ -33,6 +33,7 @@ const SUBS_PREDS = {
 function seSubsEntry(r) { return SE.subtitles[r.path] || null; }
 function seFlags(r) { const e = seSubsEntry(r); return e && e.flags ? e.flags : null; }
 function seSubsOk(r) { return SE.subtitlesOk.has(r.path); }
+function seScanned(r) { const e = seSubsEntry(r); return !!(e && e.scanned); }
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -120,8 +121,12 @@ function seVisible() {
     }
     if (f.subs.length) {
       const flags = seFlags(r);
-      if (!flags) return false;
-      if (!f.subs.some((v) => SUBS_PREDS[v](flags))) return false;
+      const scanned = seScanned(r);
+      const ok = f.subs.some((v) => {
+        if (v === "Not scanned") return !scanned;
+        return !!(flags && SUBS_PREDS[v](flags));
+      });
+      if (!ok) return false;
     }
     if (f.subsok.length) {
       const ok = seSubsOk(r) ? "yes" : "no";
@@ -276,7 +281,11 @@ function renderSeTable() {
 
     const e = seSubsEntry(r);
     let subsText = "";
-    if (e) subsText = e.error ? e.error : ((e.subs || []).join(", "));
+    if (!e || !e.scanned) {
+      subsText = "Not scanned";
+    } else {
+      subsText = e.error ? e.error : ((e.subs || []).join(", "));
+    }
     tr.appendChild(el("td", { class: "muted", text: subsText, title: subsText }));
 
     tr.appendChild(seBuildActions(r));
@@ -405,7 +414,7 @@ async function seScan() {
   btn.disabled = true;
   prog.hidden = false;
   try {
-    await postJSON("/api/subtitles/scan", "mode=changed");
+    await postJSON("/api/subtitles/scan", "mode=scan");
   } catch (e) {
     prog.hidden = true;
     btn.disabled = false;
