@@ -1,6 +1,4 @@
 # Build the image locally (on the NAS or a dev machine) instead of pulling it.
-# Same service definition as docker-compose.yml, but with `build: .`.
-#
 #   docker compose -f docker-compose.build.yml up -d --build
 services:
   jftools:
@@ -8,12 +6,10 @@ services:
     image: ghcr.io/opheophe/jftools:local
     container_name: jftools
     restart: unless-stopped
-    env_file: .env
     environment:
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
-      JFTOOLS_DATA_DIR: /data
+      PUID: 1000
+      PGID: 1000
     ports:
       - "8099:8099"
     volumes:
-      - ${JFTOOLS_DATA_PATH:-./data}:/data
+      - /Volume1/public/Docker/Configs/JFTools:/data

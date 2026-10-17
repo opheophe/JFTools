@@ -20,7 +20,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load .env for local development. No-op when env vars are already set (e.g. by
-# Docker's env_file), because load_dotenv does not override by default.
+# Docker's environment), because load_dotenv does not override by default.
 load_dotenv()
 
 
@@ -81,10 +81,10 @@ class Config:
 
         self._env_username = _env("JFTOOLS_USERNAME", "admin")
         self._env_password = _env("JFTOOLS_PASSWORD", "")
-        # When both are supplied explicitly, first-run setup is skipped.
-        self._env_creds_set = (
-            "JFTOOLS_USERNAME" in os.environ and "JFTOOLS_PASSWORD" in os.environ
-        )
+        # First-run setup is skipped only when a username AND a password are both
+        # supplied. An empty password (e.g. from an empty JFTOOLS_PASSWORD var in
+        # Docker) must not count as "set", otherwise login would be impossible.
+        self._env_creds_set = bool(self._env_username and self._env_password)
 
         self.secret_key = self._load_or_create_secret()
         self._settings = self._load_settings()

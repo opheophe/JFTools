@@ -1,23 +1,18 @@
 # Pull the prebuilt multi-arch image from GitHub Container Registry.
-# Recommended for the NAS: it only downloads, no build toolchain needed.
-#
-#   1. copy .env.example to .env and edit it
-#   2. docker compose pull
-#   3. docker compose up -d
+# Everything else (Jellyfin URL/API key, login, time zone, Radarr/Sonarr) is
+# configured on the Settings page after first launch.
 services:
   jftools:
     image: ghcr.io/opheophe/jftools:latest
     container_name: jftools
     restart: unless-stopped
-    env_file: .env
     environment:
-      # Own the data files as this user/group (match your NAS folder owner).
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
-      JFTOOLS_DATA_DIR: /data
+      # Owner of the data files. Change to match your NAS folder owner
+      # (find it over SSH with `id -u` / `id -g`).
+      PUID: 1000
+      PGID: 1000
     ports:
       - "8099:8099"
     volumes:
-      # Left side is the folder on the NAS/disk. Set JFTOOLS_DATA_PATH in .env
-      # (e.g. /volume1/docker/jftools) or edit it here. Defaults to ./data.
-      - ${JFTOOLS_DATA_PATH:-./data}:/data
+      # Change the left side to your data folder on the NAS.
+      - /Volume1/public/Docker/Configs/JFTools:/data

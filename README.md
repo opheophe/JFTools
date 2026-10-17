@@ -32,15 +32,15 @@ Actions. Pulling it needs no login.
 ```bash
 git clone https://github.com/opheophe/JFTools.git
 cd JFTools
-cp .env.example .env      # then edit .env (see Configuration below)
 docker compose pull
 docker compose up -d
 ```
 
 Open `http://<host>:8099` and follow the first-run setup, then set your Jellyfin
-URL and API key on the Settings page (or prefill them in `.env`).
+URL and API key on the Settings page.
 
-The included `docker-compose.yml`:
+The included `docker-compose.yml` is intentionally minimal — everything else is
+configured in-app:
 
 ```yaml
 services:
@@ -48,20 +48,19 @@ services:
     image: ghcr.io/opheophe/jftools:latest
     container_name: jftools
     restart: unless-stopped
-    env_file: .env
     environment:
-      PUID: ${PUID:-1000}      # own the data files as this user/group
-      PGID: ${PGID:-1000}
-      JFTOOLS_DATA_DIR: /data
+      PUID: 1000     # owner of the data files (change to your NAS folder owner)
+      PGID: 1000
     ports:
       - "8099:8099"
     volumes:
-      - ${JFTOOLS_DATA_PATH:-./data}:/data   # host folder -> container data dir
+      - /path/to/jftools/data:/data   # change to your NAS data folder
 ```
 
 Pin a specific version instead of `latest` (e.g. `ghcr.io/opheophe/jftools:1.2.3`)
-for reproducible deployments. The compose file mounts `${JFTOOLS_DATA_PATH}`
-(default `./data`) to `/data` and runs as `PUID:PGID`. See **Data & permissions**.
+for reproducible deployments. The container starts as root only to align its
+internal user with `PUID:PGID` and `chown` the data folder, then drops privileges
+with `gosu` before running the app. See **Data & permissions**.
 
 ### Tags
 
@@ -79,15 +78,12 @@ reproducible deployments.
 
 TerraMaster TOS ships **Docker Manager** and SSH access.
 
-1. Copy the project onto the NAS (or just copy `docker-compose.yml` and
-   `.env`).
-2. Create `.env` from `.env.example`. Set `JFTOOLS_DATA_PATH` to a real NAS
-   folder, e.g. `/volume1/docker/jftools`, and set `PUID`/`PGID` to the owner of
-   that folder (see **Data & permissions**).
+1. Copy `docker-compose.yml` onto the NAS.
+2. Edit the `volumes` path to a real NAS folder, e.g. `/Volume1/public/Docker/Configs/JFTools`,
+   and set `PUID`/`PGID` to the owner of that folder (`id -u` / `id -g` over SSH).
 3. In **Docker Manager → Project/Compose**, import `docker-compose.yml`, or over
    SSH run:
    ```bash
-   cd JFTools
    docker compose pull && docker compose up -d
    ```
 4. Open `http://<nas-ip>:8099`.
@@ -100,9 +96,12 @@ docker compose -f docker-compose.build.yml up -d --build
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set real values. Values in `.env` are the
-**initial defaults**; anything changed later on the Settings page is persisted
-to `${JFTOOLS_DATA_DIR}/config.json` and takes precedence.
+In Docker, configure everything on the **Settings page** in the web UI; values
+are persisted to the data directory and take precedence. You can also prefill
+any of the variables below by adding them to `environment:` in the compose file.
+
+For **local development** (no Docker), copy `.env.example` to `.env` to prefill
+values.
 
 | Variable | Description |
 | --- | --- |
@@ -114,8 +113,7 @@ to `${JFTOOLS_DATA_DIR}/config.json` and takes precedence.
 | `JFTOOLS_DATA_DIR` | Where settings/state are persisted (`/data` in Docker). |
 | `JFTOOLS_RADARR_URL` / `JFTOOLS_SONARR_URL` | Default Radarr/Sonarr URLs for Movie Match's "Open" links. |
 | `JFTOOLS_TIMEZONE` / `TZ` | Time zone for logs and scheduled jobs (default `Europe/Stockholm`). |
-| `PUID` / `PGID` | Container user/group that owns the data files (Docker only). |
-| `JFTOOLS_DATA_PATH` | Host folder bind-mounted to `/data` (Docker only). |
+| `PUID` / `PGID` | Container user/group that owns the data files. Set in `docker-compose.yml`. |
 | `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
 
 ## Data & permissions
@@ -124,8 +122,8 @@ All runtime state lives in the data directory (`/data` in the container):
 `config.json` (Jellyfin connection + login hash), `.secret_key`, `schedules.json`,
 `users.json`, `libraries.json`, `jellyfin_id.json`, and `logs/`.
 
-- **Bind mount:** set `JFTOOLS_DATA_PATH` to a NAS folder. The container starts as
-  root only to align its internal user with `PUID`/`PGID` and `chown` the data
+- **Bind mount:** point the `volumes` path at a NAS folder. The container starts
+  as root only to align its internal user with `PUID`/`PGID` and `chown` the data
   folder, then drops privileges with `gosu` before running the app. Set
   `PUID`/`PGID` to the folder's owner (`id -u` / `id -g` over SSH) to avoid
   permission errors.
