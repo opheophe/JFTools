@@ -454,9 +454,66 @@ async function checkUpdateDot() {
   }
 }
 
+// ---- collapsible cards (shared by every page) -------------------------------
+
+const CARDS_KEY = "jftools.cards";
+
+function loadCardState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(CARDS_KEY));
+    return s && typeof s === "object" ? s : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveCardState(state) {
+  try { localStorage.setItem(CARDS_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+// Clicking a card's title collapses/expands it. The collapsed state is saved
+// per page + card (card id when present, otherwise its document order).
+function initCollapsibleCards() {
+  const page = window.location.pathname;
+  const state = loadCardState();
+
+  document.querySelectorAll("section.card").forEach((card, i) => {
+    const header = card.querySelector(":scope > h2");
+    if (!header) return;
+
+    const storeKey = page + "|" + (card.id || "idx" + i);
+    const collapsed = !!state[storeKey];
+
+    const apply = (on) => {
+      card.classList.toggle("collapsed", on);
+      header.setAttribute("aria-expanded", on ? "false" : "true");
+    };
+    apply(collapsed);
+
+    header.setAttribute("role", "button");
+    header.setAttribute("tabindex", "0");
+
+    const toggle = () => {
+      const now = !card.classList.contains("collapsed");
+      apply(now);
+      if (now) state[storeKey] = 1; else delete state[storeKey];
+      saveCardState(state);
+    };
+
+    header.addEventListener("click", toggle);
+    header.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   highlightNav();
   bindSettings();
+  initCollapsibleCards();
   window.addEventListener("resize", hidePopup);
   window.addEventListener("scroll", hidePopup, true);
   checkUpdateDot();
