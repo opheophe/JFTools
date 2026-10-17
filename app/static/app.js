@@ -376,13 +376,14 @@ function bindPathMaps() {
 
     testBtn.addEventListener("click", async () => {
       const path = fromInput.value.trim();
-      if (!path) { testOut.textContent = "Set a Jellyfin path first."; return; }
+      const to = toInput.value.trim();
+      if (!path && !to) { testOut.textContent = "Fill in a path first."; return; }
       testOut.textContent = "…";
       try {
         const resp = await fetch("/api/paths/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: path }),
+          body: JSON.stringify({ path: path, to: to }),
         });
         if (resp.status === 401) { window.location.href = "/login"; return; }
         const d = await resp.json();

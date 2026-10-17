@@ -296,17 +296,21 @@ async def paths_test(request: Request, user: str = Depends(require_login)):
     except Exception:
         data = {}
     path = str((data or {}).get("path") or "").strip()
-    if not path:
+    to = str((data or {}).get("to") or "").strip()
+    if not path and not to:
         return JSONResponse({"ok": False, "error": "No path supplied."}, status_code=400)
 
-    resolved = resolve_path(path, config.settings.path_maps)
-    result = {"ok": True, "path": path, "resolved": resolved}
+    # If the row already has a local path, test that directly (it's what the
+    # user is trying to reach). Otherwise resolve the Jellyfin path through the
+    # saved mappings.
+    target = to if to else resolve_path(path, config.settings.path_maps)
+    result = {"ok": True, "path": path or to, "resolved": target}
     try:
-        st = os.stat(resolved)
+        os.stat(target)
         result["exists"] = True
-        result["is_dir"] = os.path.isdir(resolved)
-        result["readable"] = os.access(resolved, os.R_OK)
-        result["writable"] = os.access(resolved, os.W_OK)
+        result["is_dir"] = os.path.isdir(target)
+        result["readable"] = os.access(target, os.R_OK)
+        result["writable"] = os.access(target, os.W_OK)
     except OSError:
         result["exists"] = False
         result["is_dir"] = False
