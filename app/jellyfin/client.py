@@ -64,16 +64,30 @@ class JellyfinClient:
         if not self.api_key:
             raise JellyfinError("Jellyfin API key is not configured.")
 
+    def _transport_error(self, exc: httpx.HTTPError) -> JellyfinError:
+        """Turn a low-level httpx error into an actionable JellyfinError."""
+        if isinstance(exc, httpx.ConnectError):
+            return JellyfinError(
+                f"Could not connect to Jellyfin at {self.base_url}. "
+                "Check the URL and that the server is running."
+            )
+        if isinstance(exc, httpx.TimeoutException):
+            return JellyfinError(f"Jellyfin request timed out ({self.base_url}).")
+        return JellyfinError(f"Jellyfin request failed ({self.base_url}): {exc}")
+
     async def _get(self, path: str, params: dict | None = None) -> dict:
         self._check()
         client, close = self._use()
         try:
             for attempt in range(_RETRY_ATTEMPTS):
-                resp = await client.get(
-                    self.base_url + path,
-                    headers=self._headers(),
-                    params=params,
-                )
+                try:
+                    resp = await client.get(
+                        self.base_url + path,
+                        headers=self._headers(),
+                        params=params,
+                    )
+                except httpx.HTTPError as exc:
+                    raise self._transport_error(exc)
                 if resp.status_code == 401:
                     raise JellyfinError("Unauthorized — check the Jellyfin API key.")
                 if resp.status_code >= 400:
@@ -97,6 +111,8 @@ class JellyfinClient:
                 headers=self._headers(),
                 json=json,
             )
+        except httpx.HTTPError as exc:
+            raise self._transport_error(exc)
         finally:
             if close:
                 await client.aclose()
@@ -122,6 +138,8 @@ class JellyfinClient:
                 headers=self._headers(with_token=False),
                 json={"Username": username, "Pw": password},
             )
+        except httpx.HTTPError as exc:
+            raise self._transport_error(exc)
         finally:
             if close:
                 await client.aclose()
@@ -214,6 +232,8 @@ class JellyfinClient:
                 headers=headers,
                 params=params,
             )
+        except httpx.HTTPError as exc:
+            raise self._transport_error(exc)
         finally:
             if close:
                 await client.aclose()

@@ -212,3 +212,30 @@ async def test_get_raises_after_transient_retries_exhausted(monkeypatch):
 
     assert calls["n"] == client_module._RETRY_ATTEMPTS
 
+
+def test_transport_error_connect_includes_url():
+    client = JellyfinClient("http://x:8096", "key")
+    err = client._transport_error(httpx.ConnectError("All connection attempts failed"))
+    msg = str(err)
+    assert "http://x:8096" in msg
+    assert "Could not connect" in msg
+    assert "server is running" in msg
+
+
+def test_transport_error_timeout_includes_url():
+    client = JellyfinClient("http://x:8096", "key")
+    err = client._transport_error(httpx.ConnectTimeout("timed out"))
+    msg = str(err)
+    assert "http://x:8096" in msg
+    assert "timed out" in msg
+
+
+async def test_get_translates_connect_error():
+    class BoomTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            raise httpx.ConnectError("All connection attempts failed")
+
+    client = JellyfinClient("http://x:8096", "key", transport=BoomTransport())
+    with pytest.raises(JellyfinError, match="Could not connect to Jellyfin at http://x:8096"):
+        await client.get_system_info()
+
