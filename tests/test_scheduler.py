@@ -91,3 +91,9 @@ def test_refresh_users_is_not_a_scheduler_operation():
     assert "refresh_users" not in sch._OP_BY_ID
     assert "refresh_users" not in sch._DEFAULT_SCHEDULES
     assert "refresh_users" not in sch._ACTIVE_BY_DEFAULT
+
+
+def test_check_updates_runs_hourly_by_default():
+    assert "check_updates" in sch._OP_BY_ID
+    assert sch._DEFAULT_SCHEDULES["check_updates"] == {"kind": "interval", "minutes": 60}
+    assert "check_updates" in sch._ACTIVE_BY_DEFAULT

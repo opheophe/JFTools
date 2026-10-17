@@ -1,6 +1,7 @@
 """JFTools web dashboard application."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
@@ -10,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from .about import router as about_router
+from .about import check_for_updates, router as about_router
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError, close_shared_client, get_client
@@ -26,6 +27,7 @@ from .web import BASE_DIR, require_login, templates
 @asynccontextmanager
 async def lifespan(app):
     start_scheduler()
+    asyncio.create_task(check_for_updates())
     yield
     shutdown_scheduler()
     await close_shared_client()

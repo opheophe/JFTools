@@ -58,6 +58,12 @@ async def _op_refresh_libraries() -> None:
     await _libraries_run_fetch()
 
 
+async def _op_check_updates() -> None:
+    from .about import check_for_updates
+
+    await check_for_updates()
+
+
 OPERATIONS = [
     {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
      "description": "Fetch all media items and re-score their name/year match against Jellyfin."},
@@ -69,6 +75,8 @@ OPERATIONS = [
      "description": "Reset Movie Match — removes saved Ok marks, fetched rows and last-sync time."},
     {"id": "refresh_libraries", "label": "Refresh libraries", "tab": "Jellyfin", "handler": _op_refresh_libraries,
      "description": "Refresh the cached library list from Jellyfin."},
+    {"id": "check_updates", "label": "Check for updates", "tab": "System", "handler": _op_check_updates,
+     "description": "Query GitHub for the latest JFTools release."},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
 OPERATIONS_PUBLIC = [
@@ -85,8 +93,9 @@ _DEFAULT_SCHEDULES = {
     "clear_logs": {"kind": "cron", "hour": 0, "minute": 0},
     "clear_cache": {"kind": "interval", "minutes": 720},
     "refresh_libraries": {"kind": "interval", "minutes": 30},
+    "check_updates": {"kind": "interval", "minutes": 60},
 }
-_ACTIVE_BY_DEFAULT = {"refresh_libraries"}
+_ACTIVE_BY_DEFAULT = {"refresh_libraries", "check_updates"}
 
 # ---- persistence ------------------------------------------------------------
 

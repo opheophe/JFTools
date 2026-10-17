@@ -58,11 +58,12 @@ def _newer(latest: str, current: str) -> bool:
     return _parse_version(latest) > _parse_version(current)
 
 
-async def _latest_release() -> dict | None:
-    now = time.time()
-    cached = _latest_cache["data"]
-    if isinstance(cached, dict) and now - float(_latest_cache["ts"]) <= _CACHE_TTL:
-        return cached
+async def check_for_updates() -> dict | None:
+    """Fetch the latest release now and update the cache.
+
+    Failures are swallowed (the previous value, if any, is kept) so a transient
+    GitHub outage doesn't raise through the scheduler, startup, or the UI.
+    """
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             resp = await client.get(
@@ -71,10 +72,19 @@ async def _latest_release() -> dict | None:
             resp.raise_for_status()
             _latest_cache["data"] = resp.json()
     except Exception:
-        _latest_cache["data"] = cached if isinstance(cached, dict) else None
-    _latest_cache["ts"] = now
+        pass
+    _latest_cache["ts"] = time.time()
     data = _latest_cache["data"]
     return data if isinstance(data, dict) else None
+
+
+async def _latest_release() -> dict | None:
+    """Return the cached latest release, refreshing it when stale."""
+    now = time.time()
+    cached = _latest_cache["data"]
+    if isinstance(cached, dict) and now - float(_latest_cache["ts"]) <= _CACHE_TTL:
+        return cached
+    return await check_for_updates()
 
 
 async def _about_payload() -> dict:
@@ -105,4 +115,10 @@ async def about_page(request: Request, user: str = Depends(require_login)):
 
 @router.get("/api/about")
 async def about_data(request: Request, user: str = Depends(require_login)):
+    return JSONResponse(await _about_payload())
+
+
+@router.get("/api/about/refresh")
+async def about_refresh(request: Request, user: str = Depends(require_login)):
+    await check_for_updates()
     return JSONResponse(await _about_payload())

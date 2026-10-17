@@ -2,7 +2,7 @@
 
 async function aboutLoad() {
   try {
-    const d = await getJSON("/api/about");
+    const d = await getJSON("/api/about/refresh");
     document.getElementById("about-version").textContent = d.version ? "v" + d.version : "—";
 
     const latest = document.getElementById("about-latest");
