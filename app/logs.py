@@ -20,9 +20,6 @@ from .web import require_login, templates
 LOG_DIR = config.data_dir / "logs"
 MAX_FILES_PER_TAB = 10
 
-# Feature tabs that have their own log stream.
-TABS = ("Jellyfin", "Movie Match")
-
 router = APIRouter()
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9 _-]")

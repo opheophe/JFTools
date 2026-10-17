@@ -1,5 +1,18 @@
 "use strict";
 
+// Silences "Uncaught (in promise) TypeError: NetworkError …" console noise the
+// browser emits when it aborts an in-flight fetch on refresh/navigation. Real
+// errors are already caught and surfaced by their callers, so only abort /
+// network-error rejections (which have no meaningful handler in that case) are
+// swallowed here.
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  const msg = String((r && r.message) || r || "");
+  if (r && (r.name === "AbortError" || /networkerror/i.test(msg))) {
+    e.preventDefault();
+  }
+});
+
 function el(tag, attrs, children) {
   const node = document.createElement(tag);
   if (attrs) {
