@@ -338,6 +338,8 @@ section.card { margin-top: 1.25rem; }
   padding: 0.75rem; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; overflow-y: auto;
 }
+.log-content .log-warn { color: var(--warn); }
+.log-content .log-error { color: var(--danger); }
 
 /* Scheduler tab */
 .sch-fields { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: flex-end; }

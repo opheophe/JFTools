@@ -8,6 +8,23 @@ function fmtSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(1) + " MB";
 }
 
+// Extract the log level keyword from a line ("2026-10-17 12:34:56  INFO  …").
+function logLevel(line) {
+  const m = line.match(/^\S+\s+\S+\s+([A-Z]+)/);
+  return m ? m[1] : "";
+}
+
+function renderLogContent(content) {
+  const pre = document.getElementById("log-content");
+  pre.innerHTML = "";
+  (content || "").split("\n").forEach((line) => {
+    const lvl = logLevel(line);
+    const cls = (lvl === "ERROR" || lvl === "FATAL") ? "log-error"
+      : (lvl === "WARN" || lvl === "WARNING") ? "log-warn" : "";
+    pre.appendChild(el("span", { class: cls, text: line + "\n" }));
+  });
+}
+
 async function loadLogs() {
   const list = document.getElementById("logs-list");
   try {
@@ -41,9 +58,9 @@ async function inspectLog(name) {
   dl.href = "/api/logs/" + encodeURIComponent(name) + "/download";
   try {
     const data = await getJSON("/api/logs/" + encodeURIComponent(name));
-    document.getElementById("log-content").textContent = data.ok
+    renderLogContent(data.ok
       ? (data.content || "(empty)")
-      : (data.error || "Error loading log.");
+      : (data.error || "Error loading log."));
   } catch (err) {
     document.getElementById("log-content").textContent = String(err);
   }

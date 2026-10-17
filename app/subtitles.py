@@ -472,6 +472,11 @@ async def run_scan(mode: str) -> None:
                     _state["files"][key] = entry
                     done += 1
                     _fetch["scanned"] = done
+                    if entry.get("error"):
+                        log("Search", "WARN", f"{entry['file']}: {entry['error']}")
+                    else:
+                        summary = ", ".join(entry.get("subs") or []) or "no subs"
+                        log("Search", "INFO", f"{entry['file']}: {summary}")
             finally:
                 # On abort (or completion) stop queueing probes and drop pending
                 # work without waiting for it; in-flight ffprobe calls finish on
@@ -484,7 +489,11 @@ async def run_scan(mode: str) -> None:
             _state["change_scan_at"] = time.time()
         _save_state()
         _fetch["status"] = "done"
-        log("Search", "INFO", f"Subtitle {mode} scan complete: {len(to_scan)} probed")
+        log(
+            "Search",
+            "INFO",
+            f"Subtitle {mode} scan complete: {len(to_scan)} probed, {len(rows) - len(to_scan)} skipped",
+        )
     except asyncio.CancelledError:
         _fetch["status"] = "cancelled"
         _fetch["error"] = None
