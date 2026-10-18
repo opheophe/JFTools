@@ -336,7 +336,9 @@ section.card { margin-top: 1.25rem; }
 #id-table th:nth-child(1), #id-table td:nth-child(1) { width: 80px; }
 #id-table th:nth-child(4), #id-table td:nth-child(4) { width: 90px; }
 #id-table th:nth-child(5), #id-table td:nth-child(5) { width: 100px; }
-#id-table th:nth-child(8), #id-table td:nth-child(8) { width: 280px; }
+/* A compact column: the pills wrap into a second line instead of reserving a
+   whole line's worth of width. */
+#id-table th:nth-child(8), #id-table td:nth-child(8) { width: 220px; }
 #id-table td.id-actions { overflow: visible; }
 
 /* Search tab */
@@ -346,16 +348,12 @@ section.card { margin-top: 1.25rem; }
 #se-table th:nth-child(1), #se-table td:nth-child(1) { width: 80px; }
 #se-table th:nth-child(4), #se-table td:nth-child(4) { width: 150px; }
 #se-table th:nth-child(5), #se-table td:nth-child(5) { width: 90px; }
-#se-table th:nth-child(6), #se-table td:nth-child(6) { width: 240px; }
+/* A share of the width, not a fixed 240px: the user list shrinks with the
+   table instead of keeping its size while the other columns give theirs up. */
+#se-table th:nth-child(6), #se-table td:nth-child(6) { width: 12%; }
+/* A compact column: two pills per line, Open/Sync then Play/Subtitles. */
+#se-table th:nth-child(9), #se-table td:nth-child(9) { width: 190px; }
 #se-table td.id-actions { overflow: visible; }
-
-/* The action pills want a whole line's worth of column. Ask for that much only
-   when the window can spare it - below that the column takes its share of the
-   width and the pills wrap, so they never run past the table's right edge. */
-@media (min-width: 1400px) {
-  #id-table th:nth-child(8), #id-table td:nth-child(8) { width: 372px; }
-  #se-table th:nth-child(9), #se-table td:nth-child(9) { width: 290px; }
-}
 #se-table th.sortable { cursor: pointer; user-select: none; }
 #se-table th.sortable:hover { color: var(--text); }
 #se-table th .sort-arrow { margin-left: 0.3rem; color: var(--accent); }
