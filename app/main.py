@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from .about import check_for_updates, router as about_router
@@ -25,7 +24,7 @@ from .paths import resolve_path
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
 from .subtitles import router as subtitles_router
 from .users import router as users_router
-from .web import BASE_DIR, require_login, templates
+from .web import BASE_DIR, RevalidatedStaticFiles, require_login, templates
 
 
 @asynccontextmanager
@@ -49,8 +48,26 @@ app.add_middleware(
     same_site="lax",
 )
 
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-app.mount("/resources", StaticFiles(directory=str(BASE_DIR.parent / "resources")), name="resources")
+app.mount("/static", RevalidatedStaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount(
+    "/resources",
+    RevalidatedStaticFiles(directory=str(BASE_DIR.parent / "resources")),
+    name="resources",
+)
+
+
+@app.middleware("http")
+async def _pages_are_not_cached(request: Request, call_next):
+    """Never let a browser keep a rendered page.
+
+    A cached page served next to a stale script (or the reverse) is how the
+    Settings form ends up posting natively instead of through fetch, which
+    reloads the page and saves nothing.
+    """
+    response = await call_next(request)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 app.include_router(about_router)
 app.include_router(files_router)
@@ -227,6 +244,19 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
     )
 
 
+def _saved(request: Request, message: str) -> Response:
+    """Reply to a settings save.
+
+    The Settings page's scripts POST with fetch and render the JSON reply. A
+    plain form submit — which happens when the browser is running a stale or
+    missing app.js — is redirected back to the page instead of being dropped
+    into a raw JSON view, so the values still save.
+    """
+    if "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse("/settings", status_code=303)
+    return JSONResponse({"ok": True, "message": message})
+
+
 @app.post("/settings")
 async def settings_save(
     request: Request,
@@ -237,7 +267,7 @@ async def settings_save(
     api_key = jellyfin_api_key.strip() or config.settings.jellyfin_api_key
     config.save_settings(jellyfin_url, api_key)
     log("Jellyfin", "INFO", "Jellyfin settings saved")
-    return JSONResponse({"ok": True, "message": "Jellyfin settings saved."})
+    return _saved(request, "Jellyfin settings saved.")
 
 
 @app.post("/settings/auth")
@@ -253,7 +283,7 @@ async def settings_auth_save(
     config.save_auth(username, new_password)
     request.session["user"] = username
     log("Jellyfin", "INFO", "Local login settings saved")
-    return JSONResponse({"ok": True, "message": "Login settings saved."})
+    return _saved(request, "Login settings saved.")
 
 
 @app.post("/settings/integrations")
@@ -265,7 +295,7 @@ async def settings_integrations_save(
 ):
     config.save_integrations(radarr_url, sonarr_url)
     log("Jellyfin", "INFO", "Integration links saved")
-    return JSONResponse({"ok": True, "message": "Integrations saved."})
+    return _saved(request, "Integrations saved.")
 
 
 @app.post("/settings/timezone")
@@ -284,7 +314,7 @@ async def settings_timezone_save(
     config.save_timezone(tz)
     set_timezone(tz)
     log("Jellyfin", "INFO", f"Time zone set to {tz}")
-    return JSONResponse({"ok": True, "message": "Time zone saved."})
+    return _saved(request, "Time zone saved.")
 
 
 @app.post("/settings/paths")
@@ -309,7 +339,7 @@ async def settings_files_save(
     config.save_file_mgmt(enabled.strip().lower() in ("1", "true", "yes", "on"))
     state = "enabled" if config.settings.file_mgmt else "disabled"
     log("Jellyfin", "INFO", f"File management {state}")
-    return JSONResponse({"ok": True, "message": f"File management {state}."})
+    return _saved(request, f"File management {state}.")
 
 
 @app.post("/settings/opensubtitles")
@@ -337,7 +367,7 @@ async def settings_opensubtitles_save(
 
     invalidate()
     log("Jellyfin", "INFO", "OpenSubtitles settings saved")
-    return JSONResponse({"ok": True, "message": "OpenSubtitles settings saved."})
+    return _saved(request, "OpenSubtitles settings saved.")
 
 
 @app.post("/api/paths/test")

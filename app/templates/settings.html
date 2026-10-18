@@ -7,7 +7,7 @@
 <section class="card">
   <h2>Jellyfin connection</h2>
   <p class="muted">Saved settings override the environment defaults.</p>
-  <form id="jellyfin-form">
+  <form id="jellyfin-form" method="post" action="/settings">
     <label for="jellyfin_url">Jellyfin URL</label>
     <input type="text" id="jellyfin_url" name="jellyfin_url" value="{{ url }}"
            placeholder="http://192.168.1.50:8096">
@@ -30,7 +30,7 @@
 <section class="card">
   <h2>Integrations</h2>
   <p class="muted">URL prefixes used by the Movie Match tab to open Radarr/Sonarr searches.</p>
-  <form id="integrations-form">
+  <form id="integrations-form" method="post" action="/settings/integrations">
     <label for="radarr_url">Radarr URL</label>
     <input type="text" id="radarr_url" name="radarr_url" value="{{ radarr_url }}"
            placeholder="http://host:7878/add/new?term=">
@@ -49,7 +49,7 @@
 <section class="card">
   <h2>Time zone</h2>
   <p class="muted">Used for log timestamps and the Scheduler. Auto-handles summer/winter time.</p>
-  <form id="timezone-form">
+  <form id="timezone-form" method="post" action="/settings/timezone">
     <label for="timezone">Time zone</label>
     <input type="text" id="timezone" name="timezone" list="tz-options" value="{{ timezone }}">
     <datalist id="tz-options">
@@ -97,7 +97,7 @@
 <section class="card">
   <h2>File management</h2>
   <p class="muted">Enables rename and delete actions on the <strong>Files</strong> browser. Off by default — deleting is permanent and cannot be undone.</p>
-  <form id="files-form">
+  <form id="files-form" method="post" action="/settings/files">
     <label class="switch">
       <input type="checkbox" id="file_mgmt" name="enabled" value="on" {% if file_mgmt %}checked{% endif %}>
       <span class="switch-track"></span>
@@ -113,7 +113,7 @@
 <section class="card">
   <h2>OpenSubtitles</h2>
   <p class="muted">Used by the Search/Movie Match <strong>Actions → Search subs</strong> to find and download missing subtitles from opensubtitles.com. Downloads are saved next to the video and require <strong>File management</strong> (above) to be on.</p>
-  <form id="opensubtitles-form">
+  <form id="opensubtitles-form" method="post" action="/settings/opensubtitles">
     <label for="opensubtitles_api_key">API key</label>
     <input type="password" id="opensubtitles_api_key" name="opensubtitles_api_key" value=""
            placeholder="{{ 'A key is already set' if os_api_key_is_set else 'opensubtitles.com → Consumers' }}"
@@ -145,7 +145,7 @@
 <section class="card">
   <h2>Local login</h2>
   <p class="muted">This username/password only works when connecting from your local network (localhost / LAN). Jellyfin admin accounts can always log in from anywhere.</p>
-  <form id="auth-form">
+  <form id="auth-form" method="post" action="/settings/auth">
     <label for="username">Username</label>
     <input type="text" id="username" name="username" value="{{ username }}"
            autocomplete="username">
