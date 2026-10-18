@@ -16,6 +16,7 @@ const plRate = document.getElementById("pl-rate");
 const plGoto = document.getElementById("pl-goto");
 const plPrepare = document.getElementById("pl-prepare");
 const plOverlay = document.getElementById("pl-overlay");
+const plCaption = document.getElementById("pl-caption");
 
 const PL_AUTOPLAY_MSG = "Autoplay was blocked — press ▶ to start.";
 
@@ -27,6 +28,7 @@ let plPreparePoll = null;
 let plDead = false;
 let plAudioChecked = false;
 let plPlayTries = 0;    // rejected play() attempts, for the retry ladder
+let plCaptionText = null;
 
 function plEl(tag, props) {
   const node = document.createElement(tag);
@@ -114,6 +116,46 @@ function plParseTime(text) {
 
 // ---- subtitle tracks ---------------------------------------------------------
 
+// Cues are drawn here rather than left to the browser. Browsers size, place and
+// even refuse to draw the native caption layer on their own, and the whole point
+// of this window is to see the text.
+function plRenderCues() {
+  if (!plCaption) return;
+  const node = plTrackEls[plCurrent];
+  const track = node && node.track;
+  let text = "";
+  if (track && track.mode !== "disabled" && track.activeCues && !plNativeShowing()) {
+    text = Array.from(track.activeCues).map((c) => c.text || "").join("\n");
+  }
+  if (text === plCaptionText) return;
+  plCaptionText = text;
+  plCaption.textContent = text;
+  plCaption.hidden = !text;
+}
+
+// If the viewer turns captions on from the browser's own menu, its renderer
+// takes over and ours would double up.
+function plNativeShowing() {
+  return plTrackEls.some((n) => n.track && n.track.mode === "showing");
+}
+
+function plNoteCues(index) {
+  if (index !== plCurrent) return;
+  const node = plTrackEls[index];
+  const track = node && node.track;
+  if (!track || !track.cues) return;
+  const label = (plTracks[index] || {}).label || "That track";
+  if (!track.cues.length) {
+    plSetStatus("“" + label + "” holds no cues, so there is nothing to show.", "warn");
+  } else if (plStatus.textContent !== PL_AUTOPLAY_MSG && !plPrepared) {
+    const n = track.cues.length;
+    plSetStatus((n === 1 ? "1 cue" : n + " cues") + " · " + label);
+  }
+  // A track that finishes loading while the video sits still does not always
+  // produce a cuechange, so draw whatever is current now.
+  plRenderCues();
+}
+
 function plBuildTrackSelect(list) {
   plTracks = list.slice();
   plTrackEls = [];
@@ -134,6 +176,12 @@ function plBuildTrackSelect(list) {
       label: t.label,
       srclang: (t.lang && t.lang.length <= 3) ? t.lang.toLowerCase() : "und",
     });
+    track.addEventListener("cuechange", plRenderCues);
+    track.addEventListener("load", () => plNoteCues(i));
+    track.addEventListener("error", () => {
+      if (plTrackEls.indexOf(track) !== plCurrent) return;
+      plSetStatus("The browser could not load that subtitle track.", "error");
+    });
     plVideo.appendChild(track);
     plTrackEls.push(track);
   });
@@ -143,15 +191,27 @@ function plApplyModes(index) {
   plTrackEls.forEach((node, i) => {
     const textTrack = node.track;
     if (!textTrack) return;
-    textTrack.mode = (i === index && plTracks[i] && plTracks[i].playable) ? "showing" : "disabled";
+    // "hidden" still loads the cues and keeps activeCues current — the browser
+    // just doesn't draw them, and plRenderCues does.
+    textTrack.mode = (i === index && plTracks[i] && plTracks[i].playable) ? "hidden" : "disabled";
   });
   plCurrent = index;
   plSubs.value = index >= 0 ? String(index) : "";
+  plRenderCues();
 }
 
-// The browser only fetches a <track> once its mode turns to showing, and a
-// failed fetch is easy to miss, so check the conversion respond first and show
-// the server's reason when a track can't be shown.
+// The browser's own caption menu can turn a track on behind our back; follow it.
+function plOnTracksChange() {
+  const showing = plTrackEls.findIndex((n) => n.track && n.track.mode === "showing");
+  if (showing >= 0 && showing !== plCurrent) {
+    plCurrent = showing;
+    plSubs.value = String(showing);
+  }
+  plRenderCues();
+}
+
+// A failed conversion is easy to miss, so ask the server for the WebVTT first
+// and show its reason when a track can't be shown.
 async function plChooseTrack(value) {
   if (value === "" || value === null) {
     plApplyModes(-1);
@@ -332,6 +392,10 @@ function plInit() {
   plVideo.addEventListener("timeupdate", plUpdateTime);
   plVideo.addEventListener("loadedmetadata", plUpdateTime);
   plVideo.addEventListener("durationchange", plUpdateTime);
+  plVideo.addEventListener("timeupdate", plRenderCues);
+  plVideo.addEventListener("seeked", plRenderCues);
+  plVideo.addEventListener("pause", plRenderCues);
+  plVideo.textTracks.addEventListener("change", plOnTracksChange);
   plVideo.addEventListener("canplay", plTryPlay);
   plVideo.addEventListener("play", () => plSetOverlay(false));
   plVideo.addEventListener("error", plOnVideoError);

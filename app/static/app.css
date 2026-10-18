@@ -475,6 +475,18 @@ td.fb-actions { white-space: nowrap; }
   color: #fff;
 }
 .play-overlay:hover { background: rgba(0, 0, 0, 0.75); }
+/* Cues are drawn by play.js rather than the browser: the native caption
+   renderer is sizeable, unstyleable and not always on. */
+.play-caption {
+  position: absolute; left: 50%; bottom: 3.4rem; transform: translateX(-50%);
+  max-width: 92%; padding: 0.35rem 0.8rem; border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72); color: #fff;
+  font-size: clamp(1rem, 2.6vw, 1.9rem); font-weight: 600; line-height: 1.3;
+  text-align: center; white-space: pre-line; overflow-wrap: break-word;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.play-caption[hidden] { display: none; }
 .play-bar {
   display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
   padding: 0.5rem 0.6rem; background: var(--panel); border: 1px solid var(--border);

@@ -67,6 +67,16 @@ def test_srt_to_vtt_strips_a_byte_order_mark():
     assert "\ufeff" not in vtt
 
 
+def test_srt_to_vtt_copes_with_out_of_spec_timestamps():
+    # Hours missing, a dot separator, and a two-digit millisecond field: a
+    # browser quietly drops cues it cannot parse, which looks like "no
+    # subtitles" rather than an error.
+    vtt = player.srt_to_vtt("1\n00:01,5 --> 00:03,25\nOdd one.\n")
+    assert "00:00:01.500 --> 00:00:03.250" in vtt
+    vtt = player.srt_to_vtt("1\n1:02:03.5 --> 1:02:04.75\nDotted.\n")
+    assert "01:02:03.500 --> 01:02:04.750" in vtt
+
+
 def test_read_text_falls_back_to_cp1252(tmp_path):
     path = tmp_path / "latin.srt"
     path.write_bytes("1\n00:00:01,000 --> 00:00:02,000\nCaf\xe9\n".encode("cp1252"))

@@ -139,13 +139,32 @@ def _read_text(path: str) -> str:
     return raw.decode("utf-8", "replace")
 
 
+# An SRT timestamp: hours are optional, the millisecond separator may be a dot.
+_SRT_TIME = re.compile(
+    r"(?:(?P<h>\d{1,3}):)?(?P<m>\d{1,2}):(?P<s>\d{2})[,.](?P<ms>\d{1,3})"
+)
+
+
+def _vtt_time(match: "re.Match[str]") -> str:
+    """One SRT timestamp as WebVTT wants it: always ``HH:MM:SS.mmm``."""
+    hours = int(match.group("h") or 0)
+    minutes = int(match.group("m"))
+    seconds = int(match.group("s"))
+    millis = match.group("ms")
+    if len(millis) == 1:
+        millis += "00"
+    elif len(millis) == 2:
+        millis += "0"
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis}"
+
+
 def srt_to_vtt(text: str) -> str:
     """Convert SubRip text to WebVTT (same cues, WebVTT header and timestamps)."""
     text = text.replace("\ufeff", "").replace("\r\n", "\n").replace("\r", "\n")
     lines = []
     for line in text.split("\n"):
         if "-->" in line:
-            line = re.sub(r"(\d{1,2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", line)
+            line = _SRT_TIME.sub(_vtt_time, line)
         lines.append(line)
     body = "\n".join(lines).strip("\n")
     return f"WEBVTT\n\n{body}\n"

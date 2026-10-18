@@ -281,10 +281,19 @@ but marked unavailable, since a browser cannot render them. **The best track is
 already selected when the window opens** — the external file in one of the
 default subtitle languages if there is one, otherwise the first usable track —
 so subtitles are visible without touching the selector; choose **Off** to hide
-them. The same player
-opens from the subtitle dialog: every track row has a **Play** button that
+them. The same player opens from the subtitle dialog: every track row has a
+**Play** button that
 starts the file with that track already selected. One player window is reused,
 so clicking Play again just re-loads it.
+
+**The player draws the cues itself** rather than leaving them to the browser's
+caption renderer, which sizes and places them on its own (and is not always on
+at all) — the text appears in a legible bar along the bottom of the video. The
+status line also reports what loaded, e.g. `2 cues · English — movie.en.srt`, or
+warns that a track holds no cues, so a file with nothing to show says so instead
+of looking identical to a player with subtitles switched off. Turning captions
+on from the browser's own menu still works: the built-in renderer takes over and
+the player's bar steps aside.
 
 Playback starts on its own. Browsers block unmuted autoplay on origins that
 have not earned it yet, so the player retries a few times and, if playback is
