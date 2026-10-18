@@ -15,7 +15,11 @@
       <span class="play-status muted" id="pl-status"></span>
     </div>
 
-    <video id="pl-video" class="play-video" controls preload="metadata" playsinline></video>
+    <div class="play-stage">
+      <video id="pl-video" class="play-video" controls preload="metadata" playsinline></video>
+      <button type="button" class="play-overlay" id="pl-overlay" hidden
+              title="Play">▶</button>
+    </div>
 
     <div class="play-bar">
       <span class="play-time" id="pl-time">0:00 / 0:00</span>

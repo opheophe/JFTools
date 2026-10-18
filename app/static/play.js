@@ -15,6 +15,9 @@ const plSubs = document.getElementById("pl-subs");
 const plRate = document.getElementById("pl-rate");
 const plGoto = document.getElementById("pl-goto");
 const plPrepare = document.getElementById("pl-prepare");
+const plOverlay = document.getElementById("pl-overlay");
+
+const PL_AUTOPLAY_MSG = "Autoplay was blocked — press ▶ to start.";
 
 let plTracks = [];      // track descriptors from /api/player/tracks
 let plTrackEls = [];    // matching <track> elements
@@ -23,6 +26,7 @@ let plPrepared = false; // streaming the remuxed copy?
 let plPreparePoll = null;
 let plDead = false;
 let plAudioChecked = false;
+let plPlayTries = 0;    // rejected play() attempts, for the retry ladder
 
 function plEl(tag, props) {
   const node = document.createElement(tag);
@@ -38,6 +42,39 @@ function plEnc(s) { return encodeURIComponent(s || ""); }
 function plSetStatus(text, kind) {
   plStatus.textContent = text || "";
   plStatus.className = "play-status" + (kind ? " " + kind : " muted");
+}
+
+// ---- autoplay ----------------------------------------------------------------
+
+function plSetOverlay(show) {
+  if (plOverlay) plOverlay.hidden = !show;
+}
+
+// Browsers block unmuted autoplay until the origin has earned it, and the
+// click that opened the window does not always count. Rather than leaving the
+// viewer staring at a paused frame, retry a few times and then offer a button.
+function plTryPlay() {
+  if (plDead) return;
+  if (!plVideo.paused) {
+    plSetOverlay(false);
+    return;
+  }
+  const attempt = plVideo.play();
+  if (!attempt || typeof attempt.then !== "function") return;
+  attempt.then(() => {
+    plSetOverlay(false);
+    if (plStatus.textContent === PL_AUTOPLAY_MSG) plSetStatus("");
+  }).catch(() => {
+    plPlayTries += 1;
+    if (plPlayTries < 4) {
+      setTimeout(plTryPlay, 500 * plPlayTries);
+      return;
+    }
+    plSetOverlay(true);
+    if (plStatus.textContent !== PL_AUTOPLAY_MSG && !plStatus.classList.contains("error")) {
+      plSetStatus(PL_AUTOPLAY_MSG, "warn");
+    }
+  });
 }
 
 function plStreamUrl(prepared) {
@@ -146,7 +183,8 @@ async function plChooseTrack(value) {
     plTrackEls[index].setAttribute("src", url);
   }
   plApplyModes(index);
-  plSetStatus(plPrepared ? "Playing the browser copy." : "");
+  if (plPrepared) plSetStatus("Playing the browser copy.");
+  else if (plStatus.textContent !== PL_AUTOPLAY_MSG) plSetStatus("");
 }
 
 async function plLoadTracks() {
@@ -179,7 +217,7 @@ function plSwitchToPrepared() {
       try { plVideo.currentTime = at; } catch (err) { /* ignore */ }
     }
     plApplyModes(plCurrent);
-    plVideo.play().catch(() => {});
+    plTryPlay();
   };
   plVideo.addEventListener("loadedmetadata", restore);
   plVideo.src = plStreamUrl(true);
@@ -270,6 +308,7 @@ async function plExplainFailure(message) {
 async function plOnVideoError() {
   if (plDead || plPrepared) return;
   plDead = true;
+  plSetOverlay(false);
   await plExplainFailure(
     "This browser can't play the file as it is (usually the container, video " +
       "or audio codec). Make a browser copy to remux it with ffmpeg."
@@ -288,12 +327,19 @@ function plInit() {
 
   plVideo.src = plStreamUrl(false);
   plVideo.load();
-  plVideo.play().catch(() => {}); // popups from a click are allowed to autoplay
+  plTryPlay();
 
   plVideo.addEventListener("timeupdate", plUpdateTime);
   plVideo.addEventListener("loadedmetadata", plUpdateTime);
   plVideo.addEventListener("durationchange", plUpdateTime);
+  plVideo.addEventListener("canplay", plTryPlay);
+  plVideo.addEventListener("play", () => plSetOverlay(false));
   plVideo.addEventListener("error", plOnVideoError);
+
+  // The click that opened the window is often the only user gesture we get, so
+  // the first one anywhere in here is a chance to start playback for real.
+  document.addEventListener("pointerdown", () => plTryPlay(), { once: true });
+  if (plOverlay) plOverlay.addEventListener("click", plTryPlay);
 
   // A container the browser can open but whose audio it cannot decode (AC3,
   // DTS, …) plays silently, with no error at all. Chrome counts decoded audio
@@ -356,8 +402,10 @@ function plInit() {
 
   plUpdateTime();
   plLoadTracks().then(() => {
-    if (!PL.track) return;
-    const index = plTracks.findIndex((t) => t.spec === PL.track);
+    // A track named in the link wins; otherwise show the best one so subtitles
+    // are visible without hunting through the selector.
+    let index = PL.track ? plTracks.findIndex((t) => t.spec === PL.track) : -1;
+    if (index < 0) index = plTracks.findIndex((t) => t.default && t.playable);
     if (index >= 0) plChooseTrack(String(index));
   });
 }

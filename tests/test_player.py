@@ -187,7 +187,6 @@ async def test_tracks_list_embedded_and_external(logged_in, media_root, monkeypa
     (media_root / "movie.en.srt").write_text(
         "1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8"
     )
-    monkeypatch.setattr(player, "_library_row", lambda path: {"path": path})
 
     async def fake_tracks(path):
         return (
@@ -212,14 +211,43 @@ async def test_tracks_list_embedded_and_external(logged_in, media_root, monkeypa
     assert data["tracks"][1]["playable"] is False
     assert data["tracks"][2]["playable"] is True
     assert data["tracks"][2]["label"] == "English — movie.en.srt"
+    # The English .srt is what should be showing when the window opens.
+    assert data["tracks"][2].get("default") is True
+    assert "default" not in data["tracks"][0]
+    assert "default" not in data["tracks"][1]
 
 
-async def test_tracks_route_needs_a_library_row(logged_in, media_root, monkeypatch):
-    video = _video(media_root, name="movie.mkv")
-    monkeypatch.setattr(player, "_library_row", lambda path: None)
+async def test_tracks_route_needs_a_reachable_video(logged_in, media_root):
     async with _client() as client:
-        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+        resp = await client.get(
+            "/api/player/tracks", params={"path": str(media_root / "gone.mkv")}
+        )
     assert resp.status_code == 404
+
+
+def test_pick_default_prefers_the_configured_languages(monkeypatch):
+    monkeypatch.setattr(
+        player, "_preferred_languages", lambda: ["en", "english", "sv", "swedish"]
+    )
+    tracks = [
+        {"kind": "internal", "lang": "Swedish", "forced": False, "playable": True},
+        {"kind": "external", "lang": "Swedish", "forced": False, "playable": True},
+        {"kind": "external", "lang": "English", "forced": False, "playable": True},
+    ]
+    assert player._pick_default(tracks) == 2
+
+
+def test_pick_default_skips_unplayable_tracks_and_falls_back(monkeypatch):
+    monkeypatch.setattr(player, "_preferred_languages", lambda: [])
+    tracks = [
+        {"kind": "internal", "lang": "English", "forced": False, "playable": False},
+        {"kind": "internal", "lang": "English", "forced": False, "playable": True},
+        {"kind": "external", "lang": "Korean", "forced": False, "playable": True},
+    ]
+    assert player._pick_default(tracks) == 2
+    assert player._pick_default(tracks[:2]) == 1
+    assert player._pick_default(tracks[:1]) == -1
+    assert player._pick_default([]) == -1
 
 
 # ---- browser copies ----------------------------------------------------------

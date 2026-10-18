@@ -277,10 +277,19 @@ box (`mm:ss` or `hh:mm:ss`), a speed selector and a **Subtitles** selector.
 Every subtitle track the scanner knows about is in that selector: embedded
 streams are extracted with ffmpeg, external `.srt`/`.vtt`/`.ass`/`.ssa` files
 are converted to WebVTT first. Embedded bitmap subtitles (PGS/DVD) are listed
-but marked unavailable, since a browser cannot render them. The same player
+but marked unavailable, since a browser cannot render them. **The best track is
+already selected when the window opens** — the external file in one of the
+default subtitle languages if there is one, otherwise the first usable track —
+so subtitles are visible without touching the selector; choose **Off** to hide
+them. The same player
 opens from the subtitle dialog: every track row has a **Play** button that
 starts the file with that track already selected. One player window is reused,
 so clicking Play again just re-loads it.
+
+Playback starts on its own. Browsers block unmuted autoplay on origins that
+have not earned it yet, so the player retries a few times and, if playback is
+still refused, shows a **▶** button over the video (and says why in the status
+line) — one click starts it.
 
 Playback is read-only, so it needs no File management toggle — only a login.
 Paths are resolved through **Media paths** and must land inside the browsable

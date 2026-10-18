@@ -30,8 +30,8 @@ from .files import _resolve, browser_roots
 from .logs import log
 from .subtitles import (
     _external_subtitles,
-    _library_row,
     _probe_subtitles,
+    _subtitle_lang_name,
     resolve_ffmpeg,
     resolve_ffprobe,
     subtitle_tracks_for,
@@ -416,15 +416,66 @@ async def play_page(
     )
 
 
+def _preferred_languages() -> list[str]:
+    """Language codes *and* display names the player should show first."""
+    raw = (config.settings.opensubtitles_languages or "en,sv")
+    out: list[str] = []
+    for code in (c.strip().lower() for c in raw.split(",")):
+        if not code:
+            continue
+        out.append(code)
+        name = _subtitle_lang_name(code)
+        if name and name.lower() not in out:
+            out.append(name.lower())
+    return out
+
+
+def _pick_default(tracks: list[dict]) -> int:
+    """Index of the track to show without being asked, or -1.
+
+    External subtitles first (those are the files the dialog downloads and
+    syncs), starting with the configured languages, then anything playable.
+    """
+    def first(pred) -> int:
+        for i, t in enumerate(tracks):
+            if t.get("playable") and pred(t):
+                return i
+        return -1
+
+    for pref in _preferred_languages():
+        found = first(
+            lambda t, p=pref: t["kind"] == "external"
+            and not t["forced"]
+            and (t.get("lang") or "").lower() == p
+        )
+        if found >= 0:
+            return found
+    for pred in (
+        lambda t: t["kind"] == "external" and not t["forced"] and not t.get("ai"),
+        lambda t: t["kind"] == "external" and not t["forced"],
+        lambda t: t["kind"] == "external",
+        lambda t: True,
+    ):
+        found = first(pred)
+        if found >= 0:
+            return found
+    return -1
+
+
 @router.get("/api/player/tracks")
 async def player_tracks(user: str = Depends(require_login), path: str = Query("")):
     """Every subtitle track for one library video, as the player should list it."""
     path = (path or "").strip()
     if not path:
         return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
-    if _library_row(path) is None:
+    if not _local_video(path):
         return JSONResponse(
-            {"ok": False, "error": "Not in the library list."}, status_code=404
+            {
+                "ok": False,
+                "error": "The video file is not reachable. Set the Media paths "
+                         "on the Settings page.",
+            },
+            status_code=404,
         )
 
     internal, external = await subtitle_tracks_for(path)
@@ -463,6 +514,10 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
             "forced": bool(e.get("forced")),
             "playable": True,
         })
+
+    default = _pick_default(tracks)
+    if default >= 0:
+        tracks[default]["default"] = True
 
     return JSONResponse({
         "ok": True,
