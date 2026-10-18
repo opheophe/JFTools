@@ -5,9 +5,10 @@
 // Opened from the row's "Subtitles" action. Searches OpenSubtitles for
 // the file (moviehash first, name fallback), lists the candidates, lists every
 // subtitle track already on the video, and lets the user download, delete or
-// re-sync one. Closing the dialog (click outside or Escape) re-probes the file
-// when something was downloaded or deleted. Pages reload their own data by
-// assigning `window.subdlRefresh`.
+// re-sync one. The "Search Hash / Filename / Jellyfin name" buttons re-run the
+// search one way instead of the default. Closing the dialog (click outside or
+// Escape) re-probes the file when something was downloaded or deleted. Pages
+// reload their own data by assigning `window.subdlRefresh`.
 
 const SUBDL_LANG_NAMES = {
   en: "English", sv: "Swedish", no: "Norwegian", nb: "Norwegian", nn: "Norwegian",
@@ -19,6 +20,22 @@ const SUBDL_LANG_NAMES = {
   he: "Hebrew", fa: "Persian", is: "Icelandic", sk: "Slovak", hr: "Croatian",
   sr: "Serbian", sl: "Slovenian", et: "Estonian", lv: "Latvian", lt: "Lithuanian",
   und: "Unknown",
+};
+
+// The search buttons the dialog offers. The server runs only the method that
+// was asked for; the default search (on open) tries the hash first and falls
+// back to the Jellyfin name.
+const SUBDL_METHODS = [
+  ["hash", "Search Hash"],
+  ["filename", "Search Filename"],
+  ["jellyfin", "Search Jellyfin name"],
+];
+
+const SUBDL_METHOD_LABELS = {
+  hash: "hash",
+  name: "name",
+  filename: "filename",
+  jellyfin: "Jellyfin name",
 };
 
 // Pages assign this to reload their subtitle data after a change.
@@ -122,7 +139,8 @@ function subdlRenderMeta(data) {
   metaEl.innerHTML = "";
   if (!data) return;
   const bits = [];
-  if (data.method) bits.push((data.method === "hash" ? "hash" : "name") + " search");
+  if (data.method) bits.push((SUBDL_METHOD_LABELS[data.method] || data.method) + " search");
+  if (data.query) bits.push("“" + data.query + "”");
   if (typeof data.total === "number") bits.push(data.total + " result" + (data.total === 1 ? "" : "s"));
   if (typeof data.remaining === "number") bits.push(data.remaining + " downloads left today");
   if (data.note) bits.push(data.note);
@@ -354,12 +372,31 @@ async function subdlPost(url, body) {
   return resp.json();
 }
 
-async function subdlSearch() {
+// The search-method buttons in the open dialog.
+function subdlMethodButtons() {
+  return [...document.querySelectorAll(".subdl-method")];
+}
+
+// Keep the pressed button on the method whose results are on screen.
+function subdlMarkMethod(method) {
+  subdlMethodButtons().forEach((b) => {
+    b.classList.toggle("subdl-method-on", !!method && b.dataset.method === method);
+  });
+}
+
+// ``method`` is one of "hash", "filename", "jellyfin", or empty for the default
+// (hash, then the Jellyfin name).
+async function subdlSearch(method) {
   const statusEl = document.getElementById("subdl-status");
   statusEl.innerHTML = "";
   statusEl.appendChild(el("span", { class: "spinner" }));
+  subdlMarkMethod(method || "");
+  const buttons = subdlMethodButtons();
+  buttons.forEach((b) => { b.disabled = true; });
+  let body = "path=" + encodeURIComponent(subdlPath);
+  if (method) body += "&method=" + encodeURIComponent(method);
   try {
-    const data = await postJSON("/api/subtitles/search", "path=" + encodeURIComponent(subdlPath));
+    const data = await postJSON("/api/subtitles/search", body);
     statusEl.innerHTML = "";
     if (!data.ok) {
       subdlError(data.error || "Search failed.", {
@@ -378,6 +415,8 @@ async function subdlSearch() {
     }
   } catch (err) {
     subdlError(String(err));
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
   }
 }
 
@@ -394,6 +433,14 @@ function subdlOpen(path) {
   const box = el("div", { class: "subdl" });
   box.appendChild(el("h3", { text: "Subtitles" }));
   box.appendChild(el("p", { class: "muted", text: path.replace(/^.*[\\/]/, "") }));
+  const methods = el("div", { class: "subdl-methods" });
+  SUBDL_METHODS.forEach(([id, label]) => {
+    const btn = el("button", { type: "button", class: "subdl-method", text: label, title: label });
+    btn.dataset.method = id;
+    btn.addEventListener("click", () => subdlSearch(id));
+    methods.appendChild(btn);
+  });
+  box.appendChild(methods);
   const warn = el("p", {
     class: "muted subdl-fm",
     hidden: true,

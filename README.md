@@ -231,6 +231,12 @@ way VLSub does — by its OpenSubtitles "moviehash" (first + last 64 KiB) — an
 falls back to a name search when the hash finds nothing. Pick a candidate and
 JFTools saves `<video-name>.<language>.srt` next to the video.
 
+The dialog's **Search Hash**, **Search Filename** and **Search Jellyfin name**
+buttons re-run the search one way instead of the default, for when the automatic
+one comes up short: the hash alone (an exact match for that release), the release
+name on disk (`Onslaught 2026 1080p WEB H264-YTS`), or the Jellyfin item's name
+with its year. The line above the results says which search is on screen.
+
 The dialog lists **every subtitle track** on the video — the embedded tracks
 first (buttons greyed out, since they cannot be changed) and then the external
 files. Each external row has a **Delete** button (Jellyfin is told the file

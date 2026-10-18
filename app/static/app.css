@@ -420,6 +420,9 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl h3 { margin: 0; }
 .subdl p { margin: 0; }
+.subdl-methods { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.subdl-methods button { font-size: 0.75rem; padding: 0.3rem 0.6rem; }
+.subdl-method.subdl-method-on { color: var(--accent); border-color: var(--accent); }
 .subdl .row { justify-content: flex-end; margin-top: 0.5rem; }
 .subdl-status { min-height: 1.2rem; font-size: 0.85rem; }
 .subdl-status .spinner { display: inline-block; }

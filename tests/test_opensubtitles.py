@@ -277,6 +277,7 @@ def os_env(tmp_path, monkeypatch):
                     "name": "Movie",
                     "series": "",
                     "display": "Movie (2020)",
+                    "year": 2020,
                 }
             ],
             "marks": set(),
@@ -320,7 +321,7 @@ class FakeOSClient:
 async def test_search_route_hash_then_results(os_env, monkeypatch):
     fake = FakeOSClient(results=[_candidate()])
     monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
-    resp = await sub.subtitles_search(path="/Media/Movie (2020).mkv", language="")
+    resp = await sub.subtitles_search(path="/Media/Movie (2020).mkv", language="", method="")
     data = _json(resp)
     assert data["ok"] is True
     assert data["method"] == "hash"
@@ -333,7 +334,7 @@ async def test_search_route_hash_then_results(os_env, monkeypatch):
 async def test_search_route_name_fallback(os_env, monkeypatch):
     fake = FakeOSClient(results=[])
     monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
-    resp = await sub.subtitles_search(path="/Media/Movie (2020).mkv", language="")
+    resp = await sub.subtitles_search(path="/Media/Movie (2020).mkv", language="", method="")
     data = _json(resp)
     assert data["ok"] is True
     assert data["method"] == "name"
@@ -343,16 +344,122 @@ async def test_search_route_name_fallback(os_env, monkeypatch):
     assert fake.searches[1]["type"] == "movie"
 
 
+async def test_search_route_hash_only_skips_the_name_fallback(os_env, monkeypatch):
+    fake = FakeOSClient(results=[])
+    monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
+    resp = await sub.subtitles_search(
+        path="/Media/Movie (2020).mkv", language="", method="hash"
+    )
+    data = _json(resp)
+    assert data["ok"] is True
+    assert data["method"] == "hash"
+    assert data["total"] == 0
+    assert fake.searches[0]["moviehash"]
+    assert len(fake.searches) == 1  # nothing else was tried
+
+
+async def test_search_route_hash_needs_a_local_file(os_env, monkeypatch):
+    fake = FakeOSClient(results=[_candidate()])
+    monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
+    jellyfin_id._state["rows"].append(
+        {
+            "id": "i2",
+            "type": "Movie",
+            "path": "/Media/Gone (2021).mkv",
+            "file": "Gone (2021).mkv",
+            "name": "Gone",
+            "series": "",
+            "display": "Gone (2021)",
+            "year": 2021,
+        }
+    )
+    resp = await sub.subtitles_search(
+        path="/Media/Gone (2021).mkv", language="", method="hash"
+    )
+    assert resp.status_code == 400
+    assert "not reachable" in _json(resp)["error"]
+    assert not fake.searches
+
+
+async def test_search_route_filename(os_env, monkeypatch):
+    fake = FakeOSClient(results=[])
+    monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
+    resp = await sub.subtitles_search(
+        path="/Media/Movie (2020).mkv", language="", method="filename"
+    )
+    data = _json(resp)
+    assert data["ok"] is True
+    assert data["method"] == "filename"
+    assert data["query"] == "Movie (2020)"
+    assert fake.searches[0]["query"] == "Movie (2020)"
+    assert fake.searches[0]["type"] == "movie"
+    assert "moviehash" not in fake.searches[0]  # the hash is not used
+
+
+async def test_search_route_jellyfin_name_uses_the_year(os_env, monkeypatch):
+    fake = FakeOSClient(results=[_candidate()])
+    monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
+    resp = await sub.subtitles_search(
+        path="/Media/Movie (2020).mkv", language="", method="jellyfin"
+    )
+    data = _json(resp)
+    assert data["ok"] is True
+    assert data["method"] == "jellyfin"
+    assert data["query"] == "Movie"
+    assert fake.searches[0]["query"] == "Movie"
+    assert fake.searches[0]["year"] == 2020
+    assert fake.searches[0]["type"] == "movie"
+    assert len(fake.searches) == 1  # only the method that was asked for
+
+
+async def test_search_route_jellyfin_episode_searches_the_series(os_env, monkeypatch):
+    fake = FakeOSClient(results=[])
+    monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
+    jellyfin_id._state["rows"].append(
+        {
+            "id": "i3",
+            "type": "Episode",
+            "path": "/Media/Show/Show S01E03.mkv",
+            "file": "Show S01E03.mkv",
+            "name": "The Third One",
+            "series": "Show",
+            "display": "Show — The Third One",
+            "year": 2022,
+        }
+    )
+    resp = await sub.subtitles_search(
+        path="/Media/Show/Show S01E03.mkv", language="", method="jellyfin"
+    )
+    data = _json(resp)
+    assert data["ok"] is True
+    assert fake.searches[0]["query"] == "Show"
+    assert fake.searches[0]["type"] == "episode"
+    assert fake.searches[0]["season_number"] == 1
+    assert fake.searches[0]["episode_number"] == 3
+    assert not fake.searches[0].get("year")  # an episode year is the wrong year
+
+
+async def test_search_route_rejects_an_unknown_method(os_env, monkeypatch):
+    fake = FakeOSClient()
+    monkeypatch.setattr(osmod, "get_opensubtitles", lambda: fake)
+    resp = await sub.subtitles_search(
+        path="/Media/Movie (2020).mkv", language="", method="imdb"
+    )
+    assert resp.status_code == 400
+    assert "Unknown search method" in _json(resp)["error"]
+    assert not fake.searches
+
+
 async def test_search_route_not_configured(os_env, monkeypatch):
     monkeypatch.setattr(config._settings, "opensubtitles_api_key", "")
-    resp = await sub.subtitles_search(path="/Media/Movie (2020).mkv", language="")
+    resp = await sub.subtitles_search(path="/Media/Movie (2020).mkv", language="", method="")
     data = _json(resp)
     assert data["ok"] is False
     assert data["configured"] is False
 
 
 async def test_search_route_unknown_path(os_env):
-    resp = await sub.subtitles_search(path="/Media/nope.mkv", language="")
+    resp = await sub.subtitles_search(path="/Media/nope.mkv", language="", method="")
     assert resp.status_code == 404
 
 

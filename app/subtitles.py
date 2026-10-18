@@ -814,13 +814,41 @@ def _sync_subtitle_file(
                 pass
 
 
+def _jellyfin_query(row: dict) -> str:
+    """The OpenSubtitles query for a Movie Match row.
+
+    Episodes are searched by their series, everything else by the item's title.
+    """
+    if (row.get("type") or "") in ("Episode", "Series"):
+        return (row.get("series") or "").strip()
+    return (row.get("name") or row.get("display") or "").strip()
+
+
+def _filename_query(path: str) -> str:
+    """The release name of a file, without its extension.
+
+    Dots and underscores separate words in release names, so they read as spaces
+    here; the release tags are left on, that is what makes this search different
+    from the name search.
+    """
+    stem = Path(path).stem
+    return " ".join(stem.replace("_", " ").replace(".", " ").split())
+
+
 @router.post("/api/subtitles/search")
 async def subtitles_search(
     user: str = Depends(require_login),
     path: str = Form(""),
     language: str = Form(""),
+    method: str = Form(""),
 ):
-    """Search OpenSubtitles for a library file — by moviehash first, then by name."""
+    """Search OpenSubtitles for a library file.
+
+    ``method`` picks the search and is what the dialog's three search buttons
+    send: "hash" (the moviehash only), "filename" (the release name on disk) or
+    "jellyfin" (the Jellyfin item name and year). Empty means the default search:
+    the moviehash first, the Jellyfin name when that finds nothing.
+    """
     path = path.strip()
     if not path:
         return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
@@ -828,6 +856,12 @@ async def subtitles_search(
     if row is None:
         return JSONResponse(
             {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    method = method.strip().lower()
+    if method not in ("", "hash", "filename", "jellyfin"):
+        return JSONResponse(
+            {"ok": False, "error": f"Unknown search method '{method}'."},
+            status_code=400,
         )
     if not config.settings.opensubtitles_api_key:
         return JSONResponse(
@@ -854,59 +888,81 @@ async def subtitles_search(
         "remaining": client.remaining(),
     }
 
-    # 1. Hash search — exact match for this specific release.
-    method = "hash"
-    result = None
+    row_type = row.get("type") or ""
+    is_episode = row_type in ("Episode", "Series")
+    season, episode = _season_episode(path)
+    # Movies and episodes are two different searches for OpenSubtitles.
+    kind = (
+        {"type": "episode", "season_number": season, "episode_number": episode}
+        if is_episode
+        else {"type": "movie"}
+    )
     local = resolve_path(path, config.settings.path_maps)
-    if local and os.path.isfile(local):
-        try:
-            moviehash, size = await asyncio.to_thread(opensubtitles_hash, local)
-            result = await client.search(languages=langs, moviehash=moviehash)
-            log(
-                "Search",
-                "INFO",
-                f"Subtitle hash search {Path(path).name}: "
-                f"{moviehash} ({size} B) -> {result['total_count']} result(s)",
-            )
-        except OpenSubtitlesError as exc:
-            return JSONResponse(
-                {**base, "ok": False, "error": str(exc)}, status_code=502
-            )
-    elif local:
-        base["note"] = "File unreachable — searched by name only."
+    reachable = bool(local) and os.path.isfile(local)
+    # The method the run settles on: the one asked for, "name" for the default's
+    # fallback. "query" is the text a name search was given, for the dialog.
+    used = method or "hash"
+    query_used = ""
+    result = None
 
-    # 2. Name fallback when the hash found nothing.
-    if result is None or result["total_count"] == 0:
-        method = "name"
-        row_type = row.get("type") or ""
-        query = row.get("series") if row_type in ("Episode", "Series") else (row.get("name") or row.get("display") or "")
-        query = query.strip()
-        if not query:
-            query = Path(path).name
-        season, episode = _season_episode(path)
-        try:
-            result = await client.search(
-                languages=langs,
-                query=query,
-                type="episode" if row_type in ("Episode", "Series") else "movie",
-                season_number=season,
-                episode_number=episode,
-            )
-            log(
-                "Search",
-                "INFO",
-                f"Subtitle name search {Path(path).name}: "
-                f"\"{query}\" -> {result['total_count']} result(s)",
-            )
-        except OpenSubtitlesError as exc:
-            return JSONResponse(
-                {**base, "ok": False, "error": str(exc)}, status_code=502
-            )
+    async def run(label: str, where: str, **params) -> None:
+        """Search OpenSubtitles, log it and remember what the search was."""
+        nonlocal result, query_used
+        result = await client.search(languages=langs, **params)
+        query_used = params.get("query") or ""
+        log(
+            "Search",
+            "INFO",
+            f"Subtitle {label} search {Path(path).name}: "
+            f"{where} -> {result['total_count']} result(s)",
+        )
+
+    if method == "hash" and not reachable:
+        return JSONResponse(
+            {
+                **base,
+                "ok": False,
+                "error": (
+                    "The video file is not reachable, so it cannot be hashed. "
+                    "Set the Media paths on the Settings page first."
+                ),
+            },
+            status_code=400,
+        )
+
+    try:
+        if method == "filename":
+            query = _filename_query(path)
+            await run("filename", f'"{query}"', query=query, **kind)
+        elif method == "jellyfin":
+            query = _jellyfin_query(row) or Path(path).name
+            # An episode's own year is not the series year OpenSubtitles wants.
+            year = None if is_episode else row.get("year")
+            where = f'"{query}"' + (f" ({year})" if year else "")
+            await run("jellyfin", where, query=query, year=year, **kind)
+        elif method == "hash":
+            # Hash only: an exact match for this release, and nothing else.
+            moviehash, size = await asyncio.to_thread(opensubtitles_hash, local)
+            await run("hash", f"{moviehash} ({size} B)", moviehash=moviehash)
+        else:
+            # Default: hash first, name when that finds nothing.
+            if reachable:
+                moviehash, size = await asyncio.to_thread(opensubtitles_hash, local)
+                await run("hash", f"{moviehash} ({size} B)", moviehash=moviehash)
+            else:
+                base["note"] = "File unreachable — searched by name only."
+            if result is None or result["total_count"] == 0:
+                used = "name"
+                query = _jellyfin_query(row) or Path(path).name
+                await run("name", f'"{query}"', query=query, **kind)
+    except OpenSubtitlesError as exc:
+        return JSONResponse({**base, "ok": False, "error": str(exc)}, status_code=502)
 
     return JSONResponse(
         {
             **base,
-            "method": method,
+            "method": used,
+            "query": query_used,
             "total": result["total_count"] if result else 0,
             "candidates": (result or {}).get("data") or [],
         }
