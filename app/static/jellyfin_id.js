@@ -161,17 +161,23 @@ function idBuildActions(r) {
   } else if ((r.type === "Series" || r.type === "Episode") && ID.sonarr) {
     openItems.push(hoverMenuLink(ID.sonarr + idEnc(r.series || r.name), "Sonarr"));
   }
-  td.appendChild(hoverMenuButton("Open in", openItems, "open"));
-
-  const actItems = [];
   if (r.path) {
-    actItems.push(hoverMenuAction("Play", () => playVideo(r.path)));
-    actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
-    actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
-    actItems.push(hoverMenuAction("Search subs", () => subdlOpen(r.path)));
-    actItems.push(hoverMenuLink("/files?path=" + encodeURIComponent(r.path), "Browse files"));
+    openItems.push(hoverMenuLink("/files?path=" + encodeURIComponent(r.path), "File browser"));
   }
-  td.appendChild(hoverMenuButton("Actions", actItems, "actions"));
+  td.appendChild(hoverMenuButton("Open", openItems, "open"));
+
+  const syncItems = [];
+  if (r.path) {
+    syncItems.push(hoverMenuAction("Resync Jellyfin library", (node) => rescanFile(node, r.path)));
+    syncItems.push(hoverMenuAction("Resync Subtitles", (node) => rescanSubtitle(node, r.path)));
+  }
+  // Hover lists the two halves; clicking the pill runs both.
+  td.appendChild(hoverMenuButton(
+    "Sync", syncItems, "sync", r.path ? (node) => resyncBoth(node, r.path) : null
+  ));
+
+  td.appendChild(pillButton("Play", "play", r.path ? () => playVideo(r.path) : null));
+  td.appendChild(pillButton("Subtitles", "subs", r.path ? () => subdlOpen(r.path) : null));
 
   td.appendChild(idGoogleMenu(r));
   return td;

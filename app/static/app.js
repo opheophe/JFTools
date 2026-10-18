@@ -307,19 +307,22 @@ function FilterProfiles(host, storageKey, getFilters, applyFilters) {
 
 // A hover dropdown button (like the Google menu): shows a fixed-position menu
 // of items (links or buttons) while the pointer is over the button or menu.
-function hoverMenuButton(label, items, variant) {
+// ``onClick`` makes the label itself do something (the Sync pill resyncs both
+// halves while its menu still offers each one on its own).
+function hoverMenuButton(label, items, variant, onClick) {
   const wrap = el("span", { class: "id-google" });
   const btn = el("button", {
     type: "button",
     class: "id-google-btn" + (variant ? " id-btn-" + variant : ""),
     text: label,
   });
-  btn.appendChild(el("span", { class: "id-google-caret", text: "▾" }));
   wrap.appendChild(btn);
   if (!items.length) {
-    btn.disabled = true;
+    if (onClick) btn.addEventListener("click", () => onClick(btn));
+    else btn.disabled = true;
     return wrap;
   }
+  btn.appendChild(el("span", { class: "id-google-caret", text: "▾" }));
   const menu = el("div", { class: "id-google-menu" });
   menu.hidden = true;
   items.forEach((it) => menu.appendChild(it));
@@ -347,7 +350,14 @@ function hoverMenuButton(label, items, variant) {
   wrap.addEventListener("mouseleave", scheduleHide);
   menu.addEventListener("mouseenter", () => clearTimeout(hideTimer));
   menu.addEventListener("mouseleave", scheduleHide);
+  if (onClick) btn.addEventListener("click", () => onClick(btn));
   return wrap;
+}
+
+// A pill that acts rather than listing: same frame as the menus, no caret.
+// With no handler (a row with no file on disk) it renders greyed out.
+function pillButton(label, variant, onClick) {
+  return hoverMenuButton(label, [], variant, onClick);
 }
 
 // A link item and a clickable button item for a hover menu.
@@ -1057,25 +1067,6 @@ function renderPopup(resp, desc) {
   }
   if (links.children.length) inner.appendChild(links);
 
-  if (item.path) {
-    const rescan = el("a", { class: "pop-rescan", href: "#", text: "Rescan library file" });
-    rescan.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      rescanFile(rescan, item.path);
-    });
-    const rescanSub = el("a", { class: "pop-rescan pop-sub", href: "#", text: "Rescan sub" });
-    rescanSub.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      rescanSubtitle(rescanSub, item.path);
-    });
-    const play = el("a", { class: "pop-rescan pop-play", href: "#", text: "Play" });
-    play.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      playVideo(item.path);
-    });
-    inner.appendChild(el("div", { class: "pop-links" }, [play, rescan, rescanSub]));
-  }
-
   popupNode.appendChild(inner);
 }
 
@@ -1096,18 +1087,16 @@ function playVideo(path, track) {
   );
 }
 
-async function rescanFile(node, path) {
-  if (node.dataset.busy) return;
-  node.dataset.busy = "1";
-  const prev = node.textContent;
-  node.textContent = "Rescanning…";
+// Each resync reports on its own, so the Sync pill can show which half worked.
+async function resyncLibrary(path) {
   try {
     const data = await postJSON("/api/media/rescan", "path=" + encodeURIComponent(path));
-    node.textContent = data.ok ? "✓ Rescan started" : "Rescan failed";
+    return data.ok
+      ? { ok: true, text: "Rescan started" }
+      : { ok: false, text: data.error || "Rescan failed" };
   } catch (err) {
-    node.textContent = "Rescan failed";
+    return { ok: false, text: "Rescan failed" };
   }
-  setTimeout(() => { node.textContent = prev; delete node.dataset.busy; }, 2500);
 }
 
 // A subtitle rescan updates the server-side store, so mirror the fresh entry
@@ -1120,26 +1109,58 @@ function applySubtitleEntry(path, entry) {
   renderSeTable();
 }
 
-async function rescanSubtitle(node, path) {
+async function resyncSubtitles(path) {
+  try {
+    const data = await postJSON("/api/subtitles/rescan", "path=" + encodeURIComponent(path));
+    if (!data.ok) return { ok: false, text: data.error || "Subtitle scan failed" };
+    const e = data.entry || {};
+    applySubtitleEntry(path, data.entry);
+    if (e.error) return { ok: false, text: e.error };
+    return { ok: true, text: (e.subs || []).join(", ") || "no subs" };
+  } catch (err) {
+    return { ok: false, text: "Subtitle scan failed" };
+  }
+}
+
+// One half at a time, from the Sync menu: the item reports its own result.
+async function resyncOne(node, path, run, busyText) {
   if (node.dataset.busy) return;
   node.dataset.busy = "1";
   const prev = node.textContent;
-  node.textContent = "Scanning…";
-  try {
-    const data = await postJSON("/api/subtitles/rescan", "path=" + encodeURIComponent(path));
-    if (data.ok) {
-      const e = data.entry || {};
-      applySubtitleEntry(path, data.entry);
-      node.textContent = e.error
-        ? "Subtitle scan failed"
-        : ("✓ " + ((e.subs || []).join(", ") || "no subs"));
-    } else {
-      node.textContent = data.error || "Subtitle scan failed";
-    }
-  } catch (err) {
-    node.textContent = "Subtitle scan failed";
-  }
-  setTimeout(() => { node.textContent = prev; delete node.dataset.busy; }, 2500);
+  node.textContent = busyText;
+  const result = await run(path);
+  node.textContent = (result.ok ? "✓ " : "✗ ") + result.text;
+  node.title = result.text;
+  setTimeout(() => {
+    node.textContent = prev;
+    node.title = "";
+    delete node.dataset.busy;
+  }, 2500);
+}
+
+function rescanFile(node, path) {
+  return resyncOne(node, path, resyncLibrary, "Resyncing…");
+}
+
+function rescanSubtitle(node, path) {
+  return resyncOne(node, path, resyncSubtitles, "Resyncing…");
+}
+
+// The Sync pill: both halves, each marked so a failure is visible.
+async function resyncBoth(node, path) {
+  if (!path || node.dataset.busy) return;
+  node.dataset.busy = "1";
+  const prev = node.textContent;
+  node.textContent = "Syncing…";
+  const [lib, subs] = await Promise.all([resyncLibrary(path), resyncSubtitles(path)]);
+  const mark = (r) => (r.ok ? "✓" : "✗");
+  node.textContent = mark(lib) + " Library · " + mark(subs) + " Subtitles";
+  node.title = "Library: " + lib.text + " · Subtitles: " + subs.text;
+  setTimeout(() => {
+    node.textContent = prev;
+    node.title = "";
+    delete node.dataset.busy;
+  }, 4000);
 }
 
 function showPopup(desc, anchor) {

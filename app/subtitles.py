@@ -546,7 +546,7 @@ async def run_scan(mode: str) -> None:
 async def rescan_one(path: str) -> dict:
     """Force a re-probe of one library item and update the store.
 
-    Used by the "Rescan sub" popup action: it ignores the ``scanned`` flag and
+    Used by the "Resync Subtitles" row action: it ignores the ``scanned`` flag and
     probes the file now, marking it scanned only on a definitive result.
     """
     ffprobe = resolve_ffprobe()

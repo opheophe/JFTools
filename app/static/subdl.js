@@ -2,7 +2,7 @@
 
 // Subtitle search & download dialog (Search + Movie Match tabs).
 //
-// Opened from the Actions dropdown ("Search subs"). Searches OpenSubtitles for
+// Opened from the row's "Subtitles" action. Searches OpenSubtitles for
 // the file (moviehash first, name fallback), lists the candidates, lists every
 // subtitle track already on the video, and lets the user download, delete or
 // re-sync one. Closing the dialog (click outside or Escape) re-probes the file

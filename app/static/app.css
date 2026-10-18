@@ -12,6 +12,8 @@
   --warn: #e0b84c;
   --warn-border: #b89b3c;
   --rescan: #e0a458;
+  --teal: #4fc3d9;
+  --magenta: #d97ad1;
   --btn: #232c38;
 }
 
@@ -297,10 +299,14 @@ section.card { margin-top: 1.25rem; }
 }
 .id-google-btn:hover { background: rgba(79, 140, 255, 0.14); }
 .id-google-btn:disabled { opacity: 0.5; cursor: default; }
-.id-google-btn.id-btn-open { color: var(--ok); border-color: var(--ok); }
-.id-google-btn.id-btn-open:hover { background: rgba(62, 207, 142, 0.16); }
-.id-google-btn.id-btn-actions { color: var(--rescan); border-color: var(--rescan); }
-.id-google-btn.id-btn-actions:hover { background: rgba(224, 164, 88, 0.16); }
+.id-google-btn.id-btn-open { color: var(--teal); border-color: var(--teal); }
+.id-google-btn.id-btn-open:hover { background: rgba(79, 195, 217, 0.16); }
+.id-google-btn.id-btn-sync { color: var(--rescan); border-color: var(--rescan); }
+.id-google-btn.id-btn-sync:hover { background: rgba(224, 164, 88, 0.16); }
+.id-google-btn.id-btn-play { color: var(--ok); border-color: var(--ok); }
+.id-google-btn.id-btn-play:hover { background: rgba(62, 207, 142, 0.16); }
+.id-google-btn.id-btn-subs { color: var(--magenta); border-color: var(--magenta); }
+.id-google-btn.id-btn-subs:hover { background: rgba(217, 122, 209, 0.16); }
 .id-google-btn.id-btn-google { color: var(--accent); border-color: var(--accent); }
 .id-google-caret { font-size: 0.7rem; }
 .id-google-menu {
@@ -642,8 +648,6 @@ button.btn-danger:hover { border-color: var(--danger); background: rgba(255, 107
 .pop-links { display: flex; flex-wrap: wrap; gap: 0.75rem; }
 .pop-link { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
 .pop-link:hover { text-decoration: underline; }
-.pop-rescan { color: var(--rescan); text-decoration: none; font-size: 0.8rem; cursor: pointer; }
-.pop-rescan:hover { text-decoration: underline; }
 
 /* pager + sortable table headers */
 .pager { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.75rem; }

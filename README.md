@@ -11,7 +11,7 @@ existing server over the API.
 - Web UI with pages for server activity, Jellyfin users, libraries and Movie
   Match (comparing on-disk files to Jellyfin's metadata).
 - File browser: browse the media folders from Movie Match/Search's
-  "Actions → Browse files" (or `/files`). Browsing is confined to the mapped
+  "Open → File browser" (or `/files`). Browsing is confined to the mapped
   media folders — anything else, including symlink escapes, is refused.
 - File management (rename and delete) behind a Settings toggle, **off by
   default**. Deletion is permanent (with a confirmation dialog), every change
@@ -27,10 +27,10 @@ existing server over the API.
   instance.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans.
-- Player: **Actions → Play** streams a library file in a small popup window —
-  seek, speed, jump to a time — with any subtitle track attached (embedded
-  streams extracted, external files converted to WebVTT), and a one-click
-  ffmpeg remux for files the browser cannot decode.
+- Player: the **Play** action on a row streams a library file in a small popup
+  window — seek, speed, jump to a time — with any subtitle track attached
+  (embedded streams extracted, external files converted to WebVTT), and a
+  one-click ffmpeg remux for files the browser cannot decode.
 - Single small container image, published to GitHub Container Registry for both
   `linux/amd64` and `linux/arm64`.
 - `/healthz` healthcheck.
@@ -208,9 +208,9 @@ Two scheduler jobs do the work:
 - **Subtitle scan** — syncs the store with the library (adds new files as
   unscanned, drops removed ones), then probes every file not yet scanned.
 
-You can also re-probe a single file from its hover popup (**Rescan sub**),
-which ignores the `scanned` flag — handy after dropping a new `.srt` next to a
-movie.
+You can also re-probe a single file with the **Resync Subtitles** action on its
+row (or the **Sync** pill, which does both halves), which ignores the `scanned`
+flag — handy after dropping a new `.srt` next to a movie.
 
 **Requirements:**
 
@@ -225,11 +225,11 @@ Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
 
 ## Subtitles
 
-Missing subtitles can be fetched straight from the table: **Actions → Search
-subs** (Movie Match and Search tabs). It identifies the video the same way
-VLSub does — by its OpenSubtitles "moviehash" (first + last 64 KiB) — and falls
-back to a name search when the hash finds nothing. Pick a candidate and JFTools
-saves `<video-name>.<language>.srt` next to the video.
+Missing subtitles can be fetched straight from the table: the **Subtitles**
+action on a row (Movie Match and Search tabs). It identifies the video the same
+way VLSub does — by its OpenSubtitles "moviehash" (first + last 64 KiB) — and
+falls back to a name search when the hash finds nothing. Pick a candidate and
+JFTools saves `<video-name>.<language>.srt` next to the video.
 
 The dialog lists **every subtitle track** on the video — the embedded tracks
 first (buttons greyed out, since they cannot be changed) and then the external
@@ -268,10 +268,10 @@ not the legacy XML-RPC API that VLSub used (that one is being shut down).
 
 ## Player
 
-**Actions → Play** (Movie Match and Search tabs) opens the file in a small
-player window. It streams the original video straight from disk — the server
-supports HTTP range requests, so the native timeline seeks normally — and the
-row of controls adds a time readout, −30/−5/+5/+30 second jumps, a **Go to**
+The **Play** action on a row (Movie Match and Search tabs) opens the file in a
+small player window. It streams the original video straight from disk — the
+server supports HTTP range requests, so the native timeline seeks normally — and
+the row of controls adds a time readout, −30/−5/+5/+30 second jumps, a **Go to**
 box (`mm:ss` or `hh:mm:ss`), a speed selector and a **Subtitles** selector.
 
 Every subtitle track the scanner knows about is in that selector: embedded
