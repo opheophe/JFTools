@@ -38,6 +38,36 @@ def test_name_match_title_is_a_release_token():
     assert name_match_score(cleaned, "Cam", 2018) == 100
 
 
+def test_name_match_roman_sequel_not_capped():
+    # "Part II" in the file vs "2" in the title must not trip the digit cap.
+    disc = clean_release_tags("Class of Nuke 'Em High Part II - Subhumanoid Meltdown 1991 1080p web YTS.mp4")
+    assert name_match_score(disc, "Class of Nuke 'Em High 2: Subhumanoid Meltdown", 1991) >= 60
+
+
+def test_name_match_roman_and_arabic_are_equal():
+    assert name_match_score(clean_release_tags("Rocky III 1976"), "Rocky 3", 1976) == 100
+    assert name_match_score(clean_release_tags("Rocky 2 1979"), "Rocky II", 1979) == 100
+    assert name_match_score(clean_release_tags("Friday the 13th Part II 1981"), "Friday the 13th Part 2", 1981) == 100
+
+
+def test_name_match_single_letters_not_roman():
+    # Single-letter Roman numerals must not be rewritten into digits.
+    assert name_match_score(clean_release_tags("X-Men 2000"), "X-Men", 2000) == 100
+    assert name_match_score(clean_release_tags("XMen 2000"), "X-Men", 2000) >= 30
+    assert name_match_score(clean_release_tags("I Am Legend 2007"), "I Am Legend", 2007) == 100
+    assert name_match_score(clean_release_tags("IAmLegend 2007"), "I Am Legend", 2007) >= 20
+
+
+def test_name_match_single_letter_roman_avoids_false_cap():
+    # "V" is Roman for 5: a Jellyfin digit must accept the numeral on the file side.
+    assert name_match_score(clean_release_tags("Saw V 2008"), "Saw 5", 2008) >= 40
+
+
+def test_name_match_missing_sequel_number_still_capped():
+    # A genuinely different installment (no number in the file) still caps low.
+    assert name_match_score(clean_release_tags("Rocky 1976"), "Rocky 5", 1976) <= 20
+
+
 def test_year_match_correct():
     # exact year present in the path
     assert year_match_category("/Filmer/The Matrix (1999)/The Matrix 1999 1080p.mkv", 1999) == "Correct"

@@ -107,6 +107,32 @@ _NUM_WORDS = {
     "eighteen": "18", "nineteen": "19", "twenty": "20",
 }
 
+_ROMAN_RE = re.compile(
+    r"^(?=[mdclxvi])m{0,4}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$"
+)
+_ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+# Only multi-character Roman numerals up to XX are read as numbers. Single
+# letters stay as-is ("X-Men", "I Am Legend") and larger forms ("dc", "cm",
+# "mm") are left alone so real words never gain phantom digits.
+_ROMAN_SEQUEL_MAX = 20
+
+
+def _roman_to_int(token: str):
+    """Arabic value of a canonical Roman numeral token, else None."""
+    if not token or not _ROMAN_RE.match(token):
+        return None
+    total = 0
+    prev = 0
+    for ch in reversed(token):
+        val = _ROMAN_VALUES[ch]
+        if val < prev:
+            total -= val
+        else:
+            total += val
+            prev = val
+    return total
+
 
 def clean_release_tags(name: str) -> str:
     """Strip file extensions, separators and common release/quality tags."""
@@ -122,8 +148,15 @@ def clean_release_tags(name: str) -> str:
 def _norm(s: str) -> str:
     s = str(s or "").lower()
     s = re.sub(r"[^a-z0-9]+", " ", s)
-    s = " ".join(_NUM_WORDS.get(t, t) for t in s.split())
-    return re.sub(r"\s+", " ", s).strip()
+    out = []
+    for t in s.split():
+        t = _NUM_WORDS.get(t, t)
+        if not t.isdigit() and len(t) >= 2:
+            rv = _roman_to_int(t)
+            if rv is not None and 2 <= rv <= _ROMAN_SEQUEL_MAX:
+                t = str(rv)
+        out.append(t)
+    return re.sub(r"\s+", " ", " ".join(out)).strip()
 
 
 def _lcs_frac(short: str, long: str) -> float:
@@ -179,9 +212,18 @@ def name_match_score(disc_name: str, jf_name: str, jf_year=None) -> int:
     if a_core != b_core:
         score = min(score, 0.95)
 
-    disc_set = set(a_core_toks)
+    # A Jellyfin digit is missing only when the file side has neither the same
+    # digit nor an equivalent Roman numeral ("2" matches both "2" and "II").
+    disc_nums = set()
+    for t in a_core_toks:
+        if t.isdigit():
+            disc_nums.add(int(t))
+        else:
+            rv = _roman_to_int(t)
+            if rv is not None:
+                disc_nums.add(rv)
     for t in b_core_toks:
-        if t.isdigit() and t not in disc_set:
+        if t.isdigit() and int(t) not in disc_nums:
             score = min(score, 0.20)
             break
 
