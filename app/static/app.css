@@ -286,16 +286,21 @@ section.card { margin-top: 1.25rem; }
 .ok-col { width: 92px; }
 .mark-btn { min-width: 30px; padding: 0.1rem 0.4rem; font-size: 0.9rem; }
 .mini { padding: 0.1rem 0.45rem; font-size: 0.8rem; }
-.id-actions { white-space: nowrap; }
+/* The action pills sit in a fixed-width column: let them wrap onto another
+   line rather than run past the table's right edge. */
+.id-actions { white-space: normal; }
 
 /* Movie Match: Google search dropdown (distinct from the plain text links) */
-.id-google { display: inline-block; margin-right: 0.6rem; }
+/* The bottom margin separates the lines once the pills wrap; the label may
+   break mid-word as a last resort in a very narrow column. */
+.id-google { display: inline-block; margin: 0 0.6rem 0.35rem 0; vertical-align: top; }
 .id-google-btn {
   display: inline-flex; align-items: center; gap: 0.3rem;
   padding: 0.05rem 0.5rem; font-size: 0.8rem; line-height: 1.6;
   color: var(--accent); background: transparent;
   border: 1px solid var(--accent); border-radius: 999px;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 .id-google-btn:hover { background: rgba(79, 140, 255, 0.14); }
 .id-google-btn:disabled { opacity: 0.5; cursor: default; }
@@ -332,7 +337,7 @@ section.card { margin-top: 1.25rem; }
 #id-table th:nth-child(4), #id-table td:nth-child(4) { width: 90px; }
 #id-table th:nth-child(5), #id-table td:nth-child(5) { width: 100px; }
 #id-table th:nth-child(8), #id-table td:nth-child(8) { width: 280px; }
-#id-table td.id-actions { white-space: nowrap; overflow: visible; }
+#id-table td.id-actions { overflow: visible; }
 
 /* Search tab */
 #se-progress { margin-top: 0.75rem; }
@@ -342,7 +347,15 @@ section.card { margin-top: 1.25rem; }
 #se-table th:nth-child(4), #se-table td:nth-child(4) { width: 150px; }
 #se-table th:nth-child(5), #se-table td:nth-child(5) { width: 90px; }
 #se-table th:nth-child(6), #se-table td:nth-child(6) { width: 240px; }
-#se-table td.id-actions { white-space: nowrap; overflow: visible; }
+#se-table td.id-actions { overflow: visible; }
+
+/* The action pills want a whole line's worth of column. Ask for that much only
+   when the window can spare it - below that the column takes its share of the
+   width and the pills wrap, so they never run past the table's right edge. */
+@media (min-width: 1400px) {
+  #id-table th:nth-child(8), #id-table td:nth-child(8) { width: 372px; }
+  #se-table th:nth-child(9), #se-table td:nth-child(9) { width: 290px; }
+}
 #se-table th.sortable { cursor: pointer; user-select: none; }
 #se-table th.sortable:hover { color: var(--text); }
 #se-table th .sort-arrow { margin-left: 0.3rem; color: var(--accent); }
