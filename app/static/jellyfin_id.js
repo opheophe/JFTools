@@ -354,6 +354,12 @@ function renderIdTable() {
 
   pageRows.forEach((r) => {
     const tr = el("tr");
+    tr.appendChild(el("td", { text: r.type }));
+    const parent = r.path ? r.path.replace(/[\\/][^\\/]*$/, "") : "";
+    tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
+    tr.appendChild(el("td", { text: r.file, title: r.file }));
+    tr.appendChild(el("td", { text: r.name ? r.match + "%" : "" }));
+    tr.appendChild(el("td", { text: r.year_match || "—" }));
     const marked = ID.marks.has(idMarkKey(r));
     const okTd = el("td");
     const markBtn = el("button", { class: "mark-btn", text: marked ? "✔" : "○" });
@@ -361,12 +367,6 @@ function renderIdTable() {
     markBtn.addEventListener("click", () => idToggleMark(idMarkKey(r), !marked));
     okTd.appendChild(markBtn);
     tr.appendChild(okTd);
-    tr.appendChild(el("td", { text: r.type }));
-    const parent = r.path ? r.path.replace(/[\\/][^\\/]*$/, "") : "";
-    tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
-    tr.appendChild(el("td", { text: r.file, title: r.file }));
-    tr.appendChild(el("td", { text: r.name ? r.match + "%" : "" }));
-    tr.appendChild(el("td", { text: r.year_match || "—" }));
     tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
     tr.appendChild(idBuildActions(r));
     body.appendChild(tr);

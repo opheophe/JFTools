@@ -283,41 +283,25 @@ section.card { margin-top: 1.25rem; }
 .id-google-item:hover { background: var(--inset); color: var(--accent); }
 
 
-/* table: fill width, truncate long cells */
+/* table: fill width; cell text wraps instead of truncating */
 #id-table { width: 100%; table-layout: fixed; }
-#id-table th, #id-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#id-table th:nth-child(1), #id-table td:nth-child(1) { width: 42px; }
-#id-table th:nth-child(2), #id-table td:nth-child(2) { width: 80px; }
-#id-table th:nth-child(5), #id-table td:nth-child(5) { width: 90px; }
-#id-table th:nth-child(6), #id-table td:nth-child(6) { width: 100px; }
+#id-table th, #id-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+#id-table th { white-space: nowrap; }
+#id-table th:nth-child(1), #id-table td:nth-child(1) { width: 80px; }
+#id-table th:nth-child(4), #id-table td:nth-child(4) { width: 90px; }
+#id-table th:nth-child(5), #id-table td:nth-child(5) { width: 100px; }
 #id-table th:nth-child(8), #id-table td:nth-child(8) { width: 280px; }
-#id-table td.id-actions { overflow: visible; }
-
-/* wrap long names instead of truncating them */
-#id-table td:nth-child(3),
-#id-table td:nth-child(4),
-#id-table td:nth-child(7) {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  vertical-align: top;
-}
+#id-table td.id-actions { white-space: nowrap; overflow: visible; }
 
 /* Search tab */
 #se-progress { margin-top: 0.75rem; }
 #se-table { width: 100%; table-layout: fixed; }
-#se-table th, #se-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#se-table th, #se-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+#se-table th { white-space: nowrap; }
 #se-table th:nth-child(1), #se-table td:nth-child(1) { width: 80px; }
-#se-table th:nth-child(5), #se-table td:nth-child(5) { width: 150px; }
-#se-table th:nth-child(6), #se-table td:nth-child(6) { width: 240px; }
-#se-table td:nth-child(2),
-#se-table td:nth-child(3),
-#se-table td:nth-child(4),
-#se-table td:nth-child(5) {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  vertical-align: top;
-}
-#se-table td.id-actions { overflow: visible; }
+#se-table th:nth-child(4), #se-table td:nth-child(4) { width: 150px; }
+#se-table th:nth-child(5), #se-table td:nth-child(5) { width: 240px; }
+#se-table td.id-actions { white-space: nowrap; overflow: visible; }
 #se-table th.sortable { cursor: pointer; user-select: none; }
 #se-table th.sortable:hover { color: var(--text); }
 #se-table th .sort-arrow { margin-left: 0.3rem; color: var(--accent); }
@@ -389,10 +373,10 @@ button.btn-danger:hover { border-color: var(--danger); background: rgba(255, 107
 #user-history-card .progress { margin-top: 0.2rem; }
 #user-favorites-card { margin-top: 1rem; }
 #fav-table { width: 100%; table-layout: fixed; }
-#fav-table th, #fav-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#fav-table th, #fav-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+#fav-table th { white-space: nowrap; }
 #fav-table th:nth-child(1), #fav-table td:nth-child(1) { width: 90px; }
 #fav-table th:nth-child(3), #fav-table td:nth-child(3) { width: 80px; }
-#fav-table td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 #fav-table th.sortable { cursor: pointer; user-select: none; }
 #fav-table th.sortable:hover { color: var(--text); }
 #fav-table th .sort-arrow { margin-left: 0.3rem; color: var(--accent); }

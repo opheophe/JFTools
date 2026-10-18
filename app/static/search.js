@@ -262,15 +262,6 @@ function renderSeTable() {
   pageRows.forEach((r) => {
     const tr = el("tr");
 
-    // Subtitle Ok — a manual, per-row checkbox.
-    const okTd = el("td");
-    const okCb = el("input", { type: "checkbox" });
-    okCb.checked = seSubsOk(r);
-    okCb.title = seSubsOk(r) ? "Remove subtitle ok mark" : "Mark as subtitle ok";
-    okCb.addEventListener("change", () => seToggleSubsOk(r.path, okCb.checked));
-    okTd.appendChild(okCb);
-    tr.appendChild(okTd);
-
     tr.appendChild(el("td", { text: r.type }));
     const parent = r.path ? r.path.replace(/[\\/][^\\/]*$/, "") : "";
     tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
@@ -278,6 +269,15 @@ function renderSeTable() {
     tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
     const fav = (r.favorited_by || []).join(", ");
     tr.appendChild(el("td", { class: "muted", text: fav, title: fav }));
+
+    // Subtitle Ok — the same ○/✔ mark button as Movie Match's Mismatch Ok.
+    const marked = seSubsOk(r);
+    const okTd = el("td");
+    const okBtn = el("button", { class: "mark-btn", text: marked ? "✔" : "○" });
+    okBtn.title = marked ? "Remove subtitle ok mark" : "Mark as subtitle ok";
+    okBtn.addEventListener("click", () => seToggleSubsOk(r.path, !marked));
+    okTd.appendChild(okBtn);
+    tr.appendChild(okTd);
 
     const e = seSubsEntry(r);
     let subsText = "";
