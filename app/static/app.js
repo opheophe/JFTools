@@ -1088,6 +1088,16 @@ async function rescanFile(node, path) {
   setTimeout(() => { node.textContent = prev; delete node.dataset.busy; }, 2500);
 }
 
+// A subtitle rescan updates the server-side store, so mirror the fresh entry
+// into the page's data: the Subtitles column then shows it straight away
+// instead of waiting for a reload (SE comes from search.js and is absent on
+// the Movie Match page, which has no subtitle column).
+function applySubtitleEntry(path, entry) {
+  if (!entry || typeof SE === "undefined" || !SE.subtitles) return;
+  SE.subtitles[path] = entry;
+  renderSeTable();
+}
+
 async function rescanSubtitle(node, path) {
   if (node.dataset.busy) return;
   node.dataset.busy = "1";
@@ -1097,6 +1107,7 @@ async function rescanSubtitle(node, path) {
     const data = await postJSON("/api/subtitles/rescan", "path=" + encodeURIComponent(path));
     if (data.ok) {
       const e = data.entry || {};
+      applySubtitleEntry(path, data.entry);
       node.textContent = e.error
         ? "Subtitle scan failed"
         : ("✓ " + ((e.subs || []).join(", ") || "no subs"));

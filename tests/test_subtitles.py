@@ -221,3 +221,25 @@ async def test_rescan_one_without_ffprobe(monkeypatch):
     entry = await sub.rescan_one("/x/y.mkv")
     assert entry["scanned"] is False
     assert entry["error"]
+
+
+async def test_rescan_one_returns_the_stored_entry(monkeypatch, tmp_path):
+    """The Search table applies the rescan response in place, so the entry it
+    gets back has to be the one subtitles_map() serves, keyed by the path."""
+    import app.subtitles as sub
+
+    f = tmp_path / "movie.mkv"
+    f.write_bytes(b"")
+    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: "ffprobe")
+    monkeypatch.setattr(sub, "_probe_subtitles", lambda ff, local: ([], 60.0, None))
+    monkeypatch.setattr(sub, "_external_subtitles", lambda local: [])
+    monkeypatch.setattr(sub, "_save_state", lambda: None)
+
+    before = dict(sub._state["files"])
+    try:
+        entry = await sub.rescan_one(str(f))
+        assert entry["path"] == str(f)
+        assert sub.subtitles_map()[str(f)] == entry
+    finally:
+        sub._state["files"] = before
+
