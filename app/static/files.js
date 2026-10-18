@@ -13,7 +13,6 @@ const fbCrumb = document.getElementById("fb-crumb");
 const fbUsage = document.getElementById("fb-usage");
 const fbError = document.getElementById("fb-error");
 const fbUp = document.getElementById("fb-up");
-const fbMkdir = document.getElementById("fb-mkdir");
 const fbRescan = document.getElementById("fb-rescan");
 
 let fbSort = { col: "name", dir: 1 };
@@ -155,8 +154,6 @@ function fbRender(data) {
   fbCrumbHtml(data);
   fbUp.hidden = !data.parent;
   fbUp.onclick = () => { window.location.href = "/files?path=" + encodeURIComponent(data.parent); };
-  fbMkdir.hidden = !data.mgmt;
-  fbMkdir.onclick = () => fbNewFolder();
 
   if (!data.entries.length) {
     fbBody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "Empty folder." })]));
@@ -178,7 +175,6 @@ function fbRender(data) {
     const actTd = el("td", { class: "fb-actions" });
     if (data.mgmt) {
       actTd.appendChild(fbActionBtn("✎", "Rename", "fb-edit", () => fbRename(e)));
-      actTd.appendChild(fbActionBtn("➜", "Move…", "fb-edit", () => fbMove(e)));
       actTd.appendChild(fbActionBtn("🗑", "Delete", "fb-del", () => fbDelete(e)));
     } else {
       actTd.appendChild(el("span", { class: "muted", text: "—" }));
@@ -236,17 +232,6 @@ async function fbRename(e) {
   await fbMutate("/api/files/rename", "path=" + encodeURIComponent(e.path) + "&name=" + encodeURIComponent(r.value), fbCurrent.path);
 }
 
-async function fbMove(e) {
-  const r = await fbModal({
-    title: "Move",
-    text: "Target folder for \"" + e.name + "\":",
-    input: true,
-    okText: "Move",
-  });
-  if (!r.ok || !r.value) return;
-  await fbMutate("/api/files/move", "path=" + encodeURIComponent(e.path) + "&target=" + encodeURIComponent(r.value), r.value);
-}
-
 async function fbDelete(e) {
   const what = e.dir ? "folder \"" + e.name + "\" and all its contents" : "file \"" + e.name + "\"";
   const r = await fbModal({
@@ -257,12 +242,6 @@ async function fbDelete(e) {
   });
   if (!r.ok) return;
   await fbMutate("/api/files/delete", "path=" + encodeURIComponent(e.path), fbCurrent.path);
-}
-
-async function fbNewFolder() {
-  const r = await fbModal({ title: "New folder", text: "Folder name:", input: true, okText: "Create" });
-  if (!r.ok || !r.value) return;
-  await fbMutate("/api/files/mkdir", "path=" + encodeURIComponent(fbCurrent.path) + "&name=" + encodeURIComponent(r.value), fbCurrent.path);
 }
 
 // ---- loading ----------------------------------------------------------------
@@ -278,7 +257,6 @@ async function fbLoad(path) {
     fbCrumb.innerHTML = "";
     fbUp.hidden = true;
     fbUsage.textContent = "";
-    fbMkdir.hidden = true;
     return;
   }
   if (!data) return;
@@ -288,7 +266,6 @@ async function fbLoad(path) {
     fbCrumb.innerHTML = "";
     fbUp.hidden = true;
     fbUsage.textContent = "";
-    fbMkdir.hidden = true;
     return;
   }
   if (data.pick) {
@@ -304,7 +281,6 @@ function renderRoots(roots) {
   fbBody.innerHTML = "";
   fbCrumb.innerHTML = "";
   fbUp.hidden = true;
-  fbMkdir.hidden = true;
   fbUsage.textContent = "";
   if (!roots.length) return;
   fbBody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "Pick a media folder:" })]));
