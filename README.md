@@ -10,6 +10,9 @@ existing server over the API.
 
 - Web UI with pages for server activity, Jellyfin users, libraries and Movie
   Match (comparing on-disk files to Jellyfin's metadata).
+- Read-only file browser: browse the media folders from Movie Match/Search's
+  "Actions → Browse files" (or `/files`). Browsing is confined to the mapped
+  media folders — anything else, including symlink escapes, is refused.
 - First-run setup: on first launch you choose your own local login (username +
   password) — no default credentials. The local password works on your local
   network, and any Jellyfin admin account works from anywhere. Failed-login

@@ -167,6 +167,7 @@ function idBuildActions(r) {
   if (r.path) {
     actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
     actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
+    actItems.push(hoverMenuLink("/files?path=" + encodeURIComponent(r.path), "Browse files"));
   }
   td.appendChild(hoverMenuButton("Actions", actItems, "actions"));
 

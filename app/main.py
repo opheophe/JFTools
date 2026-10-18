@@ -15,6 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .about import check_for_updates, router as about_router
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
 from .config import config
+from .files import router as files_router
 from .jellyfin.client import JellyfinClient, JellyfinError, close_shared_client, get_client
 from .jellyfin_id import router as jellyfin_id_router
 from .libraries import router as libraries_router
@@ -49,6 +50,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 app.mount("/resources", StaticFiles(directory=str(BASE_DIR.parent / "resources")), name="resources")
 
 app.include_router(about_router)
+app.include_router(files_router)
 app.include_router(jellyfin_id_router)
 app.include_router(libraries_router)
 app.include_router(logs_router)
