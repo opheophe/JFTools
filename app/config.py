@@ -99,6 +99,10 @@ class Settings:
     timezone: str = "Europe/Stockholm"
     path_maps: list[dict] = field(default_factory=list)
     file_mgmt: bool = False
+    opensubtitles_api_key: str = ""
+    opensubtitles_username: str = ""
+    opensubtitles_password: str = ""
+    opensubtitles_languages: str = "en,sv"
 
 
 class Config:
@@ -149,6 +153,10 @@ class Config:
             sonarr_url=_env("JFTOOLS_SONARR_URL", ""),
             timezone=_env("JFTOOLS_TIMEZONE", "Europe/Stockholm"),
             path_maps=_parse_path_map_env(_env("JFTOOLS_PATH_MAP", "")),
+            opensubtitles_api_key=_env("JFTOOLS_OPENSUBTITLES_API_KEY", ""),
+            opensubtitles_username=_env("JFTOOLS_OPENSUBTITLES_USERNAME", ""),
+            opensubtitles_password=_env("JFTOOLS_OPENSUBTITLES_PASSWORD", ""),
+            opensubtitles_languages=_env("JFTOOLS_OPENSUBTITLES_LANGUAGES", "en,sv"),
         )
         try:
             if self.settings_file.exists():
@@ -171,6 +179,14 @@ class Config:
                     settings.path_maps = _sanitize_path_maps(data["path_maps"])
                 if "file_mgmt" in data:
                     settings.file_mgmt = bool(data["file_mgmt"])
+                if data.get("opensubtitles_api_key"):
+                    settings.opensubtitles_api_key = data["opensubtitles_api_key"]
+                if data.get("opensubtitles_username"):
+                    settings.opensubtitles_username = data["opensubtitles_username"]
+                if data.get("opensubtitles_password"):
+                    settings.opensubtitles_password = data["opensubtitles_password"]
+                if data.get("opensubtitles_languages"):
+                    settings.opensubtitles_languages = data["opensubtitles_languages"]
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -188,6 +204,10 @@ class Config:
             "timezone": s.timezone,
             "path_maps": s.path_maps,
             "file_mgmt": s.file_mgmt,
+            "opensubtitles_api_key": s.opensubtitles_api_key,
+            "opensubtitles_username": s.opensubtitles_username,
+            "opensubtitles_password": s.opensubtitles_password,
+            "opensubtitles_languages": s.opensubtitles_languages,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -254,6 +274,18 @@ class Config:
         self._settings.file_mgmt = bool(enabled)
         self._persist()
 
+    def save_opensubtitles(self, api_key: str, username: str, password: str, languages: str) -> None:
+        s = self._settings
+        if api_key is not None:
+            s.opensubtitles_api_key = api_key.strip()
+        if username is not None:
+            s.opensubtitles_username = username.strip()
+        if password is not None:
+            s.opensubtitles_password = password
+        if languages is not None:
+            s.opensubtitles_languages = languages.strip() or "en,sv"
+        self._persist()
+
     # ---- backup / restore ---------------------------------------------------
 
     _EXPORT_FIELDS = (
@@ -266,6 +298,10 @@ class Config:
         "timezone",
         "path_maps",
         "file_mgmt",
+        "opensubtitles_api_key",
+        "opensubtitles_username",
+        "opensubtitles_password",
+        "opensubtitles_languages",
     )
 
     def export_settings(self) -> dict:

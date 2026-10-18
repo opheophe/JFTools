@@ -62,6 +62,7 @@ function seBuildActions(r) {
   if (r.path) {
     actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
     actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
+    actItems.push(hoverMenuAction("Search subs", () => subdlOpen(r.path)));
     actItems.push(hoverMenuLink("/files?path=" + encodeURIComponent(r.path), "Browse files"));
   }
   td.appendChild(hoverMenuButton("Actions", actItems, "actions"));
@@ -459,6 +460,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSort();
   bindSeControls();
   bindSortHeaders();
+  window.subdlRefresh = () => seLoad();
   FilterProfiles(document.getElementById("se-profiles"),
     "jftools.search.profiles",
     () => ({ filters: SE.filters, sort: SE.sort }),

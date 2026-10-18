@@ -121,6 +121,9 @@ values.
 | `JFTOOLS_RADARR_URL` / `JFTOOLS_SONARR_URL` | Default Radarr/Sonarr URLs for Movie Match's "Open" links. |
 | `JFTOOLS_TIMEZONE` / `TZ` | Time zone for logs and scheduled jobs (default `Europe/Stockholm`). |
 | `JFTOOLS_PATH_MAP` | Optional. Semicolon-separated `from=to` path mappings, e.g. `/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`. Maps Jellyfin's container paths to paths this machine can open. Also editable in-app (Settings → Media paths). |
+| `JFTOOLS_OPENSUBTITLES_API_KEY` | Optional. OpenSubtitles API key (opensubtitles.com → Consumers) used by subtitle search/download. Also editable in-app. |
+| `JFTOOLS_OPENSUBTITLES_USERNAME` / `JFTOOLS_OPENSUBTITLES_PASSWORD` | Optional. OpenSubtitles account login — raises the daily download quota. |
+| `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Languages searched by default, e.g. `en,sv` (default `en,sv`). |
 | `PUID` / `PGID` | Container user/group that owns the data files. Set in `docker-compose.yml`. |
 | `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
 
@@ -215,6 +218,49 @@ movie.
 
 Classification matches Subber's Movie List: `acceptable` (English/Swedish/
 Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
+
+## Subtitles
+
+Missing subtitles can be fetched straight from the table: **Actions → Search
+subs** (Movie Match and Search tabs). It identifies the video the same way
+VLSub does — by its OpenSubtitles "moviehash" (first + last 64 KiB) — and falls
+back to a name search when the hash finds nothing. Pick a candidate and JFTools
+saves `<video-name>.<language>.srt` next to the video.
+
+The dialog lists **every subtitle track** on the video — the embedded tracks
+first (buttons greyed out, since they cannot be changed) and then the external
+files. Each external row has a **Delete** button (Jellyfin is told the file
+changed right away) and a **Sync** button that re-aligns that subtitle to the
+video with [ffsubsync](https://github.com/smacke/ffsubsync) — the original is
+only replaced once the sync succeeds.
+
+Closing the dialog (clicking outside it, or Escape) re-scans the file with
+ffprobe and asks Jellyfin to refresh that path, so the Subtitles column and
+Jellyfin's own view update. It only does that when something was downloaded or
+deleted; a sync needs no rescan since the filename and language are unchanged.
+
+A download or delete marks the item as **Not scanned** until that close-time
+rescan (or the **Subtitle scan** button / scheduled scan) re-probes it. A manual
+"Subtitle Ok" mark is cleared when the subtitle files change.
+
+**Requirements:**
+
+- **OpenSubtitles API key** — Settings → OpenSubtitles (create a free consumer
+  key at opensubtitles.com). The key alone works anonymously (~5 downloads/day);
+  adding your account username/password raises it to the free-account quota
+  (~20/day). The dialog shows how many downloads remain.
+- **ffsubsync** for the per-subtitle **Sync** button — drop `ffsubsync.exe` in a
+  `Tools` folder next to the app, put it on PATH, or set `JFTOOLS_FFSUBSYNC`.
+  (ffmpeg/ffprobe are found the same way.) Without it the button reports that
+  ffsubsync is missing.
+- **Media paths** (above) so JFTools can open the video and write next to it.
+- **File management** enabled on the Settings page — subtitle downloads and
+  deletions write into the media folders and are gated behind the same toggle as
+  rename/delete. Existing subtitle files are never overwritten or deleted
+  without confirmation.
+
+Downloads talk to the modern OpenSubtitles.com REST API (`api.opensubtitles.com`),
+not the legacy XML-RPC API that VLSub used (that one is being shut down).
 
 ## User watching
 

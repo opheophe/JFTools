@@ -35,6 +35,9 @@ async def lifespan(app):
     yield
     shutdown_scheduler()
     await close_shared_client()
+    from .opensubtitles import close_shared_client as close_os_client
+
+    await close_os_client()
 
 
 app = FastAPI(title="JFTools", lifespan=lifespan)
@@ -217,6 +220,9 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "timezone": config.settings.timezone,
             "path_maps": config.settings.path_maps,
             "file_mgmt": config.settings.file_mgmt,
+            "os_api_key_is_set": bool(config.settings.opensubtitles_api_key),
+            "os_username": config.settings.opensubtitles_username,
+            "os_languages": config.settings.opensubtitles_languages,
         },
     )
 
@@ -304,6 +310,34 @@ async def settings_files_save(
     state = "enabled" if config.settings.file_mgmt else "disabled"
     log("Jellyfin", "INFO", f"File management {state}")
     return JSONResponse({"ok": True, "message": f"File management {state}."})
+
+
+@app.post("/settings/opensubtitles")
+async def settings_opensubtitles_save(
+    request: Request,
+    user: str = Depends(require_login),
+    opensubtitles_api_key: str = Form(""),
+    opensubtitles_username: str = Form(""),
+    opensubtitles_password: str = Form(""),
+    opensubtitles_languages: str = Form(""),
+):
+    # Blank API key/password fields keep the stored value (they are never
+    # echoed back to the page), so a user can save a login without retyping it.
+    from .opensubtitles import normalize_languages
+
+    api_key = opensubtitles_api_key.strip() or config.settings.opensubtitles_api_key
+    password = opensubtitles_password or config.settings.opensubtitles_password
+    languages = opensubtitles_languages.strip() or config.settings.opensubtitles_languages
+    if not normalize_languages(languages):
+        return JSONResponse(
+            {"ok": False, "error": "Language list is empty."}, status_code=400
+        )
+    config.save_opensubtitles(api_key, opensubtitles_username, password, languages)
+    from .opensubtitles import invalidate
+
+    invalidate()
+    log("Jellyfin", "INFO", "OpenSubtitles settings saved")
+    return JSONResponse({"ok": True, "message": "OpenSubtitles settings saved."})
 
 
 @app.post("/api/paths/test")
@@ -411,6 +445,44 @@ async def settings_test(
                 ["Operating system", info.get("OperatingSystem", "?")],
             ],
         }
+    )
+
+
+@app.post("/api/settings/opensubtitles/test")
+async def settings_opensubtitles_test(
+    request: Request,
+    user: str = Depends(require_login),
+    opensubtitles_api_key: str = Form(""),
+    opensubtitles_username: str = Form(""),
+    opensubtitles_password: str = Form(""),
+):
+    from .opensubtitles import OpenSubtitlesClient, OpenSubtitlesError
+
+    api_key = opensubtitles_api_key.strip() or config.settings.opensubtitles_api_key
+    username = opensubtitles_username.strip() or config.settings.opensubtitles_username
+    password = opensubtitles_password or config.settings.opensubtitles_password
+    client = OpenSubtitlesClient(api_key, username, password)
+    try:
+        user_info = await client.test()
+    except OpenSubtitlesError as exc:
+        log("Jellyfin", "ERROR", f"OpenSubtitles test: {exc}")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    items = []
+    if user_info:
+        allowed = user_info.get("allowed_downloads")
+        used = user_info.get("downloads_count")
+        items.append(["Account", username or "?"])
+        items.append(["Level", user_info.get("level") or (user_info.get("vip") and "VIP") or "?"])
+        items.append(["Downloads used today", f"{used} / {allowed}" if isinstance(used, int) and isinstance(allowed, int) else "?"])
+    else:
+        items.append(["API key", "accepted"])
+        items.append(
+            ["Account", "anonymous — add a username/password for a higher daily quota"]
+        )
+    log("Jellyfin", "INFO", "OpenSubtitles test OK")
+    return JSONResponse(
+        {"ok": True, "type": "kv", "title": "OpenSubtitles OK", "items": items}
     )
 
 

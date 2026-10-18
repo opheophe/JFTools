@@ -438,6 +438,7 @@ function bindSettings() {
   bindFormSubmit("integrations-form", "/settings/integrations", "integrations-result");
   bindFormSubmit("timezone-form", "/settings/timezone", "timezone-result");
   bindFormSubmit("files-form", "/settings/files", "files-result");
+  bindFormSubmit("opensubtitles-form", "/settings/opensubtitles", "opensubtitles-result");
   bindSettingsBackup();
   bindPathMaps();
 
@@ -458,6 +459,26 @@ function bindSettings() {
       resultEl.appendChild(el("p", { class: "error", text: String(err) }));
     } finally {
       testBtn.disabled = false;
+    }
+  });
+
+  const osTestBtn = document.getElementById("os-test-btn");
+  const osResultEl = document.getElementById("opensubtitles-result");
+  if (!osTestBtn || !osResultEl) return;
+
+  osTestBtn.addEventListener("click", async () => {
+    const form = document.getElementById("opensubtitles-form");
+    showSpinner(osResultEl);
+    osTestBtn.disabled = true;
+    try {
+      const data = await postJSON("/api/settings/opensubtitles/test", serializeForm(form));
+      osResultEl.innerHTML = "";
+      renderResult(osResultEl, data);
+    } catch (err) {
+      osResultEl.innerHTML = "";
+      osResultEl.appendChild(el("p", { class: "error", text: String(err) }));
+    } finally {
+      osTestBtn.disabled = false;
     }
   });
 }

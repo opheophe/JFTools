@@ -167,6 +167,7 @@ function idBuildActions(r) {
   if (r.path) {
     actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
     actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
+    actItems.push(hoverMenuAction("Search subs", () => subdlOpen(r.path)));
     actItems.push(hoverMenuLink("/files?path=" + encodeURIComponent(r.path), "Browse files"));
   }
   td.appendChild(hoverMenuButton("Actions", actItems, "actions"));
@@ -501,6 +502,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSort();
   bindIdControls();
   bindSortHeaders();
+  window.subdlRefresh = null;  // Movie Match shows no subtitle column; nothing to refresh
   FilterProfiles(document.getElementById("id-profiles"),
     "jftools.moviematch.profiles",
     () => ({ filters: ID.filters, sort: ID.sort }),

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -20,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Header, Request
 from fastapi.responses import JSONResponse
 
 from .config import config
@@ -267,27 +268,47 @@ def _display_lines(internal: list[dict], external: list[dict]) -> list[str]:
 # ---- ffprobe -----------------------------------------------------------------
 
 
-def resolve_ffprobe() -> str | None:
-    """Return a path to a working ffprobe binary, or ``None``.
+def _resolve_tool(env_var: str, name: str) -> str | None:
+    """Locate an external binary.
 
-    Resolution order: ``JFTOOLS_FFPROBE`` env var -> ``ffprobe`` on PATH -> the
-    bundled ``Tools/ffprobe.exe`` (Windows) next to the app.
+    Resolution order: ``env_var`` -> ``name`` on PATH -> the bundled
+    ``Tools/<name>`` (Windows ``.exe`` first) next to the app.
     """
     candidates = []
-    env = (os.environ.get("JFTOOLS_FFPROBE") or "").strip()
+    env = (os.environ.get(env_var) or "").strip()
     if env:
         candidates.append(env)
-    on_path = shutil.which("ffprobe")
+    on_path = shutil.which(name)
     if on_path:
         candidates.append(on_path)
     root = Path(__file__).resolve().parent.parent
     for folder in ("Tools", "tools"):
-        for name in ("ffprobe.exe", "ffprobe"):
-            candidates.append(str(root / folder / name))
+        for suffix in (".exe", ""):
+            candidates.append(str(root / folder / f"{name}{suffix}"))
     for c in candidates:
         if c and Path(c).is_file():
             return c
     return None
+
+
+def resolve_ffprobe() -> str | None:
+    """Return a path to a working ffprobe binary, or ``None``."""
+    return _resolve_tool("JFTOOLS_FFPROBE", "ffprobe")
+
+
+def resolve_ffmpeg() -> str | None:
+    """Return a path to a working ffmpeg binary, or ``None``."""
+    return _resolve_tool("JFTOOLS_FFMPEG", "ffmpeg")
+
+
+def resolve_ffsubsync() -> str | None:
+    """Return a path to ffsubsync (subtitle auto-sync), or ``None``.
+
+    ffsubsync aligns a subtitle to the video's audio waveform; it is what makes
+    "Sync" in the subtitle dialog work. Bundled ``Tools/ffsubsync.exe`` or on
+    PATH is fine.
+    """
+    return _resolve_tool("JFTOOLS_FFSUBSYNC", "ffsubsync")
 
 
 def _probe_subtitles(ffprobe: str, video_path: str) -> tuple[list[dict], float, str | None]:
@@ -598,3 +619,581 @@ async def subtitles_ok_set(
     set_ok(path, on)
     log("Search", "INFO", f"Subtitle Ok {'marked' if on else 'unmarked'}: {path}")
     return JSONResponse({"ok": True})
+
+
+# ---- OpenSubtitles download -------------------------------------------------
+
+
+def _library_row(path: str) -> dict | None:
+    """The Movie Match row for a Jellyfin path, or None."""
+    from .jellyfin_id import _state as id_state
+
+    for r in id_state.get("rows") or []:
+        if r.get("path") == path:
+            return r
+    return None
+
+
+def _season_episode(path: str) -> tuple[int | None, int | None]:
+    """Season/episode numbers parsed from a file path (``SxxExx``/``1x02``)."""
+    m = re.search(r"[sS](\d{1,2})[eE](\d{1,2})", path or "")
+    if not m:
+        m = re.search(r"(?:^|[^0-9])(\d{1,2})[xX](\d{2})(?:[^0-9]|$)", path or "")
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None, None
+
+
+def _download_languages(requested: str) -> list[str]:
+    from .opensubtitles import normalize_languages
+
+    langs = normalize_languages(requested) or normalize_languages(
+        config.settings.opensubtitles_languages
+    )
+    return langs or ["en"]
+
+
+def _write_gate(x_jftools: str):
+    """403 unless File management is on and the CSRF header is present."""
+    if not config.settings.file_mgmt:
+        return JSONResponse(
+            {
+                "ok": False,
+                "file_mgmt": False,
+                "error": (
+                    "File management is disabled. Enable it on the Settings "
+                    "page to change subtitle files."
+                ),
+            },
+            status_code=403,
+        )
+    if x_jftools != "1":
+        return JSONResponse({"ok": False, "error": "Missing security header."}, status_code=403)
+    return None
+
+
+def _mark_unscanned(path: str) -> None:
+    """Flag a library item for a fresh subtitle scan after its subs change.
+
+    The Search tab then shows "Not scanned", the flag filters stop matching
+    stale data, and the next scan (the Subtitle scan button, closing the dialog,
+    or the scheduled job) re-probes it. The embedded tracks are kept so the
+    dialog can still list them without a fresh probe. The manual "Subtitle Ok"
+    mark is dropped too — the state changed.
+    """
+    entry = _state["files"].get(path) or _stub(path)
+    entry["scanned"] = False
+    entry["external"] = []
+    entry["subs"] = []
+    entry["flags"] = None
+    entry["error"] = None
+    _state["files"][path] = entry
+    _state["ok"] = [k for k in _state["ok"] if k != path]
+    _save_state()
+
+
+def _sync_subtitle_file(
+    video: str, subtitle: str, offset: float | None
+) -> tuple[bool, str | None, str]:
+    """Sync ``subtitle`` to ``video`` in place. Returns ``(ok, error, method)``.
+
+    With no offset this runs ffsubsync (audio-waveform alignment). A manual
+    offset shifts the file with ffmpeg instead (srt only). The original file is
+    only replaced once the tool produced valid output, so a failure leaves it
+    untouched.
+    """
+    target = Path(subtitle)
+    # A dotted temp name keeps it hidden from ``_external_subtitles`` while it
+    # exists, and the real extension lets the tool infer the format.
+    tmp = str(target.with_name(f".{target.stem}.jfsync{target.suffix}"))
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
+    def run(cmd: list[str]) -> tuple[bool, str | None]:
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=600,
+                encoding="utf-8", errors="replace", creationflags=creationflags,
+            )
+        except FileNotFoundError:
+            return False, "the tool could not be started."
+        except subprocess.TimeoutExpired:
+            return False, "the sync timed out."
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)
+        if result.returncode != 0:
+            lines = [ln for ln in (result.stderr or result.stdout or "").splitlines() if ln.strip()]
+            return False, (lines[-1].strip() if lines else f"exit code {result.returncode}")
+        return True, None
+
+    try:
+        if offset is None:
+            ffsubsync = resolve_ffsubsync()
+            if not ffsubsync:
+                return False, "ffsubsync was not found.", "none"
+            cmd = [ffsubsync, "-i", subtitle, "-o", tmp]
+            ffmpeg = resolve_ffmpeg()
+            if ffmpeg:
+                cmd += ["--ffmpeg-path", ffmpeg]
+            cmd.append(video)
+            ok, err = run(cmd)
+            if not ok:
+                return False, f"ffsubsync: {err}", "ffsubsync"
+            method = "ffsubsync"
+        else:
+            if target.suffix.lower() != ".srt":
+                return False, "a manual offset only works for .srt subtitles.", "ffmpeg"
+            ffmpeg = resolve_ffmpeg()
+            if not ffmpeg:
+                return False, "ffmpeg was not found.", "ffmpeg"
+            cmd = [
+                ffmpeg,
+                "-i", video,
+                "-itsoffset", str(offset),
+                "-i", subtitle,
+                "-map", "1:s:0",
+                "-c", "srt",
+                "-y",
+                tmp,
+            ]
+            ok, err = run(cmd)
+            if not ok:
+                return False, f"ffmpeg: {err}", "ffmpeg"
+            method = "ffmpeg"
+
+        if not os.path.isfile(tmp) or os.path.getsize(tmp) == 0:
+            return False, "the sync produced no output.", method
+        os.replace(tmp, subtitle)
+        return True, None, method
+    finally:
+        if os.path.lexists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+@router.post("/api/subtitles/search")
+async def subtitles_search(
+    user: str = Depends(require_login),
+    path: str = Form(""),
+    language: str = Form(""),
+):
+    """Search OpenSubtitles for a library file — by moviehash first, then by name."""
+    path = path.strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    row = _library_row(path)
+    if row is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    if not config.settings.opensubtitles_api_key:
+        return JSONResponse(
+            {
+                "ok": False,
+                "configured": False,
+                "error": (
+                    "OpenSubtitles is not configured. Add an API key on the "
+                    "Settings page (opensubtitles.com → Consumers)."
+                ),
+            },
+            status_code=400,
+        )
+
+    from .opensubtitles import OpenSubtitlesError, get_opensubtitles, opensubtitles_hash
+
+    client = get_opensubtitles()
+    langs = _download_languages(language)
+    base = {
+        "ok": True,
+        "file": Path(path).name,
+        "languages": langs,
+        "file_mgmt": config.settings.file_mgmt,
+        "remaining": client.remaining(),
+    }
+
+    # 1. Hash search — exact match for this specific release.
+    method = "hash"
+    result = None
+    local = resolve_path(path, config.settings.path_maps)
+    if local and os.path.isfile(local):
+        try:
+            moviehash, size = await asyncio.to_thread(opensubtitles_hash, local)
+            result = await client.search(languages=langs, moviehash=moviehash)
+            log(
+                "Search",
+                "INFO",
+                f"Subtitle hash search {Path(path).name}: "
+                f"{moviehash} ({size} B) -> {result['total_count']} result(s)",
+            )
+        except OpenSubtitlesError as exc:
+            return JSONResponse(
+                {**base, "ok": False, "error": str(exc)}, status_code=502
+            )
+    elif local:
+        base["note"] = "File unreachable — searched by name only."
+
+    # 2. Name fallback when the hash found nothing.
+    if result is None or result["total_count"] == 0:
+        method = "name"
+        row_type = row.get("type") or ""
+        query = row.get("series") if row_type in ("Episode", "Series") else (row.get("name") or row.get("display") or "")
+        query = query.strip()
+        if not query:
+            query = Path(path).name
+        season, episode = _season_episode(path)
+        try:
+            result = await client.search(
+                languages=langs,
+                query=query,
+                type="episode" if row_type in ("Episode", "Series") else "movie",
+                season_number=season,
+                episode_number=episode,
+            )
+            log(
+                "Search",
+                "INFO",
+                f"Subtitle name search {Path(path).name}: "
+                f"\"{query}\" -> {result['total_count']} result(s)",
+            )
+        except OpenSubtitlesError as exc:
+            return JSONResponse(
+                {**base, "ok": False, "error": str(exc)}, status_code=502
+            )
+
+    return JSONResponse(
+        {
+            **base,
+            "method": method,
+            "total": result["total_count"] if result else 0,
+            "candidates": (result or {}).get("data") or [],
+        }
+    )
+
+
+@router.post("/api/subtitles/download")
+async def subtitles_download(
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+    path: str = Form(""),
+    file_id: str = Form(""),
+    sub_format: str = Form("srt"),
+    language: str = Form(""),
+    overwrite: str = Form(""),
+):
+    """Download one subtitle file and save it next to the video.
+
+    Writing into the media folders requires the File management setting and the
+    same-origin CSRF header as the other file mutations.
+    """
+    gate = _write_gate(x_jftools)
+    if gate:
+        return gate
+
+    path = path.strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    row = _library_row(path)
+    if row is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    try:
+        file_id_int = int(file_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Invalid subtitle id."}, status_code=400)
+
+    local = resolve_path(path, config.settings.path_maps)
+    if not local or not os.path.isfile(local):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "The video file is not reachable. Set the Media paths on "
+                    "the Settings page first."
+                ),
+            },
+            status_code=400,
+        )
+
+    from .opensubtitles import (
+        OpenSubtitlesError,
+        get_opensubtitles,
+        normalize_languages,
+        sub_extension,
+    )
+
+    langs = _download_languages(language)
+    lang_code = re.sub(r"[^a-z0-9]", "", (langs[0] or "").lower()) or "und"
+    ext = sub_extension(sub_format)
+    target = os.path.join(os.path.dirname(local), f"{Path(local).stem}.{lang_code}{ext}")
+    if os.path.lexists(target) and overwrite.strip().lower() not in ("1", "true", "yes"):
+        return JSONResponse(
+            {
+                "ok": False,
+                "exists": True,
+                "error": f"{os.path.basename(target)} already exists.",
+            },
+            status_code=409,
+        )
+
+    client = get_opensubtitles()
+    try:
+        data = await client.download(file_id_int, sub_format)
+    except OpenSubtitlesError as exc:
+        log("Search", "ERROR", f"Subtitle download failed: {exc}")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    def _write(content: bytes) -> None:
+        tmp = target + ".part"
+        with open(tmp, "wb") as fh:
+            fh.write(content)
+        os.replace(tmp, target)
+
+    try:
+        await asyncio.to_thread(_write, data["content"])
+    except OSError as exc:
+        log("Search", "ERROR", f"Subtitle write failed: {target}: {exc}")
+        return JSONResponse(
+            {"ok": False, "error": f"Could not save the subtitle: {exc}"},
+            status_code=500,
+        )
+
+    remaining = data.get("remaining")
+    log(
+        "Search",
+        "INFO",
+        f"Downloaded subtitle: {os.path.basename(target)} "
+        f"({remaining if remaining is not None else '?'} downloads remaining)",
+    )
+
+    # Mark the item for a fresh scan rather than probing now: closing the dialog
+    # (or the Subtitle scan button / scheduled job) does the actual ffprobe pass.
+    # Until then the Search tab shows "Not scanned".
+    _mark_unscanned(path)
+
+    # Tell Jellyfin a subtitle appeared so it can pick it up right away.
+    jellyfin = None
+    try:
+        from .jellyfin.client import JellyfinError, get_client
+
+        await get_client().scan_paths([path])
+    except JellyfinError as exc:
+        jellyfin = str(exc)
+        log("Search", "WARN", f"Jellyfin rescan after download failed: {exc}")
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": f"Saved {os.path.basename(target)}.",
+            "file": os.path.basename(target),
+            "remaining": remaining,
+            "unscanned": True,
+            "jellyfin": jellyfin,
+        }
+    )
+
+
+@router.post("/api/subtitles/existing")
+async def subtitles_existing(
+    user: str = Depends(require_login),
+    path: str = Form(""),
+):
+    """Every subtitle track for a library video: embedded tracks + files."""
+    path = path.strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    if _library_row(path) is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+
+    # Embedded tracks: from the scan store when we have them, otherwise probe.
+    stored = (_state["files"].get(path) or {}).get("internal")
+    internal = list(stored or [])
+
+    external: list[dict] = []
+    local = resolve_path(path, config.settings.path_maps)
+    if local and os.path.isfile(local):
+        folder = os.path.dirname(local)
+        for e in _external_subtitles(local):
+            try:
+                size = os.path.getsize(os.path.join(folder, e["file"]))
+            except OSError:
+                size = None
+            external.append({**e, "size": size})
+
+        if stored is None:
+            ffprobe = resolve_ffprobe()
+            if ffprobe:
+                tracks, _duration, err = await asyncio.to_thread(
+                    _probe_subtitles, ffprobe, local
+                )
+                if not err:
+                    internal = tracks
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "file_mgmt": config.settings.file_mgmt,
+            "internal": internal,
+            "external": external,
+        }
+    )
+
+
+@router.post("/api/subtitles/delete")
+async def subtitles_delete(
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+    path: str = Form(""),
+    file: str = Form(""),
+):
+    """Delete one external subtitle file next to a library video.
+
+    Write-gated like the other file mutations. The requested file must be one
+    of the video's own external subtitles (recomputed here), so this can never
+    delete an arbitrary file even if the caller is authenticated.
+    """
+    gate = _write_gate(x_jftools)
+    if gate:
+        return gate
+
+    path = (path or "").strip()
+    file = (file or "").strip()
+    if not path or not file:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    if _library_row(path) is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    local = resolve_path(path, config.settings.path_maps)
+    if not local or not os.path.isfile(local):
+        return JSONResponse(
+            {"ok": False, "error": "The video file is not reachable."}, status_code=400
+        )
+    if file not in {e["file"] for e in _external_subtitles(local)}:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "That subtitle does not belong to this video.",
+            },
+            status_code=403,
+        )
+
+    from .files import browser_roots, delete_entry
+
+    result = delete_entry(os.path.join(os.path.dirname(local), file), browser_roots())
+    if not result.get("ok"):
+        log("Search", "WARN", f"Subtitle delete refused ({result.get('error')}): {file}")
+        return JSONResponse(
+            {"ok": False, "error": result.get("error") or "Delete failed."},
+            status_code=400,
+        )
+
+    _mark_unscanned(path)
+
+    # Tell Jellyfin the file changed so the subtitle disappears from its view.
+    jellyfin = None
+    try:
+        from .jellyfin.client import JellyfinError, get_client
+
+        await get_client().scan_paths([path])
+    except JellyfinError as exc:
+        jellyfin = str(exc)
+        log("Search", "WARN", f"Jellyfin rescan after delete failed: {exc}")
+
+    log("Search", "INFO", f"Deleted subtitle: {os.path.basename(result['src'])}")
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": f"Deleted {file}.",
+            "file": file,
+            "jellyfin": jellyfin,
+        }
+    )
+
+
+@router.post("/api/subtitles/sync")
+async def subtitles_sync(
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+    path: str = Form(""),
+    file: str = Form(""),
+    offset: str = Form(""),
+):
+    """Re-align one external subtitle file to its video.
+
+    Write-gated like the other file mutations. Without an offset the file is
+    aligned with ffsubsync; a numeric ``offset`` (seconds) shifts it with ffmpeg
+    instead. The requested file must be one of the video's own external
+    subtitles, and the original is only replaced once the tool succeeds.
+    """
+    gate = _write_gate(x_jftools)
+    if gate:
+        return gate
+
+    path = (path or "").strip()
+    file = (file or "").strip()
+    if not path or not file:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    if _library_row(path) is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    local = resolve_path(path, config.settings.path_maps)
+    if not local or not os.path.isfile(local):
+        return JSONResponse(
+            {"ok": False, "error": "The video file is not reachable."}, status_code=400
+        )
+    if file not in {e["file"] for e in _external_subtitles(local)}:
+        return JSONResponse(
+            {"ok": False, "error": "That subtitle does not belong to this video."},
+            status_code=403,
+        )
+
+    offset_val: float | None = None
+    if isinstance(offset, str) and offset.strip():
+        try:
+            offset_val = float(offset)
+        except ValueError:
+            return JSONResponse(
+                {"ok": False, "error": "The offset must be a number of seconds."},
+                status_code=400,
+            )
+    if offset_val is None and not resolve_ffsubsync():
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "ffsubsync is required to sync subtitles. Put ffsubsync.exe in "
+                    "the Tools folder, install it on PATH, or set JFTOOLS_FFSUBSYNC."
+                ),
+            },
+            status_code=400,
+        )
+
+    subtitle = os.path.join(os.path.dirname(local), file)
+    ok, err, method = await asyncio.to_thread(
+        _sync_subtitle_file, local, subtitle, offset_val
+    )
+    if not ok:
+        log("Search", "WARN", f"Subtitle sync failed ({err}): {file}")
+        return JSONResponse({"ok": False, "error": err or "Sync failed."}, status_code=502)
+
+    # The filename and language do not change, so there is nothing else to do:
+    # Jellyfin reads the subtitle from disk, and the stored track data (name,
+    # language, forced) is still accurate.
+    if method == "ffmpeg":
+        message = f"Shifted {file} by {offset_val}s."
+    else:
+        message = f"Synced {file}."
+    log("Search", "INFO", f"{message} ({method})")
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": message,
+            "file": file,
+            "method": method,
+        }
+    )
