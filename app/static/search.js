@@ -60,6 +60,7 @@ function seBuildActions(r) {
 
   const actItems = [];
   if (r.path) {
+    actItems.push(hoverMenuAction("Play", () => playVideo(r.path)));
     actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
     actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
     actItems.push(hoverMenuAction("Search subs", () => subdlOpen(r.path)));

@@ -450,9 +450,38 @@ td.fb-actions { white-space: nowrap; }
   background: var(--panel); color: var(--muted); border: 1px solid var(--border);
 }
 .subdl-mini { flex-shrink: 0; font-size: 0.72rem; padding: 0.1rem 0.5rem; }
+.subdl-mini.subdl-play { color: var(--ok); border-color: var(--ok); }
 .subdl-mini.subdl-del { color: var(--danger); border-color: var(--danger); }
 .subdl-mini.subdl-sync { color: var(--accent); border-color: var(--accent); }
 .subdl-mini:disabled { opacity: 0.4; cursor: default; color: var(--muted); border-color: var(--border); }
+
+/* player window (/play) */
+.play-body { background: #000; overflow: hidden; }
+.play { display: flex; flex-direction: column; gap: 0.6rem; height: 100vh; padding: 0.75rem; }
+.play-head { display: flex; align-items: baseline; gap: 0.75rem; min-width: 0; }
+.play-file {
+  font-weight: 600; color: var(--text); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.play-status { font-size: 0.8rem; margin-left: auto; text-align: right; flex-shrink: 0; }
+.play-status.error { color: var(--danger); }
+.play-status.warn { color: var(--warn); }
+.play-video { width: 100%; flex: 1 1 auto; min-height: 0; background: #000; border-radius: 8px; }
+.play-bar {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.5rem 0.6rem; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.play-time { font-variant-numeric: tabular-nums; font-size: 0.85rem; margin-right: 0.25rem; }
+.play-field { display: flex; align-items: center; gap: 0.35rem; margin: 0; font-weight: 600; font-size: 0.8rem; white-space: nowrap; }
+.play-btn { padding: 0.25rem 0.55rem; font-size: 0.8rem; }
+.play-input {
+  font: inherit; font-size: 0.8rem; color: var(--text); background: var(--inset);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.4rem;
+  width: auto; margin: 0;
+}
+.play-subs { max-width: 22rem; }
+.play-prepare { margin-left: auto; color: var(--warn); border-color: var(--warn-border); }
 
 /* About page */
 .about-head { align-items: center; gap: 1.25rem; }

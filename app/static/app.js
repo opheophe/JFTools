@@ -1068,10 +1068,32 @@ function renderPopup(resp, desc) {
       ev.preventDefault();
       rescanSubtitle(rescanSub, item.path);
     });
-    inner.appendChild(el("div", { class: "pop-links" }, [rescan, rescanSub]));
+    const play = el("a", { class: "pop-rescan pop-play", href: "#", text: "Play" });
+    play.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      playVideo(item.path);
+    });
+    inner.appendChild(el("div", { class: "pop-links" }, [play, rescan, rescanSub]));
   }
 
   popupNode.appendChild(inner);
+}
+
+// Player popup: one reusable window per session, so clicking Play again on
+// another file (or another subtitle track) navigates that window instead of
+// stacking a new one per click. Must be called straight from a click handler,
+// or the browser blocks the popup.
+const PLAY_WINDOW = "jftools-play";
+
+function playVideo(path, track) {
+  if (!path) return;
+  let url = "/play?path=" + encodeURIComponent(path);
+  if (track) url += "&track=" + encodeURIComponent(track);
+  window.open(
+    url,
+    PLAY_WINDOW,
+    "width=1180,height=720,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no"
+  );
 }
 
 async function rescanFile(node, path) {

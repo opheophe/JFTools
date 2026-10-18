@@ -346,6 +346,9 @@ def _probe_subtitles(ffprobe: str, video_path: str) -> tuple[list[dict], float, 
         name = lang if (not title or title.lower() == lang.lower()) else f"{lang} ({title})"
         forced = bool((s.get("disposition") or {}).get("forced")) or "forced" in title.lower()
         internal.append({
+            # The absolute stream index, so the player can map this track
+            # exactly (``-map 0:<index>``) when it extracts it to WebVTT.
+            "index": s.get("index"),
             "lang": lang,
             "name": name,
             "forced": forced,
@@ -433,7 +436,13 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
     external = _external_subtitles(local)
     entry["duration"] = duration
     entry["internal"] = [
-        {"lang": t["lang"], "name": t["name"], "forced": t["forced"], "codec": t["codec"]}
+        {
+            "index": t.get("index"),
+            "lang": t["lang"],
+            "name": t["name"],
+            "forced": t["forced"],
+            "codec": t["codec"],
+        }
         for t in internal
     ]
     entry["external"] = external
@@ -632,6 +641,39 @@ def _library_row(path: str) -> dict | None:
         if r.get("path") == path:
             return r
     return None
+
+
+async def subtitle_tracks_for(path: str) -> tuple[list[dict], list[dict]]:
+    """``(embedded, external)`` subtitle tracks for a library video path.
+
+    Embedded tracks come from the scan store when the scan has seen this file,
+    otherwise from a one-off ffprobe. External tracks are the subtitle files
+    sitting next to the video. Shared by the subtitle dialog and the player.
+    """
+    stored = (_state["files"].get(path) or {}).get("internal")
+    internal = list(stored or [])
+
+    external: list[dict] = []
+    local = resolve_path(path, config.settings.path_maps)
+    if local and os.path.isfile(local):
+        folder = os.path.dirname(local)
+        for e in _external_subtitles(local):
+            try:
+                size = os.path.getsize(os.path.join(folder, e["file"]))
+            except OSError:
+                size = None
+            external.append({**e, "size": size})
+
+        if stored is None:
+            ffprobe = resolve_ffprobe()
+            if ffprobe:
+                tracks, _duration, err = await asyncio.to_thread(
+                    _probe_subtitles, ffprobe, local
+                )
+                if not err:
+                    internal = tracks
+
+    return internal, external
 
 
 def _season_episode(path: str) -> tuple[int | None, int | None]:
@@ -1008,29 +1050,7 @@ async def subtitles_existing(
             {"ok": False, "error": "Not in the library list."}, status_code=404
         )
 
-    # Embedded tracks: from the scan store when we have them, otherwise probe.
-    stored = (_state["files"].get(path) or {}).get("internal")
-    internal = list(stored or [])
-
-    external: list[dict] = []
-    local = resolve_path(path, config.settings.path_maps)
-    if local and os.path.isfile(local):
-        folder = os.path.dirname(local)
-        for e in _external_subtitles(local):
-            try:
-                size = os.path.getsize(os.path.join(folder, e["file"]))
-            except OSError:
-                size = None
-            external.append({**e, "size": size})
-
-        if stored is None:
-            ffprobe = resolve_ffprobe()
-            if ffprobe:
-                tracks, _duration, err = await asyncio.to_thread(
-                    _probe_subtitles, ffprobe, local
-                )
-                if not err:
-                    internal = tracks
+    internal, external = await subtitle_tracks_for(path)
 
     return JSONResponse(
         {

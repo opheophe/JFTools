@@ -27,6 +27,10 @@ existing server over the API.
   instance.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans.
+- Player: **Actions → Play** streams a library file in a small popup window —
+  seek, speed, jump to a time — with any subtitle track attached (embedded
+  streams extracted, external files converted to WebVTT), and a one-click
+  ffmpeg remux for files the browser cannot decode.
 - Single small container image, published to GitHub Container Registry for both
   `linux/amd64` and `linux/arm64`.
 - `/healthz` healthcheck.
@@ -261,6 +265,39 @@ rescan (or the **Subtitle scan** button / scheduled scan) re-probes it. A manual
 
 Downloads talk to the modern OpenSubtitles.com REST API (`api.opensubtitles.com`),
 not the legacy XML-RPC API that VLSub used (that one is being shut down).
+
+## Player
+
+**Actions → Play** (Movie Match and Search tabs) opens the file in a small
+player window. It streams the original video straight from disk — the server
+supports HTTP range requests, so the native timeline seeks normally — and the
+row of controls adds a time readout, −30/−5/+5/+30 second jumps, a **Go to**
+box (`mm:ss` or `hh:mm:ss`), a speed selector and a **Subtitles** selector.
+
+Every subtitle track the scanner knows about is in that selector: embedded
+streams are extracted with ffmpeg, external `.srt`/`.vtt`/`.ass`/`.ssa` files
+are converted to WebVTT first. Embedded bitmap subtitles (PGS/DVD) are listed
+but marked unavailable, since a browser cannot render them. The same player
+opens from the subtitle dialog: every track row has a **Play** button that
+starts the file with that track already selected. One player window is reused,
+so clicking Play again just re-loads it.
+
+Playback is read-only, so it needs no File management toggle — only a login.
+Paths are resolved through **Media paths** and must land inside the browsable
+media folders, exactly like the file browser.
+
+**A browser can only decode what it supports.** A remuxed MKV with AC3/DTS
+audio, for example, plays silently (or not at all). When that happens the
+player offers **Make browser copy**: ffmpeg remuxes the file into
+`play_cache/` in the data folder — video stream copied untouched, audio
+converted to AAC — and the player switches to it, keeping the position. The
+first copy takes a minute or two for a feature film; later plays reuse it. The
+cache is pruned at startup (older than a week, and oldest-first above ~5 GB).
+
+**Requirements:** ffmpeg (bundled in the Docker image, or in `Tools/` next to
+the app) for embedded subtitle extraction and browser copies. Without it the
+player still streams files the browser can decode, but the embedded tracks
+report that they cannot be converted.
 
 ## User watching
 

@@ -21,6 +21,7 @@ from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .media import router as media_router
 from .paths import resolve_path
+from .player import prune_play_cache, router as player_router
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
 from .subtitles import router as subtitles_router
 from .users import router as users_router
@@ -31,6 +32,7 @@ from .web import BASE_DIR, RevalidatedStaticFiles, require_login, templates
 async def lifespan(app):
     start_scheduler()
     asyncio.create_task(check_for_updates())
+    prune_play_cache()
     yield
     shutdown_scheduler()
     await close_shared_client()
@@ -75,6 +77,7 @@ app.include_router(jellyfin_id_router)
 app.include_router(libraries_router)
 app.include_router(logs_router)
 app.include_router(media_router)
+app.include_router(player_router)
 app.include_router(scheduler_router)
 app.include_router(subtitles_router)
 app.include_router(users_router)

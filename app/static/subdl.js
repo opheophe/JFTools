@@ -182,8 +182,13 @@ function subdlRenderList(langFilter) {
 // ---- subtitle tracks (embedded + external) ----------------------------------
 
 // Delete/Sync buttons for a track row. Embedded tracks pass no file, so both
-// stay disabled — only files on disk can be changed.
-function subdlTrackButtons(rowEl, file) {
+// stay disabled — only files on disk can be changed. Play works for every row
+// (it only reads), in the player popup with that track preselected.
+function subdlTrackButtons(rowEl, file, spec) {
+  const play = el("button", { type: "button", class: "subdl-mini subdl-play", text: "Play" });
+  if (spec) play.addEventListener("click", () => playVideo(subdlPath, spec));
+  else play.disabled = true;
+
   const del = el("button", { type: "button", class: "subdl-mini subdl-del", text: "Delete" });
   const sync = el("button", { type: "button", class: "subdl-mini subdl-sync", text: "Sync" });
   if (!file || !subdlFileMgmt) {
@@ -193,6 +198,7 @@ function subdlTrackButtons(rowEl, file) {
     del.addEventListener("click", () => subdlDelete(file, del));
     sync.addEventListener("click", () => subdlSync(file, sync));
   }
+  rowEl.appendChild(play);
   rowEl.appendChild(del);
   rowEl.appendChild(sync);
 }
@@ -206,14 +212,17 @@ function subdlRenderTracks() {
     box.appendChild(el("p", { class: "muted", text: "No subtitle tracks on this file." }));
     return;
   }
-  subdlInternal.forEach((t) => {
+  subdlInternal.forEach((t, i) => {
     const rowEl = el("div", { class: "subdl-subrow" });
     rowEl.appendChild(el("span", { class: "subdl-tag", text: "embedded" }));
     let label = t.name || t.lang || "Unknown";
     if (t.forced && !/forced/i.test(label)) label += " (Forced)";
     rowEl.appendChild(el("span", { class: "subdl-name", text: label, title: label }));
     if (t.codec) rowEl.appendChild(el("span", { class: "muted", text: t.codec }));
-    subdlTrackButtons(rowEl, null);
+    // "internal:<n>" is ffprobe's stream index; "sub:<n>" the n-th subtitle
+    // stream, for stores written before the index was kept.
+    const spec = (t.index === null || t.index === undefined) ? "sub:" + i : "internal:" + t.index;
+    subdlTrackButtons(rowEl, null, spec);
     box.appendChild(rowEl);
   });
   subdlExisting.forEach((s) => {
@@ -225,7 +234,7 @@ function subdlRenderTracks() {
     rowEl.appendChild(el("span", { class: "subdl-c-lang", text: label }));
     rowEl.appendChild(el("span", { class: "subdl-name", text: s.file, title: s.file }));
     rowEl.appendChild(el("span", { class: "muted", text: subdlFmtSize(s.size) }));
-    subdlTrackButtons(rowEl, s.file);
+    subdlTrackButtons(rowEl, s.file, "external:" + s.file);
     box.appendChild(rowEl);
   });
 }

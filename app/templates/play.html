@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ file }} — JFTools player</title>
+  <link rel="icon" href="/resources/icon.ico">
+  <link rel="icon" type="image/png" href="/resources/icon.png">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset }}">
+</head>
+<body class="play-body">
+  <main class="play">
+    <div class="play-head">
+      <span class="play-file" id="pl-file" title="{{ path }}">{{ file }}</span>
+      <span class="play-status muted" id="pl-status"></span>
+    </div>
+
+    <video id="pl-video" class="play-video" controls preload="metadata" playsinline></video>
+
+    <div class="play-bar">
+      <span class="play-time" id="pl-time">0:00 / 0:00</span>
+      <button type="button" class="play-btn" data-skip="-30" title="Back 30 seconds">−30s</button>
+      <button type="button" class="play-btn" data-skip="-5" title="Back 5 seconds">−5s</button>
+      <button type="button" class="play-btn" data-skip="5" title="Forward 5 seconds">+5s</button>
+      <button type="button" class="play-btn" data-skip="30" title="Forward 30 seconds">+30s</button>
+
+      <label class="play-field">Go to
+        <input type="text" id="pl-goto" class="play-input" placeholder="mm:ss" size="8">
+      </label>
+      <button type="button" class="play-btn" id="pl-goto-go">Jump</button>
+
+      <label class="play-field">Speed
+        <select id="pl-rate" class="play-input">
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+
+      <label class="play-field">Subtitles
+        <select id="pl-subs" class="play-input play-subs"></select>
+      </label>
+
+      <button type="button" class="play-btn play-prepare" id="pl-prepare" hidden>Make browser copy</button>
+    </div>
+  </main>
+
+  <script>
+    window.JF_PLAY = {
+      path: {{ path|tojson }},
+      file: {{ file|tojson }},
+      track: {{ track|tojson }}
+    };
+  </script>
+  <script src="/static/play.js?v={{ asset }}"></script>
+</body>
+</html>
