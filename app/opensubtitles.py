@@ -162,7 +162,12 @@ class OpenSubtitlesClient:
     def _use(self) -> tuple[httpx.AsyncClient, bool]:
         if self._http is not None:
             return self._http, False
-        return httpx.AsyncClient(timeout=self.timeout, transport=self._transport), True
+        # api.opensubtitles.com answers the first request of a connection with a
+        # 301 to the very same URL (Cloudflare handing out a cookie); without
+        # following it every search fails with a bare status.
+        return httpx.AsyncClient(
+            timeout=self.timeout, transport=self._transport, follow_redirects=True
+        ), True
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -236,10 +241,11 @@ class OpenSubtitlesClient:
             )
         if resp.status_code == 406:
             raise OpenSubtitlesError(_error_message(resp, "OpenSubtitles refused the request."))
-        if resp.status_code >= 400:
-            raise OpenSubtitlesError(
-                f"OpenSubtitles returned HTTP {resp.status_code} for {what}."
-            )
+        # Anything else that is not a 200: a 3xx we could not follow, a 2xx we do
+        # not understand, or a plain error status. Always say which one.
+        raise OpenSubtitlesError(
+            f"OpenSubtitles returned HTTP {resp.status_code} for {what}."
+        )
 
     # ---- API calls -----------------------------------------------------------
 
@@ -343,7 +349,6 @@ class OpenSubtitlesClient:
                 await self.login()
                 continue
             self._raise_for_status(resp, "search")
-            raise OpenSubtitlesError("OpenSubtitles search failed.")
 
     async def download(self, file_id, sub_format: str = "srt") -> dict:
         """Request a subtitle file; returns
@@ -381,7 +386,6 @@ class OpenSubtitlesClient:
                 await self.login()
                 continue
             self._raise_for_status(resp, "download")
-            raise OpenSubtitlesError("OpenSubtitles download failed.")
 
     async def _fetch_link(self, link: str) -> tuple[bytes, str]:
         client, close = self._use()
@@ -427,7 +431,9 @@ def get_opensubtitles() -> "OpenSubtitlesClient":
     )
     if _shared_client is None or _shared_key != key:
         if _shared_http is None:
-            _shared_http = httpx.AsyncClient(timeout=20.0)
+            # follow_redirects: the API answers a cold connection with a 301 to
+            # the same URL (see OpenSubtitlesClient._use).
+            _shared_http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
         _shared_client = OpenSubtitlesClient(key[0], key[1], key[2], http=_shared_http)
         _shared_key = key
     return _shared_client

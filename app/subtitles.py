@@ -956,6 +956,7 @@ async def subtitles_search(
                 query = _jellyfin_query(row) or Path(path).name
                 await run("name", f'"{query}"', query=query, **kind)
     except OpenSubtitlesError as exc:
+        log("Search", "WARN", f"Subtitle search failed {Path(path).name}: {exc}")
         return JSONResponse({**base, "ok": False, "error": str(exc)}, status_code=502)
 
     return JSONResponse(

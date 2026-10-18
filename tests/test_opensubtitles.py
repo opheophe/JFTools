@@ -131,6 +131,33 @@ async def test_search_sends_api_key_and_params():
     assert result == {"total_count": 1, "data": []}
 
 
+async def test_search_follows_the_self_redirect():
+    """api.opensubtitles.com answers the first request of a connection with a
+    301 to the same URL; the search has to follow it instead of giving up."""
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if len(seen) == 1:
+            return httpx.Response(301, headers={"location": "/api/v1/subtitles?query=Movie"})
+        return httpx.Response(200, json={"total_count": 1, "data": []})
+
+    client = OpenSubtitlesClient("key", transport=httpx.MockTransport(handler))
+    result = await client.search(languages=["en"], query="Movie")
+
+    assert result["total_count"] == 1
+    assert len(seen) == 2
+
+
+async def test_search_reports_an_unexpected_status():
+    def handler(request):
+        return httpx.Response(304)
+
+    client = OpenSubtitlesClient("key", transport=httpx.MockTransport(handler))
+    with pytest.raises(OpenSubtitlesError, match="HTTP 304 for search"):
+        await client.search(languages=["en"], query="Movie")
+
+
 async def test_search_flattens_candidates():
     def handler(request):
         return httpx.Response(
