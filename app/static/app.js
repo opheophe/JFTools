@@ -305,6 +305,58 @@ function FilterProfiles(host, storageKey, getFilters, applyFilters) {
   renderChips();
 }
 
+// A hover dropdown button (like the Google menu): shows a fixed-position menu
+// of items (links or buttons) while the pointer is over the button or menu.
+function hoverMenuButton(label, items) {
+  const wrap = el("span", { class: "id-google" });
+  const btn = el("button", { type: "button", class: "id-google-btn", text: label });
+  btn.appendChild(el("span", { class: "id-google-caret", text: "▾" }));
+  wrap.appendChild(btn);
+  if (!items.length) {
+    btn.disabled = true;
+    return wrap;
+  }
+  const menu = el("div", { class: "id-google-menu" });
+  menu.hidden = true;
+  items.forEach((it) => menu.appendChild(it));
+  wrap.appendChild(menu);
+
+  let hideTimer = null;
+  const show = () => {
+    clearTimeout(hideTimer);
+    menu.hidden = false;
+    const rct = wrap.getBoundingClientRect();
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let left = Math.round(rct.left);
+    left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
+    let top = Math.round(rct.bottom + 4);
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, rct.top - mh - 4);
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+  };
+  const scheduleHide = () => {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { menu.hidden = true; }, 180);
+  };
+  wrap.addEventListener("mouseenter", show);
+  wrap.addEventListener("mouseleave", scheduleHide);
+  menu.addEventListener("mouseenter", () => clearTimeout(hideTimer));
+  menu.addEventListener("mouseleave", scheduleHide);
+  return wrap;
+}
+
+// A link item and a clickable button item for a hover menu.
+function hoverMenuLink(href, text) {
+  return el("a", { class: "id-google-item", href: href, target: "_blank", rel: "noopener", text: text });
+}
+
+function hoverMenuAction(text, onClick) {
+  const item = el("button", { type: "button", class: "id-google-item id-google-item-btn", text: text });
+  item.addEventListener("click", () => onClick(item));
+  return item;
+}
+
 let statusTimer = null;
 
 // Poll a "/status" endpoint until it reports no longer "running".

@@ -44,52 +44,27 @@ function seSafeRe(text) {
   try { return new RegExp(text, "i"); } catch (e) { return null; }
 }
 
-function seFallbackCopy(text, done) {
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.opacity = "0";
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  try { document.execCommand("copy"); } catch (e) {}
-  document.body.removeChild(ta);
-  done();
-}
-
-function seCopy(text, btn) {
-  const done = () => {
-    const o = btn.textContent;
-    btn.textContent = "✓";
-    setTimeout(() => { btn.textContent = o; }, 800);
-  };
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done).catch(() => seFallbackCopy(text, done));
-  } else {
-    seFallbackCopy(text, done);
-  }
-}
-
-function seLink(href, text) {
-  return el("a", { href: href, target: "_blank", rel: "noopener", text: text, class: "id-link" });
-}
-
 function seBuildActions(r) {
   const td = el("td", { class: "id-actions" });
+
+  const openItems = [];
   if (r.id && SE.jellyfin) {
-    td.appendChild(seLink(SE.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + r.id, "Jellyfin"));
+    openItems.push(hoverMenuLink(SE.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + r.id, "Jellyfin"));
   }
   if ((r.type === "Movie" || r.type === "Video") && SE.radarr) {
-    td.appendChild(seLink(SE.radarr + seEnc(r.name), "Radarr"));
+    openItems.push(hoverMenuLink(SE.radarr + seEnc(r.name), "Radarr"));
   } else if ((r.type === "Series" || r.type === "Episode") && SE.sonarr) {
-    td.appendChild(seLink(SE.sonarr + seEnc(r.series || r.name), "Sonarr"));
+    openItems.push(hoverMenuLink(SE.sonarr + seEnc(r.series || r.name), "Sonarr"));
   }
-  const cp = el("button", { class: "mini", text: "path" });
-  cp.addEventListener("click", () => seCopy(r.path, cp));
-  td.appendChild(cp);
-  const ci = el("button", { class: "mini", text: "id" });
-  ci.addEventListener("click", () => seCopy(r.id, ci));
-  td.appendChild(ci);
+  td.appendChild(hoverMenuButton("Open in", openItems));
+
+  const actItems = [];
+  if (r.path) {
+    actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
+    actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
+  }
+  td.appendChild(hoverMenuButton("Actions", actItems));
+
   return td;
 }
 
@@ -168,6 +143,7 @@ const SORTABLE = {
   path: (r) => r.path || "",
   file: (r) => r.file || "",
   display: (r) => r.display || r.name || "",
+  added: (r) => r.added || "",
   fav: (r) => (r.favorited_by || []).join(", "),
   subsok: (r) => (seSubsOk(r) ? 1 : 0),
   subs: (r) => { const e = seSubsEntry(r); return (e && e.subs || []).join(", "); },
@@ -239,13 +215,13 @@ function renderSeTable() {
   updateSortIndicators();
 
   if (!SE.fetched) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "Not fetched yet — click Fetch." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "9", text: "Not fetched yet — click Fetch." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
   }
   if (visible.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "8", text: "No items match the filters." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "9", text: "No items match the filters." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
@@ -267,6 +243,7 @@ function renderSeTable() {
     tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
     tr.appendChild(el("td", { text: r.file, title: r.file }));
     tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
+    tr.appendChild(el("td", { class: "muted", text: r.added || "—", title: r.added || "" }));
     const fav = (r.favorited_by || []).join(", ");
     tr.appendChild(el("td", { class: "muted", text: fav, title: fav }));
 
@@ -482,8 +459,9 @@ document.addEventListener("DOMContentLoaded", () => {
   bindSortHeaders();
   FilterProfiles(document.getElementById("se-profiles"),
     "jftools.search.profiles",
-    () => SE.filters,
-    (f) => {
+    () => ({ filters: SE.filters, sort: SE.sort }),
+    (p) => {
+      const f = (p && p.filters) ? p.filters : (p || {});
       SE.filters = {
         lib: Array.isArray(f.lib) ? f.lib : [],
         type: Array.isArray(f.type) ? f.type : [],
@@ -493,8 +471,11 @@ document.addEventListener("DOMContentLoaded", () => {
         subs: Array.isArray(f.subs) ? f.subs : [],
         subsok: Array.isArray(f.subsok) ? f.subsok : [],
       };
+      const s = (p && p.sort) || {};
+      if (SORTABLE[s.col]) SE.sort = { col: s.col, dir: s.dir === -1 ? -1 : 1 };
       SE.page = 1;
       saveFilters();
+      saveSort();
       applyFilterUI();
       renderSeTable();
     });

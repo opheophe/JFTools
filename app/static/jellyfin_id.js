@@ -37,36 +37,6 @@ function idInRanges(score, ranges) {
   return false;
 }
 
-function idFallbackCopy(text, done) {
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.opacity = "0";
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  try { document.execCommand("copy"); } catch (e) {}
-  document.body.removeChild(ta);
-  done();
-}
-
-function idCopy(text, btn) {
-  const done = () => {
-    const o = btn.textContent;
-    btn.textContent = "✓";
-    setTimeout(() => { btn.textContent = o; }, 800);
-  };
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done).catch(() => idFallbackCopy(text, done));
-  } else {
-    idFallbackCopy(text, done);
-  }
-}
-
-function idLink(href, text) {
-  return el("a", { href: href, target: "_blank", rel: "noopener", text: text, class: "id-link" });
-}
-
 // Title used for external lookups: the show for series/episodes, else the name.
 function idSearchTitle(r) {
   if (r.type === "Series" || r.type === "Episode") return r.series || r.name || "";
@@ -181,22 +151,26 @@ function idGoogleMenu(r) {
 
 function idBuildActions(r) {
   const td = el("td", { class: "id-actions" });
+
+  const openItems = [];
   if (r.id && ID.jellyfin) {
-    td.appendChild(idLink(ID.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + r.id, "Jellyfin"));
+    openItems.push(hoverMenuLink(ID.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + r.id, "Jellyfin"));
   }
   if ((r.type === "Movie" || r.type === "Video") && ID.radarr) {
-    td.appendChild(idLink(ID.radarr + idEnc(r.name), "Radarr"));
+    openItems.push(hoverMenuLink(ID.radarr + idEnc(r.name), "Radarr"));
   } else if ((r.type === "Series" || r.type === "Episode") && ID.sonarr) {
-    td.appendChild(idLink(ID.sonarr + idEnc(r.series || r.name), "Sonarr"));
+    openItems.push(hoverMenuLink(ID.sonarr + idEnc(r.series || r.name), "Sonarr"));
   }
-  td.appendChild(idGoogleMenu(r));
+  td.appendChild(hoverMenuButton("Open in", openItems));
 
-  const cp = el("button", { class: "mini", text: "path" });
-  cp.addEventListener("click", () => idCopy(r.path, cp));
-  td.appendChild(cp);
-  const ci = el("button", { class: "mini", text: "id" });
-  ci.addEventListener("click", () => idCopy(r.id, ci));
-  td.appendChild(ci);
+  const actItems = [];
+  if (r.path) {
+    actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
+    actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
+  }
+  td.appendChild(hoverMenuButton("Actions", actItems));
+
+  td.appendChild(idGoogleMenu(r));
   return td;
 }
 
@@ -527,8 +501,9 @@ document.addEventListener("DOMContentLoaded", () => {
   bindSortHeaders();
   FilterProfiles(document.getElementById("id-profiles"),
     "jftools.moviematch.profiles",
-    () => ID.filters,
-    (f) => {
+    () => ({ filters: ID.filters, sort: ID.sort }),
+    (p) => {
+      const f = (p && p.filters) ? p.filters : (p || {});
       ID.filters = {
         lib: Array.isArray(f.lib) ? f.lib : [],
         type: Array.isArray(f.type) ? f.type : [],
@@ -538,8 +513,11 @@ document.addEventListener("DOMContentLoaded", () => {
         file: typeof f.file === "string" ? f.file : "",
         jf: typeof f.jf === "string" ? f.jf : "",
       };
+      const s = (p && p.sort) || {};
+      if (SORTABLE[s.col]) ID.sort = { col: s.col, dir: s.dir === -1 ? -1 : 1 };
       ID.page = 1;
       saveFilters();
+      saveSort();
       applyFilterUI();
       renderIdTable();
     });

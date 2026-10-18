@@ -263,7 +263,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
     params = {
         "Recursive": "true",
         "IncludeItemTypes": "Movie,Episode,Series,MusicVideo,Video",
-        "Fields": "Path,ProductionYear,ProviderIds,SeriesName,SeriesId",
+        "Fields": "Path,ProductionYear,ProviderIds,SeriesName,SeriesId,DateCreated",
         "Limit": "500",
         "StartIndex": "0",
         "SortBy": "SortName",
@@ -294,6 +294,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
                     "display": _item_display(it),
                     "year": it.get("ProductionYear"),
                     "library": _library_for_path(path, locations),
+                    "added": (it.get("DateCreated") or "")[:10],
                     "imdb": provider.get("Imdb", ""),
                     "tmdb": provider.get("Tmdb", ""),
                     "match": name_match_score(clean_release_tags(Path(path).name), title, it.get("ProductionYear")),

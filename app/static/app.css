@@ -285,9 +285,6 @@ section.card { margin-top: 1.25rem; }
 .mark-btn { min-width: 30px; padding: 0.1rem 0.4rem; font-size: 0.9rem; }
 .mini { padding: 0.1rem 0.45rem; font-size: 0.8rem; }
 .id-actions { white-space: nowrap; }
-.id-actions .id-link { margin-right: 0.6rem; color: var(--accent); text-decoration: none; }
-.id-actions .id-link:hover { text-decoration: underline; }
-.id-actions .mini { margin-left: 0.4rem; }
 
 /* Movie Match: Google search dropdown (distinct from the plain text links) */
 .id-google { display: inline-block; margin-right: 0.6rem; }
@@ -311,6 +308,10 @@ section.card { margin-top: 1.25rem; }
   color: var(--text); text-decoration: none; font-size: 0.82rem; white-space: nowrap;
 }
 .id-google-item:hover { background: var(--inset); color: var(--accent); }
+.id-google-item-btn {
+  background: none; border: none; width: 100%; text-align: left; cursor: pointer;
+}
+.id-google-item-btn:hover { background: var(--inset); color: var(--accent); }
 
 
 /* table: fill width; cell text wraps instead of truncating */
@@ -328,7 +329,8 @@ section.card { margin-top: 1.25rem; }
 #se-table th, #se-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 #se-table th:nth-child(1), #se-table td:nth-child(1) { width: 80px; }
 #se-table th:nth-child(4), #se-table td:nth-child(4) { width: 150px; }
-#se-table th:nth-child(5), #se-table td:nth-child(5) { width: 240px; }
+#se-table th:nth-child(5), #se-table td:nth-child(5) { width: 90px; }
+#se-table th:nth-child(6), #se-table td:nth-child(6) { width: 240px; }
 #se-table td.id-actions { white-space: nowrap; overflow: visible; }
 #se-table th.sortable { cursor: pointer; user-select: none; }
 #se-table th.sortable:hover { color: var(--text); }
