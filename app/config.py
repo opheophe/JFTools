@@ -98,6 +98,7 @@ class Settings:
     sonarr_url: str = ""
     timezone: str = "Europe/Stockholm"
     path_maps: list[dict] = field(default_factory=list)
+    file_mgmt: bool = False
 
 
 class Config:
@@ -168,6 +169,8 @@ class Config:
                     settings.timezone = data["timezone"]
                 if "path_maps" in data:
                     settings.path_maps = _sanitize_path_maps(data["path_maps"])
+                if "file_mgmt" in data:
+                    settings.file_mgmt = bool(data["file_mgmt"])
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -184,6 +187,7 @@ class Config:
             "sonarr_url": s.sonarr_url,
             "timezone": s.timezone,
             "path_maps": s.path_maps,
+            "file_mgmt": s.file_mgmt,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -246,6 +250,10 @@ class Config:
         self._settings.path_maps = _sanitize_path_maps(maps)
         self._persist()
 
+    def save_file_mgmt(self, enabled: bool) -> None:
+        self._settings.file_mgmt = bool(enabled)
+        self._persist()
+
     # ---- backup / restore ---------------------------------------------------
 
     _EXPORT_FIELDS = (
@@ -257,6 +265,7 @@ class Config:
         "sonarr_url",
         "timezone",
         "path_maps",
+        "file_mgmt",
     )
 
     def export_settings(self) -> dict:
@@ -276,6 +285,8 @@ class Config:
             if field in data and data[field] is not None:
                 if field == "path_maps":
                     self._settings.path_maps = _sanitize_path_maps(data[field])
+                elif field == "file_mgmt":
+                    self._settings.file_mgmt = bool(data[field])
                 else:
                     setattr(self._settings, field, str(data[field]).strip())
         self._persist()

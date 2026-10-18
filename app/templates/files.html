@@ -6,19 +6,21 @@
 
 <div class="page-head">
   <button id="fb-up" class="primary" hidden>⬆ Up</button>
+  <button id="fb-mkdir" class="btn-edit" hidden>New folder</button>
   <nav id="fb-crumb" class="fb-crumb"></nav>
   <span id="fb-usage" class="muted"></span>
   <div id="fb-error" class="error" hidden></div>
 </div>
+<div id="fb-rescan" class="fb-banner" hidden></div>
 
 <section class="card">
   <div class="table-wrap">
     <table id="fb-table">
       <thead>
-        <tr><th data-sort="name" class="sortable">Name<span class="sort-arrow"></span></th><th data-sort="size" class="sortable">Size<span class="sort-arrow"></span></th><th data-sort="mtime" class="sortable">Modified<span class="sort-arrow"></span></th><th data-sort="ext" class="sortable">Type<span class="sort-arrow"></span></th></tr>
+        <tr><th data-sort="name" class="sortable">Name<span class="sort-arrow"></span></th><th data-sort="size" class="sortable">Size<span class="sort-arrow"></span></th><th data-sort="mtime" class="sortable">Modified<span class="sort-arrow"></span></th><th data-sort="ext" class="sortable">Type<span class="sort-arrow"></span></th><th>Actions</th></tr>
       </thead>
       <tbody id="fb-body">
-        <tr><td colspan="4" class="muted"><span class="spinner"></span> Loading…</td></tr>
+        <tr><td colspan="5" class="muted"><span class="spinner"></span> Loading…</td></tr>
       </tbody>
     </table>
   </div>

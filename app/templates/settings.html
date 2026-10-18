@@ -95,6 +95,21 @@
 </section>
 
 <section class="card">
+  <h2>File management</h2>
+  <p class="muted">Enables rename, move, delete and new-folder actions on the <strong>Files</strong> browser. Off by default — deleting is permanent and cannot be undone.</p>
+  <form id="files-form">
+    <label class="switch">
+      <input type="checkbox" id="file_mgmt" name="enabled" value="on" {% if file_mgmt %}checked{% endif %}>
+      Enable file management
+    </label>
+    <div class="row">
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+  <div class="result" id="files-result" hidden></div>
+</section>
+
+<section class="card">
   <h2>Local login</h2>
   <p class="muted">This username/password only works when connecting from your local network (localhost / LAN). Jellyfin admin accounts can always log in from anywhere.</p>
   <form id="auth-form">

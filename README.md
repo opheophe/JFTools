@@ -10,9 +10,13 @@ existing server over the API.
 
 - Web UI with pages for server activity, Jellyfin users, libraries and Movie
   Match (comparing on-disk files to Jellyfin's metadata).
-- Read-only file browser: browse the media folders from Movie Match/Search's
+- File browser: browse the media folders from Movie Match/Search's
   "Actions → Browse files" (or `/files`). Browsing is confined to the mapped
   media folders — anything else, including symlink escapes, is refused.
+- File management (rename, move, delete, new folder) behind a Settings toggle,
+  **off by default**. Deletion is permanent (with a confirmation dialog), every
+  change is logged, mutations require a same-origin CSRF header, and after a
+  change you can trigger a Jellyfin library rescan with one click.
 - First-run setup: on first launch you choose your own local login (username +
   password) — no default credentials. The local password works on your local
   network, and any Jellyfin admin account works from anywhere. Failed-login

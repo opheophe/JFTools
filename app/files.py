@@ -14,7 +14,7 @@ import stat as stat_mod
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import config
@@ -83,24 +83,178 @@ def _resolve(raw: str, roots: list[str]) -> str | None:
         target = os.path.realpath(os.path.abspath(local))
     except (OSError, ValueError):
         return None
+    if not _within(target, roots) or _denied(target):
+        return None
+    return target
+
+
+def _within(target: str, roots: list[str]) -> bool:
     tp = Path(target)
-    allowed = False
     for root in roots:
         try:
             tp.relative_to(Path(root))
-            allowed = True
-            break
+            return True
         except ValueError:
             continue
-    if not allowed:
-        return None
+    return False
+
+
+def _denied(target: str) -> bool:
+    tp = Path(target)
     for deny in _deny_dirs():
         try:
             tp.relative_to(Path(deny))
-            return None
+            return True
         except ValueError:
             continue
+    return False
+
+
+def _root_paths(roots: list[str]) -> set[str]:
+    return {os.path.normcase(r) for r in roots}
+
+
+# ---- mutation helpers -------------------------------------------------------
+
+
+def _bad_name(name: str) -> bool:
+    n = (name or "").strip()
+    if not n or n in (".", "..") or len(n) > 200:
+        return True
+    if "/" in n or "\\" in n:
+        return True
+    if os.name == "nt" and any(ch in n for ch in ':<>"|?*'):
+        return True
+    return False
+
+
+def _mut_source(raw: str, roots: list[str]) -> str | None:
+    """Path to act on, validated without resolving its final component.
+
+    The parent is canonicalised (so a symlinked parent cannot smuggle the
+    operation outside the media folders) but the entry itself is not, so
+    symlinks are renamed/moved/deleted as links, never through their target.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    local = resolve_path(raw, config.settings.path_maps)
+    try:
+        src = os.path.abspath(local)
+    except (OSError, ValueError):
+        return None
+    name = os.path.basename(src)
+    if name in ("", ".", ".."):
+        return None
+    try:
+        parent_real = os.path.realpath(os.path.dirname(src))
+    except OSError:
+        return None
+    if not _within(parent_real, roots) or _denied(parent_real):
+        return None
+    full = os.path.join(parent_real, name)
+    if not os.path.lexists(full):
+        return None
+    try:
+        if os.path.normcase(os.path.realpath(full)) in _root_paths(roots):
+            return None  # never operate on a browser root itself
+    except OSError:
+        pass
+    return full
+
+
+def _mut_dir(raw: str, roots: list[str]) -> str | None:
+    """An existing directory inside a root (symlink-canonicalised)."""
+    target = _resolve(raw, roots)
+    if target is None or not os.path.isdir(target):
+        return None
     return target
+
+
+def rename_entry(path: str, new_name: str, roots: list[str]) -> dict:
+    src = _mut_source(path, roots)
+    if not src:
+        return {"ok": False, "error": "That path is outside the media folders."}
+    if _bad_name(new_name):
+        return {"ok": False, "error": "Invalid name."}
+    dst = os.path.join(os.path.dirname(src), new_name.strip())
+    if os.path.normcase(os.path.realpath(dst)) == os.path.normcase(src):
+        return {"ok": True, "src": src, "dst": dst}  # no-op
+    if os.path.lexists(dst):
+        return {"ok": False, "error": "A file with that name already exists."}
+    try:
+        os.rename(src, dst)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "src": src, "dst": dst}
+
+
+def move_entry(path: str, target_dir: str, roots: list[str]) -> dict:
+    src = _mut_source(path, roots)
+    if not src:
+        return {"ok": False, "error": "That path is outside the media folders."}
+    dst_dir = _mut_dir(target_dir, roots)
+    if not dst_dir:
+        return {"ok": False, "error": "Target folder is outside the media folders or not a folder."}
+    name = os.path.basename(src)
+    if os.path.normcase(os.path.realpath(dst_dir)) == os.path.normcase(os.path.dirname(src)):
+        return {"ok": True, "src": src, "dst": os.path.join(dst_dir, name)}  # no-op
+    if os.path.isdir(src) and not os.path.islink(src):
+        # cannot move a folder into itself or one of its descendants
+        sr = os.path.normcase(os.path.realpath(src))
+        dr = os.path.normcase(dst_dir)
+        if dr == sr or dr.startswith(sr + os.sep):
+            return {"ok": False, "error": "Cannot move a folder into itself."}
+    dst = os.path.join(dst_dir, name)
+    if os.path.lexists(dst):
+        return {"ok": False, "error": "A file with that name already exists there."}
+    try:
+        shutil.move(src, dst)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "src": src, "dst": dst}
+
+
+def delete_entry(path: str, roots: list[str]) -> dict:
+    src = _mut_source(path, roots)
+    if not src:
+        return {"ok": False, "error": "That path is outside the media folders."}
+    try:
+        if os.path.isdir(src) and not os.path.islink(src):
+            shutil.rmtree(src)
+        else:
+            os.remove(src)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "src": src}
+
+
+def mkdir_entry(path: str, name: str, roots: list[str]) -> dict:
+    parent = _mut_dir(path, roots)
+    if not parent:
+        return {"ok": False, "error": "That folder is outside the media folders or missing."}
+    if _bad_name(name):
+        return {"ok": False, "error": "Invalid name."}
+    dst = os.path.join(parent, name.strip())
+    if os.path.lexists(dst):
+        return {"ok": False, "error": "That name already exists."}
+    try:
+        os.mkdir(dst)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "src": dst}
+
+
+def _mutation_gate(x_jftools: str):
+    """403 unless file management is enabled and the CSRF header is present."""
+    if not config.settings.file_mgmt:
+        return JSONResponse(
+            {"ok": False, "error": "File management is disabled. Enable it on the Settings page."},
+            status_code=403,
+        )
+    if x_jftools != "1":
+        return JSONResponse({"ok": False, "error": "Missing security header."}, status_code=403)
+    return None
 
 
 def _crumb(dir_path: str) -> list[list[str]]:
@@ -131,6 +285,7 @@ async def api_files_roots(user: str = Depends(require_login)):
         {
             "ok": True,
             "roots": [{"path": r, "name": Path(r).name or r} for r in roots],
+            "mgmt": config.settings.file_mgmt,
         }
     )
 
@@ -227,5 +382,98 @@ async def api_files_list(path: str = "", user: str = Depends(require_login)):
             "writable": os.access(list_dir, os.W_OK),
             "usage": usage,
             "truncated": truncated,
+            "mgmt": config.settings.file_mgmt,
         }
     )
+
+
+# ---- mutations --------------------------------------------------------------
+# These are sync endpoints (run in FastAPI's thread pool) because the file
+# operations can be slow (large files on a NAS).
+
+
+def _mutation_error(resp: dict) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": resp.get("error", "Failed.")}, status_code=400)
+
+
+@router.post("/api/files/rename")
+def api_files_rename(
+    path: str = Form(""),
+    name: str = Form(""),
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+):
+    gate = _mutation_gate(x_jftools)
+    if gate:
+        return gate
+    roots = browser_roots()
+    if not roots:
+        return JSONResponse({"ok": False, "error": "No media folders found."}, status_code=403)
+    result = rename_entry(path, name, roots)
+    if result["ok"]:
+        log("Files", "INFO", f"Renamed: {result['src']} -> {result['dst']}")
+        return JSONResponse({"ok": True, "message": "Renamed."})
+    log("Files", "WARN", f"Rename refused ({result.get('error')}): {path}")
+    return _mutation_error(result)
+
+
+@router.post("/api/files/move")
+def api_files_move(
+    path: str = Form(""),
+    target: str = Form(""),
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+):
+    gate = _mutation_gate(x_jftools)
+    if gate:
+        return gate
+    roots = browser_roots()
+    if not roots:
+        return JSONResponse({"ok": False, "error": "No media folders found."}, status_code=403)
+    result = move_entry(path, target, roots)
+    if result["ok"]:
+        log("Files", "INFO", f"Moved: {result['src']} -> {result['dst']}")
+        return JSONResponse({"ok": True, "message": "Moved."})
+    log("Files", "WARN", f"Move refused ({result.get('error')}): {path}")
+    return _mutation_error(result)
+
+
+@router.post("/api/files/delete")
+def api_files_delete(
+    path: str = Form(""),
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+):
+    gate = _mutation_gate(x_jftools)
+    if gate:
+        return gate
+    roots = browser_roots()
+    if not roots:
+        return JSONResponse({"ok": False, "error": "No media folders found."}, status_code=403)
+    result = delete_entry(path, roots)
+    if result["ok"]:
+        log("Files", "WARN", f"Deleted: {result['src']}")
+        return JSONResponse({"ok": True, "message": "Deleted."})
+    log("Files", "WARN", f"Delete refused ({result.get('error')}): {path}")
+    return _mutation_error(result)
+
+
+@router.post("/api/files/mkdir")
+def api_files_mkdir(
+    path: str = Form(""),
+    name: str = Form(""),
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+):
+    gate = _mutation_gate(x_jftools)
+    if gate:
+        return gate
+    roots = browser_roots()
+    if not roots:
+        return JSONResponse({"ok": False, "error": "No media folders found."}, status_code=403)
+    result = mkdir_entry(path, name, roots)
+    if result["ok"]:
+        log("Files", "INFO", f"Created folder: {result['src']}")
+        return JSONResponse({"ok": True, "message": "Folder created."})
+    log("Files", "WARN", f"Mkdir refused ({result.get('error')}): {path}")
+    return _mutation_error(result)

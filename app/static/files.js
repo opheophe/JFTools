@@ -1,8 +1,9 @@
 "use strict";
 
 // ---- file browser -----------------------------------------------------------
-// Read-only browsing of the media folders. Navigation happens through plain
-// links (/files?path=...), so the browser's back/forward buttons work.
+// Read-only browsing by default; rename / move / delete / new-folder appear
+// when file management is enabled on the Settings page. Navigation happens
+// through plain links (/files?path=...), so the browser's back/forward work.
 
 const qp = new URLSearchParams(location.search);
 const INITIAL = qp.get("path") || "";
@@ -12,9 +13,11 @@ const fbCrumb = document.getElementById("fb-crumb");
 const fbUsage = document.getElementById("fb-usage");
 const fbError = document.getElementById("fb-error");
 const fbUp = document.getElementById("fb-up");
+const fbMkdir = document.getElementById("fb-mkdir");
+const fbRescan = document.getElementById("fb-rescan");
 
 let fbSort = { col: "name", dir: 1 };
-let fbCurrent = { entries: [], parent: null, highlight: null, writable: true, usage: null };
+let fbCurrent = { entries: [], parent: null, highlight: null, writable: true, usage: null, mgmt: false, path: "" };
 
 function fbErr(msg) {
   fbError.textContent = msg;
@@ -30,6 +33,77 @@ function fmtSize(n) {
   do { v /= 1024; i++; } while (v >= 1024 && i < units.length - 1);
   return v.toFixed(1) + " " + units[i];
 }
+
+// POST with the CSRF header the mutation endpoints require.
+async function fbPost(url, body) {
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "X-JFTools": "1" },
+    body: body,
+  });
+  if (resp.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Not authenticated");
+  }
+  return resp.json();
+}
+
+// ---- modal ------------------------------------------------------------------
+
+function fbModal(opts) {
+  return new Promise((resolve) => {
+    const back = el("div", { class: "fb-modal-back" });
+    const box = el("div", { class: "fb-modal" });
+    box.appendChild(el("h3", { text: opts.title }));
+    if (opts.text) box.appendChild(el("p", { class: "muted", text: opts.text }));
+    let input = null;
+    if (opts.input) {
+      input = el("input", { type: "text", class: "fb-modal-input", value: opts.value || "" });
+      box.appendChild(input);
+    }
+    const row = el("div", { class: "row" });
+    const ok = el("button", { class: (opts.danger ? "danger" : "primary"), text: opts.okText || "OK" });
+    const cancel = el("button", { text: "Cancel" });
+    row.appendChild(cancel);
+    row.appendChild(ok);
+    box.appendChild(row);
+    back.appendChild(box);
+    document.body.appendChild(back);
+
+    const done = (okClicked) => {
+      const value = input ? input.value.trim() : "";
+      document.body.removeChild(back);
+      document.removeEventListener("keydown", onKey);
+      resolve(okClicked ? { ok: true, value } : { ok: false, value });
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") done(false);
+      if (e.key === "Enter" && input) done(true);
+    };
+    cancel.addEventListener("click", () => done(false));
+    ok.addEventListener("click", () => done(true));
+    back.addEventListener("mousedown", (e) => { if (e.target === back) done(false); });
+    document.addEventListener("keydown", onKey);
+    if (input) input.focus();
+  });
+}
+
+// ---- rescan banner ----------------------------------------------------------
+
+function fbShowRescan(dir) {
+  fbRescan.innerHTML = "";
+  fbRescan.hidden = false;
+  const text = "Media changed in " + dir;
+  const btn = el("button", { class: "primary", text: "Rescan library folder" });
+  const dismiss = el("button", { class: "mini", text: "Dismiss" });
+  btn.addEventListener("click", () => rescanFile(btn, dir));
+  dismiss.addEventListener("click", () => { fbRescan.hidden = true; });
+  fbRescan.appendChild(el("span", { class: "muted", text: text + " — " }));
+  fbRescan.appendChild(btn);
+  fbRescan.appendChild(dismiss);
+}
+
+// ---- rendering --------------------------------------------------------------
 
 function fbSortEntries(entries) {
   const dir = fbSort.dir;
@@ -70,14 +144,22 @@ function fbCrumbHtml(data) {
   });
 }
 
+function fbActionBtn(text, title, cls, onClick) {
+  const b = el("button", { class: "fb-mini-btn " + (cls || ""), text: text, title: title });
+  b.addEventListener("click", () => onClick(b));
+  return b;
+}
+
 function fbRender(data) {
   fbBody.innerHTML = "";
   fbCrumbHtml(data);
   fbUp.hidden = !data.parent;
   fbUp.onclick = () => { window.location.href = "/files?path=" + encodeURIComponent(data.parent); };
+  fbMkdir.hidden = !data.mgmt;
+  fbMkdir.onclick = () => fbNewFolder();
 
   if (!data.entries.length) {
-    fbBody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "muted", text: "Empty folder." })]));
+    fbBody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "Empty folder." })]));
   }
   fbSortEntries(data.entries).forEach((e) => {
     const tr = el("tr");
@@ -92,11 +174,21 @@ function fbRender(data) {
     tr.appendChild(el("td", { class: "muted", text: e.dir ? "—" : fmtSize(e.size) }));
     tr.appendChild(el("td", { class: "muted", text: e.mtime || "" }));
     tr.appendChild(el("td", { class: "muted", text: e.ext }));
+
+    const actTd = el("td", { class: "fb-actions" });
+    if (data.mgmt) {
+      actTd.appendChild(fbActionBtn("✎", "Rename", "fb-edit", () => fbRename(e)));
+      actTd.appendChild(fbActionBtn("➜", "Move…", "fb-edit", () => fbMove(e)));
+      actTd.appendChild(fbActionBtn("🗑", "Delete", "fb-del", () => fbDelete(e)));
+    } else {
+      actTd.appendChild(el("span", { class: "muted", text: "—" }));
+    }
+    tr.appendChild(actTd);
     fbBody.appendChild(tr);
   });
 
   if (data.truncated) {
-    fbBody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "muted", text: "Too many entries — only the first 2000 are shown." })]));
+    fbBody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "Too many entries — only the first 2000 are shown." })]));
   }
 
   if (data.usage) {
@@ -112,6 +204,69 @@ function fbRender(data) {
   if (hl && hl.scrollIntoView) hl.scrollIntoView({ block: "center" });
 }
 
+// ---- mutations --------------------------------------------------------------
+
+async function fbMutate(url, body, rescanDir) {
+  let data = null;
+  try {
+    data = await fbPost(url, body);
+  } catch (err) {
+    fbErr("Could not reach the server.");
+    return false;
+  }
+  if (!data.ok) {
+    fbErr(data.error || "That operation failed.");
+    return false;
+  }
+  fbErr("");
+  await fbLoad(fbCurrent.path);
+  if (rescanDir) fbShowRescan(rescanDir);
+  return true;
+}
+
+async function fbRename(e) {
+  const r = await fbModal({
+    title: "Rename",
+    text: "New name for \"" + e.name + "\" (same folder):",
+    input: true,
+    value: e.name,
+    okText: "Rename",
+  });
+  if (!r.ok || !r.value || r.value === e.name) return;
+  await fbMutate("/api/files/rename", "path=" + encodeURIComponent(e.path) + "&name=" + encodeURIComponent(r.value), fbCurrent.path);
+}
+
+async function fbMove(e) {
+  const r = await fbModal({
+    title: "Move",
+    text: "Target folder for \"" + e.name + "\":",
+    input: true,
+    okText: "Move",
+  });
+  if (!r.ok || !r.value) return;
+  await fbMutate("/api/files/move", "path=" + encodeURIComponent(e.path) + "&target=" + encodeURIComponent(r.value), r.value);
+}
+
+async function fbDelete(e) {
+  const what = e.dir ? "folder \"" + e.name + "\" and all its contents" : "file \"" + e.name + "\"";
+  const r = await fbModal({
+    title: "Delete permanently?",
+    text: "The " + what + " will be deleted. This cannot be undone.",
+    danger: true,
+    okText: "Delete permanently",
+  });
+  if (!r.ok) return;
+  await fbMutate("/api/files/delete", "path=" + encodeURIComponent(e.path), fbCurrent.path);
+}
+
+async function fbNewFolder() {
+  const r = await fbModal({ title: "New folder", text: "Folder name:", input: true, okText: "Create" });
+  if (!r.ok || !r.value) return;
+  await fbMutate("/api/files/mkdir", "path=" + encodeURIComponent(fbCurrent.path) + "&name=" + encodeURIComponent(r.value), fbCurrent.path);
+}
+
+// ---- loading ----------------------------------------------------------------
+
 async function fbLoad(path) {
   fbErr("");
   let data = null;
@@ -123,6 +278,7 @@ async function fbLoad(path) {
     fbCrumb.innerHTML = "";
     fbUp.hidden = true;
     fbUsage.textContent = "";
+    fbMkdir.hidden = true;
     return;
   }
   if (!data) return;
@@ -132,6 +288,7 @@ async function fbLoad(path) {
     fbCrumb.innerHTML = "";
     fbUp.hidden = true;
     fbUsage.textContent = "";
+    fbMkdir.hidden = true;
     return;
   }
   if (data.pick) {
@@ -147,11 +304,12 @@ function renderRoots(roots) {
   fbBody.innerHTML = "";
   fbCrumb.innerHTML = "";
   fbUp.hidden = true;
+  fbMkdir.hidden = true;
   fbUsage.textContent = "";
   if (!roots.length) return;
-  fbBody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "muted", text: "Pick a media folder:" })]));
+  fbBody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "Pick a media folder:" })]));
   roots.forEach((r) => {
-    fbBody.appendChild(el("tr", {}, [el("td", { colspan: "4" }, [
+    fbBody.appendChild(el("tr", {}, [el("td", { colspan: "5" }, [
       el("a", { class: "fb-entry-link", href: "/files?path=" + encodeURIComponent(r.path), text: r.path }),
     ])]));
   });

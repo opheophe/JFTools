@@ -216,6 +216,7 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "sonarr_url": config.settings.sonarr_url,
             "timezone": config.settings.timezone,
             "path_maps": config.settings.path_maps,
+            "file_mgmt": config.settings.file_mgmt,
         },
     )
 
@@ -291,6 +292,18 @@ async def settings_paths_save(request: Request, user: str = Depends(require_logi
     config.save_path_maps(data["maps"])
     log("Jellyfin", "INFO", "Media path mappings saved")
     return JSONResponse({"ok": True, "message": "Media paths saved."})
+
+
+@app.post("/settings/files")
+async def settings_files_save(
+    request: Request,
+    user: str = Depends(require_login),
+    enabled: str = Form(""),
+):
+    config.save_file_mgmt(enabled.strip().lower() in ("1", "true", "yes", "on"))
+    state = "enabled" if config.settings.file_mgmt else "disabled"
+    log("Jellyfin", "INFO", f"File management {state}")
+    return JSONResponse({"ok": True, "message": f"File management {state}."})
 
 
 @app.post("/api/paths/test")

@@ -437,6 +437,7 @@ function bindSettings() {
   bindFormSubmit("auth-form", "/settings/auth", "auth-result");
   bindFormSubmit("integrations-form", "/settings/integrations", "integrations-result");
   bindFormSubmit("timezone-form", "/settings/timezone", "timezone-result");
+  bindFormSubmit("files-form", "/settings/files", "files-result");
   bindSettingsBackup();
   bindPathMaps();
 
