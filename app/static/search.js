@@ -480,5 +480,23 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSort();
   bindSeControls();
   bindSortHeaders();
+  FilterProfiles(document.getElementById("se-profiles"),
+    "jftools.search.profiles",
+    () => SE.filters,
+    (f) => {
+      SE.filters = {
+        lib: Array.isArray(f.lib) ? f.lib : [],
+        type: Array.isArray(f.type) ? f.type : [],
+        file: typeof f.file === "string" ? f.file : "",
+        jf: typeof f.jf === "string" ? f.jf : "",
+        fav: Array.isArray(f.fav) ? f.fav : [],
+        subs: Array.isArray(f.subs) ? f.subs : [],
+        subsok: Array.isArray(f.subsok) ? f.subsok : [],
+      };
+      SE.page = 1;
+      saveFilters();
+      applyFilterUI();
+      renderSeTable();
+    });
   seLoad();
 });

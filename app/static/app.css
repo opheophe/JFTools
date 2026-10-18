@@ -248,6 +248,36 @@ section.card { margin-top: 1.25rem; }
   border: 1px solid var(--border); border-radius: 7px; height: 34px;
   padding: 0 0.4rem; margin: 0;
 }
+
+/* Filter profile row (Search + Movie Match) */
+.prof-row-host { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.prof-row { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.prof-btn {
+  font: inherit; font-size: 0.8rem; cursor: pointer;
+  background: var(--btn); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 0.25rem 0.6rem;
+}
+.prof-save { color: var(--ok); border-color: var(--ok); }
+.prof-save:hover { background: rgba(62, 207, 142, 0.12); }
+.prof-del { color: var(--danger); border-color: var(--danger); }
+.prof-del:hover { background: rgba(255, 107, 107, 0.12); }
+.prof-chip { color: var(--accent); border-color: var(--accent); }
+.prof-chip:hover { background: rgba(79, 140, 255, 0.14); }
+.prof-chips { display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.prof-del-wrap { position: relative; display: inline-flex; }
+.prof-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; min-width: 170px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.3rem; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+.prof-menu-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text); padding: 0.3rem 0.5rem; font-size: 0.82rem; cursor: pointer;
+}
+.prof-menu-item:hover { background: var(--inset); color: var(--danger); }
+.prof-menu-empty { padding: 0.3rem 0.5rem; font-size: 0.82rem; }
 .id-status { margin-top: 0.75rem; font-size: 0.9rem; }
 #id-progress { margin-top: 0.75rem; }
 .table-wrap { overflow-x: auto; margin-top: 0.75rem; }

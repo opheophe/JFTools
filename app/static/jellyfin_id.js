@@ -525,5 +525,23 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSort();
   bindIdControls();
   bindSortHeaders();
+  FilterProfiles(document.getElementById("id-profiles"),
+    "jftools.moviematch.profiles",
+    () => ID.filters,
+    (f) => {
+      ID.filters = {
+        lib: Array.isArray(f.lib) ? f.lib : [],
+        type: Array.isArray(f.type) ? f.type : [],
+        ok: Array.isArray(f.ok) ? f.ok : [],
+        match: Array.isArray(f.match) ? f.match : [],
+        ymatch: Array.isArray(f.ymatch) ? f.ymatch : [],
+        file: typeof f.file === "string" ? f.file : "",
+        jf: typeof f.jf === "string" ? f.jf : "",
+      };
+      ID.page = 1;
+      saveFilters();
+      applyFilterUI();
+      renderIdTable();
+    });
   idLoad();
 });

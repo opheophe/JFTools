@@ -228,6 +228,83 @@ function MultiSelect(container, options, onChange) {
   return { setOptions, setValues, getValue: () => [...selected] };
 }
 
+// Filter profiles (Search + Movie Match): a "Save profile / Delete profile"
+// row with one button per saved profile. Profiles persist to localStorage under
+// their own key per page. getFilters() snapshots the current filter state;
+// applyFilters(profile) restores it into the page.
+function FilterProfiles(host, storageKey, getFilters, applyFilters) {
+  let profiles = {};
+  try { profiles = JSON.parse(localStorage.getItem(storageKey)) || {}; } catch (e) {}
+
+  const row = el("div", { class: "prof-row" });
+  const chips = el("div", { class: "prof-chips" });
+
+  const delWrap = el("div", { class: "prof-del-wrap" });
+  const menu = el("div", { class: "prof-menu" });
+  menu.hidden = true;
+
+  function persist() {
+    try { localStorage.setItem(storageKey, JSON.stringify(profiles)); } catch (e) {}
+  }
+
+  const names = () => Object.keys(profiles)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+
+  function renderChips() {
+    chips.innerHTML = "";
+    names().forEach((name) => {
+      const b = el("button", { type: "button", class: "prof-btn prof-chip", text: name });
+      b.title = "Load filters: " + name;
+      b.addEventListener("click", () => applyFilters(profiles[name]));
+      chips.appendChild(b);
+    });
+  }
+
+  const saveBtn = el("button", { type: "button", class: "prof-btn prof-save", text: "Save profile" });
+  saveBtn.title = "Save the current filter selections";
+  saveBtn.addEventListener("click", () => {
+    const name = (window.prompt("Profile name:") || "").trim();
+    if (!name) return;
+    profiles[name] = JSON.parse(JSON.stringify(getFilters()));
+    persist();
+    renderChips();
+  });
+
+  const delBtn = el("button", { type: "button", class: "prof-btn prof-del", text: "Delete profile" });
+  delBtn.title = "Delete a saved profile";
+  delBtn.addEventListener("click", () => {
+    menu.innerHTML = "";
+    const saved = names();
+    if (!saved.length) {
+      menu.appendChild(el("span", { class: "muted prof-menu-empty", text: "No profiles saved." }));
+    } else {
+      saved.forEach((name) => {
+        const item = el("button", { type: "button", class: "prof-menu-item", text: "✕ " + name });
+        item.title = "Delete " + name;
+        item.addEventListener("click", () => {
+          delete profiles[name];
+          persist();
+          renderChips();
+          menu.hidden = true;
+        });
+        menu.appendChild(item);
+      });
+    }
+    menu.hidden = !menu.hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!row.contains(e.target)) menu.hidden = true;
+  });
+
+  delWrap.appendChild(delBtn);
+  delWrap.appendChild(menu);
+  row.appendChild(saveBtn);
+  row.appendChild(delWrap);
+  row.appendChild(chips);
+  host.appendChild(row);
+  renderChips();
+}
+
 let statusTimer = null;
 
 // Poll a "/status" endpoint until it reports no longer "running".
