@@ -87,11 +87,12 @@ function renderRecent(items) {
   items.forEach((it) => {
     const tr = el("tr");
     tr.appendChild(el("td", { class: "muted nowrap", text: it.added || "—" }));
-    tr.appendChild(el("td", { text: it.name }));
+    const nameTd = el("td", { text: it.name });
+    tr.appendChild(nameTd);
     tr.appendChild(el("td", { class: "muted", text: it.type }));
     tr.appendChild(el("td", { class: "muted", text: it.year || "—" }));
     body.appendChild(tr);
-    if (it.id) registerPopup(tr, { key: it.id, itemId: it.id });
+    if (it.id) registerPopup(nameTd, { key: it.id, itemId: it.id });
   });
 }
 

@@ -307,9 +307,13 @@ function FilterProfiles(host, storageKey, getFilters, applyFilters) {
 
 // A hover dropdown button (like the Google menu): shows a fixed-position menu
 // of items (links or buttons) while the pointer is over the button or menu.
-function hoverMenuButton(label, items) {
+function hoverMenuButton(label, items, variant) {
   const wrap = el("span", { class: "id-google" });
-  const btn = el("button", { type: "button", class: "id-google-btn", text: label });
+  const btn = el("button", {
+    type: "button",
+    class: "id-google-btn" + (variant ? " id-btn-" + variant : ""),
+    text: label,
+  });
   btn.appendChild(el("span", { class: "id-google-caret", text: "▾" }));
   wrap.appendChild(btn);
   if (!items.length) {

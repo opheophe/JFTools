@@ -98,7 +98,7 @@ function idGoogleQueries(r) {
 
 function idGoogleMenu(r) {
   const wrap = el("span", { class: "id-google" });
-  const btn = el("button", { type: "button", class: "id-google-btn", text: "Google" });
+  const btn = el("button", { type: "button", class: "id-google-btn id-btn-google", text: "Google" });
   btn.appendChild(el("span", { class: "id-google-caret", text: "▾" }));
   wrap.appendChild(btn);
 
@@ -161,14 +161,14 @@ function idBuildActions(r) {
   } else if ((r.type === "Series" || r.type === "Episode") && ID.sonarr) {
     openItems.push(hoverMenuLink(ID.sonarr + idEnc(r.series || r.name), "Sonarr"));
   }
-  td.appendChild(hoverMenuButton("Open in", openItems));
+  td.appendChild(hoverMenuButton("Open in", openItems, "open"));
 
   const actItems = [];
   if (r.path) {
     actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
     actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
   }
-  td.appendChild(hoverMenuButton("Actions", actItems));
+  td.appendChild(hoverMenuButton("Actions", actItems, "actions"));
 
   td.appendChild(idGoogleMenu(r));
   return td;
@@ -341,10 +341,11 @@ function renderIdTable() {
     markBtn.addEventListener("click", () => idToggleMark(idMarkKey(r), !marked));
     okTd.appendChild(markBtn);
     tr.appendChild(okTd);
-    tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
+    const nameTd = el("td", { text: r.display || r.name, title: r.display || r.name });
+    tr.appendChild(nameTd);
     tr.appendChild(idBuildActions(r));
     body.appendChild(tr);
-    if (r.id) registerPopup(tr, { key: r.id, itemId: r.id });
+    if (r.id) registerPopup(nameTd, { key: r.id, itemId: r.id });
   });
 
   renderPager(visible.length);

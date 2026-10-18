@@ -297,6 +297,11 @@ section.card { margin-top: 1.25rem; }
 }
 .id-google-btn:hover { background: rgba(79, 140, 255, 0.14); }
 .id-google-btn:disabled { opacity: 0.5; cursor: default; }
+.id-google-btn.id-btn-open { color: var(--ok); border-color: var(--ok); }
+.id-google-btn.id-btn-open:hover { background: rgba(62, 207, 142, 0.16); }
+.id-google-btn.id-btn-actions { color: var(--rescan); border-color: var(--rescan); }
+.id-google-btn.id-btn-actions:hover { background: rgba(224, 164, 88, 0.16); }
+.id-google-btn.id-btn-google { color: var(--accent); border-color: var(--accent); }
 .id-google-caret { font-size: 0.7rem; }
 .id-google-menu {
   position: fixed; z-index: 60; min-width: 180px;

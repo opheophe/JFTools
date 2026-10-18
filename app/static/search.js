@@ -56,14 +56,14 @@ function seBuildActions(r) {
   } else if ((r.type === "Series" || r.type === "Episode") && SE.sonarr) {
     openItems.push(hoverMenuLink(SE.sonarr + seEnc(r.series || r.name), "Sonarr"));
   }
-  td.appendChild(hoverMenuButton("Open in", openItems));
+  td.appendChild(hoverMenuButton("Open in", openItems, "open"));
 
   const actItems = [];
   if (r.path) {
     actItems.push(hoverMenuAction("Rescan library file", (node) => rescanFile(node, r.path)));
     actItems.push(hoverMenuAction("Rescan sub", (node) => rescanSubtitle(node, r.path)));
   }
-  td.appendChild(hoverMenuButton("Actions", actItems));
+  td.appendChild(hoverMenuButton("Actions", actItems, "actions"));
 
   return td;
 }
@@ -242,7 +242,8 @@ function renderSeTable() {
     const parent = r.path ? r.path.replace(/[\\/][^\\/]*$/, "") : "";
     tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
     tr.appendChild(el("td", { text: r.file, title: r.file }));
-    tr.appendChild(el("td", { text: r.display || r.name, title: r.display || r.name }));
+    const nameTd = el("td", { text: r.display || r.name, title: r.display || r.name });
+    tr.appendChild(nameTd);
     tr.appendChild(el("td", { class: "muted", text: r.added || "—", title: r.added || "" }));
     const fav = (r.favorited_by || []).join(", ");
     tr.appendChild(el("td", { class: "muted", text: fav, title: fav }));
@@ -267,7 +268,7 @@ function renderSeTable() {
 
     tr.appendChild(seBuildActions(r));
     body.appendChild(tr);
-    if (r.id) registerPopup(tr, { key: r.id, itemId: r.id });
+    if (r.id) registerPopup(nameTd, { key: r.id, itemId: r.id });
   });
 
   renderPager(visible.length);
