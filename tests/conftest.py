@@ -13,3 +13,22 @@ def _keep_test_logs_out_of_the_app(tmp_path, monkeypatch):
     from app import logs
 
     monkeypatch.setattr(logs, "LOG_DIR", tmp_path / "logs")
+
+
+@pytest.fixture(autouse=True)
+def _keep_test_writes_out_of_the_scan_store(tmp_path, monkeypatch):
+    """Point the scan store at temporary files.
+
+    ``app.subtitles`` loads ``data/scans.json`` (or the legacy
+    ``subtitles.json``) at import time. A test that saves state — a scan, an Ok
+    mark, an audio delete — would otherwise write the real store, and the
+    first save also removes the legacy file after a migration. That is real
+    user data, so no test may touch it.
+    """
+    from app import subtitles
+
+    monkeypatch.setattr(subtitles, "_SCANS_FILE", tmp_path / "scans.json")
+    monkeypatch.setattr(subtitles, "_LEGACY_SUBS_FILE", tmp_path / "subtitles.json")
+    # The in-memory state came from the real store at import; never let an
+    # unpatched save treat it as a migration and unlink anything.
+    monkeypatch.setitem(subtitles._state, "legacy", False)

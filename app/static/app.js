@@ -373,8 +373,8 @@ function hoverMenuAction(text, onClick) {
 
 // ---- row actions -----------------------------------------------------------
 //
-// The action pills a row carries: Open ▾ · Sync ▾ · Play · Subtitles and,
-// where asked for, Google ▾. One builder so the Search, Movie Match and
+// The action pills a row carries: Open ▾ · Sync ▾ · Play · Subtitles · Audio
+// and, where asked for, Google ▾. One builder so the Search, Movie Match and
 // Libraries tables cannot drift apart; ``cfg.urls`` supplies the base URLs
 // (Jellyfin/Radarr/Sonarr, empty when unconfigured) and ``cfg.google`` adds
 // the trailing Google menu.
@@ -413,6 +413,7 @@ function rowActions(r, cfg) {
   const playable = r.path && r.type !== "Series";
   td.appendChild(pillButton("Play", "play", playable ? () => playVideo(r.path) : null));
   td.appendChild(pillButton("Subtitles", "subs", playable ? () => subdlOpen(r.path) : null));
+  td.appendChild(pillButton("Audio", "audio", playable ? () => audioOpen(r.path) : null));
 
   if (cfg.google) td.appendChild(rowGoogleMenu(r));
   return td;
@@ -1263,8 +1264,8 @@ async function resyncLibrary(path) {
 // instead of waiting for a reload (SE comes from search.js and is absent on
 // the Movie Match page, which has no subtitle column).
 function applySubtitleEntry(path, entry) {
-  if (!entry || typeof SE === "undefined" || !SE.subtitles) return;
-  SE.subtitles[path] = entry;
+  if (!entry || typeof SE === "undefined" || !SE.scans) return;
+  SE.scans[path] = entry;
   renderSeTable();
 }
 

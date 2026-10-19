@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from starlette.middleware.sessions import SessionMiddleware
 
 from .about import check_for_updates, router as about_router
+from .audio import router as audio_router
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
 from .config import config
 from .files import router as files_router
@@ -72,6 +73,7 @@ async def _pages_are_not_cached(request: Request, call_next):
     return response
 
 app.include_router(about_router)
+app.include_router(audio_router)
 app.include_router(files_router)
 app.include_router(jellyfin_id_router)
 app.include_router(libraries_router)

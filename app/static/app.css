@@ -14,6 +14,7 @@
   --rescan: #e0a458;
   --teal: #4fc3d9;
   --magenta: #d97ad1;
+  --violet: #b48cff;
   --btn: #232c38;
 }
 
@@ -312,6 +313,8 @@ section.card { margin-top: 1.25rem; }
 .id-google-btn.id-btn-play:hover { background: rgba(62, 207, 142, 0.16); }
 .id-google-btn.id-btn-subs { color: var(--magenta); border-color: var(--magenta); }
 .id-google-btn.id-btn-subs:hover { background: rgba(217, 122, 209, 0.16); }
+.id-google-btn.id-btn-audio { color: var(--violet); border-color: var(--violet); }
+.id-google-btn.id-btn-audio:hover { background: rgba(180, 140, 255, 0.16); }
 .id-google-btn.id-btn-google { color: var(--accent); border-color: var(--accent); }
 .id-google-caret { font-size: 0.7rem; }
 .id-google-menu {
@@ -338,7 +341,7 @@ section.card { margin-top: 1.25rem; }
 #id-table th:nth-child(5), #id-table td:nth-child(5) { width: 100px; }
 /* A compact column: the pills wrap into a second line instead of reserving a
    whole line's worth of width. */
-#id-table th:nth-child(8), #id-table td:nth-child(8) { width: 220px; }
+#id-table th:nth-child(8), #id-table td:nth-child(8) { width: 270px; }
 #id-table td.id-actions { overflow: visible; }
 
 /* Libraries tab: the newest items, with the same action pills as the other
@@ -349,7 +352,7 @@ section.card { margin-top: 1.25rem; }
 #recent-table th:nth-child(2), #recent-table td:nth-child(2) { width: 110px; }
 #recent-table th:nth-child(4), #recent-table td:nth-child(4) { width: 80px; }
 #recent-table th:nth-child(5), #recent-table td:nth-child(5) { width: 60px; }
-#recent-table th:nth-child(6), #recent-table td:nth-child(6) { width: 220px; }
+#recent-table th:nth-child(6), #recent-table td:nth-child(6) { width: 240px; }
 #recent-table td.id-actions { overflow: visible; }
 /* The table rule above would otherwise beat ".card td.nowrap" and split the
    date across two lines. */
@@ -366,7 +369,8 @@ section.card { margin-top: 1.25rem; }
    table instead of keeping its size while the other columns give theirs up. */
 #se-table th:nth-child(6), #se-table td:nth-child(6) { width: 12%; }
 /* A compact column: two pills per line, Open/Sync then Play/Subtitles. */
-#se-table th:nth-child(9), #se-table td:nth-child(9) { width: 190px; }
+#se-table th:nth-child(9), #se-table td:nth-child(9) { width: 170px; }
+#se-table th:nth-child(10), #se-table td:nth-child(10) { width: 230px; }
 #se-table td.id-actions { overflow: visible; }
 #se-table th.sortable { cursor: pointer; user-select: none; }
 #se-table th.sortable:hover { color: var(--text); }

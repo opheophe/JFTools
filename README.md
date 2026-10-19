@@ -28,7 +28,10 @@ existing server over the API.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans. **Latest additions** names each item's
   library and carries the same action pills as the other tabs (Open, Sync, Play,
-  Subtitles, Google).
+  Subtitles, Audio, Google).
+- Audio tracks: the **Audio** column lists every embedded track, a filter can
+  match scan state, track count or a language, and the **Audio** pill opens a
+  per-track dialog that can delete a track in place.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT), and an
@@ -138,7 +141,9 @@ values.
 
 All runtime state lives in the data directory (`/data` in the container):
 `config.json` (Jellyfin connection + login hash), `.secret_key`, `schedules.json`,
-`users.json`, `libraries.json`, `jellyfin_id.json`, `subtitles.json`, and `logs/`.
+`users.json`, `libraries.json`, `jellyfin_id.json`, `scans.json`, and `logs/`.
+An old `subtitles.json` is imported automatically the first time the app starts
+with `scans.json` missing; it is left on disk as a backup.
 
 - **Bind mount:** point the `volumes` path at a NAS folder. The container starts
   as root only to align its internal user with `PUID`/`PGID` and `chown` the data
@@ -195,32 +200,36 @@ Notes:
 - **Verify:** use the **Test** button on a mapping, or in Docker
   `docker exec jftools ls "/Filmer"`.
 
-## Subtitle scan
+## Subtitle and audio scan
 
-JFTools can probe every media file with **ffprobe** and list its subtitle
-tracks — embedded streams plus external `.srt`/`.ass`/… files next to the video.
-Results are cached to `subtitles.json` and shown in the **Search** tab (a
-**Subtitles** column with a **Not scanned** state, a **Subtitles** filter, and a
-manual **Subtitle Ok** mark/filter). Each file carries a `scanned` flag:
-probing sets it to `true` only when the result is definitive (subs found or
-none); errors leave it `false` and are retried.
+JFTools can probe every media file with **ffprobe** and list its subtitle and
+audio tracks — embedded streams plus external `.srt`/`.ass`/… files next to the
+video. One probe fills both halves, cached in `scans.json` and shown in the
+**Search** tab: a **Subtitles** column with a **Not scanned** state, a
+**Subtitles** filter, a manual **Subtitle Ok** mark/filter, an **Audio** column
+and an **Audio** filter. Each half carries its own `scanned` / `audio_scanned`
+flag: probing sets it to `true` only when the result is definitive (tracks found
+or none); errors leave it `false` and are retried. The split also lets the audio
+scan backfill a store created by the subtitle-only version.
 
 Jellyfin lists a **series** as an item whose path is the show's folder. There is
 no file to probe — the episodes are rows of their own — so the scan records the
-folder as done and the column shows `—` for it. Without that, every series
+folder as done and both columns show `—` for it. Without that, every series
 stayed "Not scanned" forever and was re-probed on every scan.
 
-A file that genuinely cannot be probed keeps its `scanned` flag off and is
-retried by the next scan; the column names the reason (**Not reachable** when
-the path is missing, **Probe failed** for a damaged file, with ffprobe's own
-message in the tooltip). The scan's log line counts those separately, so
-"complete" never hides them.
+A file that genuinely cannot be probed keeps its flag off and is retried by the
+next scan; the column names the reason (**Not reachable** when the path is
+missing, **Probe failed** for a damaged file, with ffprobe's own message in the
+tooltip). The scan's log line counts those separately, so "complete" never
+hides them.
 
-Two scheduler jobs do the work:
+Four scheduler jobs do the work:
 
-- **Subtitle scan (full)** — marks every file unscanned, then re-probes them all.
-- **Subtitle scan** — syncs the store with the library (adds new files as
-  unscanned, drops removed ones), then probes every file not yet scanned.
+- **Subtitle scan (full)** / **Audio scan (full)** — marks every file unscanned,
+  then re-probes them all.
+- **Subtitle scan** / **Audio scan** — syncs the store with the library (adds new
+  files as unscanned, drops removed ones), then probes every file whose half has
+  not been scanned. The two buttons on the Search page start the same jobs.
 
 You can also re-probe a single file with the **Resync Subtitles** action on its
 row (or the **Sync** pill, which does both halves), which ignores the `scanned`
@@ -236,6 +245,27 @@ flag — handy after dropping a new `.srt` next to a movie.
 
 Classification matches Subber's Movie List: `acceptable` (English/Swedish/
 Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
+
+## Audio tracks
+
+The **Audio** column lists each file's embedded tracks as
+`English (E-AC-3 5.1), Swedish (AAC stereo)`; a trailing `*` marks the default
+track. The **Audio** filter offers the scan state and track counts (**Not
+scanned**, **No audio**, **Single track**, **Multiple tracks**) followed by one
+**Has <language>** entry per language the scan has seen.
+
+The **Audio** pill on a row opens a per-track dialog with a **Delete** button on
+each track. Deleting rewrites the video in place with ffmpeg — every other
+stream is copied as-is — into a temporary file in the same folder, which
+replaces the original only if ffmpeg succeeds. The dialog refuses to delete the
+only audio track, promotes the first remaining track to default if the deleted
+one was default, and asks Jellyfin to rescan the folder. It needs **File
+management** enabled in the settings, and free space equal to the file size.
+There is no batch delete.
+
+An audio track is shown as default if the file marks it so; the dialog also
+flags commentary tracks. Deleting is per file and per track — pick the row,
+pick the track.
 
 ## Subtitles
 

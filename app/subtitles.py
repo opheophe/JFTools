@@ -1,12 +1,18 @@
-"""Subtitle scanning — probe media files for subtitle tracks with ffprobe.
+"""Media scanning — probe files for subtitle and audio tracks with ffprobe.
 
-Two scan jobs (full + changed) walk the Movie Match items, resolve each path to
-this machine, run ffprobe to list embedded subtitle streams, and detect external
-subtitle files sitting next to the video. Results are cached to
-``data/subtitles.json`` and shown in the Search tab.
+Scan jobs walk the Movie Match items, resolve each path to this machine, run
+ffprobe once to list the embedded subtitle and audio streams, and detect
+external subtitle files sitting next to the video. Results are cached to
+``data/scans.json`` and shown in the Search tab.
 
-The classification mirrors Subber's "Movie List" tab so the two tools agree on
-what "acceptable", "AI sub", "forced", "foreign" and "no subs" mean.
+One probe fills both halves of an entry. Each half keeps its own "scanned"
+flag (``scanned`` for subtitles, ``audio_scanned`` for audio), so the audio scan
+can backfill a store written by a subtitle-only version, and each job's
+worklist only covers the files its half has not seen. New files are added
+unscanned by the reconcile step and picked up by whichever scan runs next.
+
+The subtitle classification mirrors Subber's "Movie List" tab so the two tools
+agree on what "acceptable", "AI sub", "forced", "foreign" and "no subs" mean.
 """
 from __future__ import annotations
 
@@ -31,7 +37,9 @@ from .web import require_login
 
 router = APIRouter()
 
-_SUBS_FILE = config.data_dir / "subtitles.json"
+_SCANS_FILE = config.data_dir / "scans.json"
+# The pre-audio store. Read once on upgrade, then removed by the first save.
+_LEGACY_SUBS_FILE = config.data_dir / "subtitles.json"
 
 # External subtitle file extensions.
 SUBTITLE_EXTENSIONS = {
@@ -107,13 +115,30 @@ _FULL_LANG_NAMES = {
 
 
 def _load_state() -> dict:
+    data = {}
+    legacy = False
     try:
-        data = json.loads(_SUBS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(_SCANS_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict) or not data.get("files"):
+        # Upgrading from the subtitle-only store. Its entries were probed for
+        # subtitles but carry no audio, so they start with audio_scanned false
+        # and the audio scan backfills them.
+        try:
+            data = json.loads(_LEGACY_SUBS_FILE.read_text(encoding="utf-8"))
+            legacy = isinstance(data, dict) and bool(data.get("files"))
+        except (OSError, ValueError):
+            data = {}
+    if not isinstance(data, dict):
         data = {}
     files = data.get("files")
     if not isinstance(files, dict):
         files = {}
+    for entry in files.values():
+        if isinstance(entry, dict):
+            entry.setdefault("audio", [])
+            entry.setdefault("audio_scanned", False)
     ok = data.get("ok")
     if not isinstance(ok, list):
         ok = []
@@ -122,32 +147,51 @@ def _load_state() -> dict:
         "ok": ok,
         "full_scan_at": data.get("full_scan_at"),
         "change_scan_at": data.get("change_scan_at"),
+        "audio_full_scan_at": data.get("audio_full_scan_at"),
+        "audio_change_scan_at": data.get("audio_change_scan_at"),
+        "legacy": legacy,
     }
 
 
 def _save_state() -> None:
     payload = {
-        "version": 1,
+        "version": 2,
         "full_scan_at": _state["full_scan_at"],
         "change_scan_at": _state["change_scan_at"],
+        "audio_full_scan_at": _state["audio_full_scan_at"],
+        "audio_change_scan_at": _state["audio_change_scan_at"],
         "files": _state["files"],
         "ok": _state["ok"],
     }
     try:
         config.data_dir.mkdir(parents=True, exist_ok=True)
-        tmp = _SUBS_FILE.with_suffix(".tmp")
+        tmp = _SCANS_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(_SUBS_FILE)
+        tmp.replace(_SCANS_FILE)
     except OSError:
-        pass
+        return
+    if _state.get("legacy"):
+        # The merged file now owns the data. Keep the old subtitle-only store:
+        # it is a free backup of a scan over 26k files, and deleting it the
+        # moment the first save runs is not worth the risk.
+        log(
+            "Search",
+            "INFO",
+            "Subtitle store moved to scans.json; subtitles.json is no longer read and may be deleted.",
+        )
+        _state["legacy"] = False
 
 
 _state = _load_state()
-_fetch = {"status": "idle", "scanned": 0, "total": 0, "error": None}
+_fetch = {"status": "idle", "kind": None, "scanned": 0, "total": 0, "error": None}
 
 
-def subtitles_map() -> dict:
-    """The scan store, keyed by Jellyfin path (``{path: entry}``)."""
+def scans_map() -> dict:
+    """The scan store, keyed by Jellyfin path (``{path: entry}``).
+
+    Each entry carries the subtitle half (``internal``/``external``/``subs``/
+    ``flags``) and the audio half (``audio``), plus one scanned flag per half.
+    """
     return _state["files"]
 
 
@@ -311,13 +355,67 @@ def resolve_ffsubsync() -> str | None:
     return _resolve_tool("JFTOOLS_FFSUBSYNC", "ffsubsync")
 
 
-def _probe_subtitles(ffprobe: str, video_path: str) -> tuple[list[dict], float, str | None]:
-    """Run ffprobe for subtitle streams + duration. Returns (tracks, duration, error)."""
+# ---- audio formatting -------------------------------------------------------
+
+
+# ffprobe's codec names to the short labels people know from their player.
+_AUDIO_CODEC_NAMES = {
+    "aac": "AAC", "ac3": "AC3", "eac3": "E-AC-3", "dts": "DTS",
+    "truehd": "TrueHD", "flac": "FLAC", "opus": "Opus", "mp3": "MP3",
+    "vorbis": "Vorbis", "alac": "ALAC", "pcm_s16le": "PCM", "pcm_s24le": "PCM",
+    "pcm_s16be": "PCM", "pcm_s24be": "PCM",
+}
+
+
+def _audio_codec_name(codec: str) -> str:
+    c = (codec or "").strip().lower()
+    if not c:
+        return "Unknown"
+    return _AUDIO_CODEC_NAMES.get(c) or c.upper()
+
+
+def _audio_layout(channels, layout) -> str:
+    """A compact channel description: ``5.1``, ``stereo``, ``7.1``, ``6ch``."""
+    lay = (layout or "").strip().lower()
+    if lay in ("mono", "stereo", "5.1", "7.1"):
+        return lay
+    try:
+        n = int(channels)
+    except (TypeError, ValueError):
+        return lay
+    return {1: "mono", 2: "stereo", 6: "5.1", 8: "7.1"}.get(n, f"{n}ch")
+
+
+def _audio_line(track: dict) -> str:
+    """``English (E-AC-3 5.1)*`` — the star marks the default track."""
+    label = f"{track.get('lang') or 'Unknown'} ({_audio_codec_name(track.get('codec'))}"
+    layout = _audio_layout(track.get("channels"), track.get("layout"))
+    if layout:
+        label += " " + layout
+    label += ")"
+    if track.get("default"):
+        label += "*"
+    return label
+
+
+# ---- ffprobe -----------------------------------------------------------------
+
+
+def _probe_streams(
+    ffprobe: str, video_path: str
+) -> tuple[list[dict], list[dict], float, str | None]:
+    """Probe one file once for its subtitle and audio streams.
+
+    Returns ``(subtitles, audio, duration, error)``. Both lists carry the
+    absolute ffprobe stream index, which is what the player and the audio
+    delete use to address exactly one stream.
+    """
     cmd = [
         ffprobe, "-v", "error",
-        "-select_streams", "s",
         "-show_entries",
-        "stream=index,codec_name:stream_tags=language,title:stream_disposition=forced:format=duration",
+        "stream=index,codec_type,codec_name,channels,channel_layout"
+        ":stream_tags=language,title"
+        ":stream_disposition=forced,default:format=duration",
         "-of", "json",
         video_path,
     ]
@@ -330,30 +428,49 @@ def _probe_subtitles(ffprobe: str, video_path: str) -> tuple[list[dict], float, 
             encoding="utf-8", errors="replace", creationflags=creationflags,
         )
     except Exception as exc:  # noqa: BLE001
-        return [], 0.0, f"ffprobe error: {exc}"
+        return [], [], 0.0, f"ffprobe error: {exc}"
     if result.returncode != 0:
-        return [], 0.0, f"ffprobe exit {result.returncode}: {(result.stderr or '').strip()[:200]}"
+        return [], [], 0.0, f"ffprobe exit {result.returncode}: {(result.stderr or '').strip()[:200]}"
     try:
         data = json.loads(result.stdout)
     except Exception as exc:  # noqa: BLE001
-        return [], 0.0, f"ffprobe JSON parse failed: {exc}"
+        return [], [], 0.0, f"ffprobe JSON parse failed: {exc}"
 
     internal = []
+    audio = []
     for s in data.get("streams") or []:
+        kind = s.get("codec_type")
         tags = s.get("tags") or {}
-        lang = _subtitle_lang_name(tags.get("language"))
-        title = (tags.get("title") or "").strip()
-        name = lang if (not title or title.lower() == lang.lower()) else f"{lang} ({title})"
-        forced = bool((s.get("disposition") or {}).get("forced")) or "forced" in title.lower()
-        internal.append({
-            # The absolute stream index, so the player can map this track
-            # exactly (``-map 0:<index>``) when it extracts it to WebVTT.
-            "index": s.get("index"),
-            "lang": lang,
-            "name": name,
-            "forced": forced,
-            "codec": s.get("codec_name") or "",
-        })
+        if kind == "subtitle":
+            lang = _subtitle_lang_name(tags.get("language"))
+            title = (tags.get("title") or "").strip()
+            name = lang if (not title or title.lower() == lang.lower()) else f"{lang} ({title})"
+            forced = bool((s.get("disposition") or {}).get("forced")) or "forced" in title.lower()
+            internal.append({
+                # The absolute stream index, so the player can map this track
+                # exactly (``-map 0:<index>``) when it extracts it to WebVTT.
+                "index": s.get("index"),
+                "lang": lang,
+                "name": name,
+                "forced": forced,
+                "codec": s.get("codec_name") or "",
+            })
+        elif kind == "audio":
+            code = (tags.get("language") or "").strip().lower()
+            title = (tags.get("title") or "").strip()
+            track = {
+                "index": s.get("index"),
+                "lang": _subtitle_lang_name(code),
+                "code": code,
+                "title": title,
+                "codec": s.get("codec_name") or "",
+                "channels": s.get("channels"),
+                "layout": s.get("channel_layout") or "",
+                "default": bool((s.get("disposition") or {}).get("default")),
+                "commentary": "commentary" in title.lower(),
+            }
+            track["name"] = _audio_line(track)
+            audio.append(track)
 
     duration = 0.0
     fmt = data.get("format") or {}
@@ -361,7 +478,13 @@ def _probe_subtitles(ffprobe: str, video_path: str) -> tuple[list[dict], float, 
         duration = float(fmt.get("duration") or 0)
     except (TypeError, ValueError):
         duration = 0.0
-    return internal, duration, None
+    return internal, audio, duration, None
+
+
+def _probe_subtitles(ffprobe: str, video_path: str) -> tuple[list[dict], float, str | None]:
+    """Subtitle-only view of :func:`_probe_streams` (used by the player)."""
+    internal, _audio, duration, err = _probe_streams(ffprobe, video_path)
+    return internal, duration, err
 
 
 # ---- scanning ---------------------------------------------------------------
@@ -376,7 +499,13 @@ def _stat_path(local: str):
 
 def _stub(path: str) -> dict:
     """A minimal store entry for a library item that has not been probed yet."""
-    return {"path": path, "file": Path(path).name, "scanned": False}
+    return {
+        "path": path,
+        "file": Path(path).name,
+        "scanned": False,
+        "audio": [],
+        "audio_scanned": False,
+    }
 
 
 def _reconcile(files: dict, ok: list[str], current_paths: set[str]) -> tuple[dict, list[str]]:
@@ -390,16 +519,20 @@ def _reconcile(files: dict, ok: list[str], current_paths: set[str]) -> tuple[dic
     return files, ok
 
 
-def _build_worklist(rows: list[dict], files: dict) -> list[tuple[str, str, object]]:
-    """Return the (key, local, st) triples to probe — every entry not yet scanned.
+def _build_worklist(
+    rows: list[dict], files: dict, kind: str = "subs"
+) -> list[tuple[str, str, object]]:
+    """Return the (key, local, st) triples to probe — every entry whose half
+    (subtitles or audio) has not been scanned yet.
 
     Runs in a worker thread: os.stat over SMB/NFS can be slow, and doing it on
     the event loop would freeze the app during a large scan.
     """
+    flag = "audio_scanned" if kind == "audio" else "scanned"
     to_scan = []
     for r in rows:
         key = r["path"]
-        if files.get(key, {}).get("scanned"):
+        if files.get(key, {}).get(flag):
             continue
         local = resolve_path(key, config.settings.path_maps)
         st = _stat_path(local)
@@ -415,12 +548,14 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
         "size": st.st_size if st else None,
         "mtime": st.st_mtime if st else None,
         "scanned": False,
+        "audio_scanned": False,
         "scanned_at": time.time(),
         "duration": 0.0,
         "internal": [],
         "external": [],
         "subs": [],
         "flags": None,
+        "audio": [],
         "error": None,
     }
     if st is None:
@@ -433,11 +568,12 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
         # every worklist and in the "Not scanned" filter forever.
         entry["folder"] = True
         entry["scanned"] = True
+        entry["audio_scanned"] = True
         return key, entry
     if not stat.S_ISREG(st.st_mode):
         entry["error"] = "not a file"
         return key, entry
-    internal, duration, err = _probe_subtitles(ffprobe, local)
+    internal, audio, duration, err = _probe_streams(ffprobe, local)
     if err:
         entry["error"] = err
         return key, entry
@@ -456,20 +592,31 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
     entry["external"] = external
     entry["subs"] = _display_lines(internal, external)
     entry["flags"] = _classify_tracks(internal, external)
+    entry["audio"] = audio
     entry["scanned"] = True
+    entry["audio_scanned"] = True
     return key, entry
 
 
-async def run_scan(mode: str) -> None:
-    """Probe the Movie Match items for subtitle tracks and refresh the store.
+async def run_scan(mode: str, kind: str = "subs") -> None:
+    """Probe the Movie Match items for subtitle and audio tracks.
 
-    ``mode`` is ``"scan"`` (reconcile, then probe every unscanned file) or
-    ``"full"`` (mark everything unscanned first, then the same scan).
+    ``mode`` is ``"scan"`` (reconcile, then probe every file whose requested
+    half is unscanned) or ``"full"`` (mark that half unscanned first, then the
+    same scan).
+
+    ``kind`` selects which half's worklist drives the scan (``"subs"`` or
+    ``"audio"``). One probe fills both halves, so whichever job runs first also
+    backfills the other one for the files it touched.
     """
     if _fetch["status"] == "running":
         return
-    label = "Subtitle scan (full)" if mode == "full" else "Subtitle scan"
-    _fetch.update({"status": "running", "scanned": 0, "total": 0, "error": None})
+    kind = "audio" if kind == "audio" else "subs"
+    flag = "audio_scanned" if kind == "audio" else "scanned"
+    label = ("Audio scan" if kind == "audio" else "Subtitle scan") + (
+        " (full)" if mode == "full" else ""
+    )
+    _fetch.update({"status": "running", "kind": kind, "scanned": 0, "total": 0, "error": None})
     log("Search", "INFO", f"{label} started")
     try:
         ffprobe = resolve_ffprobe()
@@ -495,13 +642,13 @@ async def run_scan(mode: str) -> None:
         files, ok = _reconcile(dict(_state["files"]), list(_state["ok"]), current_paths)
         if mode == "full":
             for entry in files.values():
-                entry["scanned"] = False
+                entry[flag] = False
         _state["files"] = files
         _state["ok"] = ok
 
         # Resolve + stat each path off the event loop — os.stat over SMB/NFS can
         # be slow, and doing it inline would freeze the app during a big scan.
-        to_scan = await asyncio.to_thread(_build_worklist, rows, files)
+        to_scan = await asyncio.to_thread(_build_worklist, rows, files, kind)
 
         _fetch["total"] = len(to_scan)
         folders = 0
@@ -526,7 +673,12 @@ async def run_scan(mode: str) -> None:
                         failed += 1
                         log("Search", "WARN", f"{entry['file']}: {entry['error']}")
                     else:
-                        summary = ", ".join(entry.get("subs") or []) or "no subs"
+                        tracks = entry.get("audio") if kind == "audio" else entry.get("subs")
+                        if kind == "audio":
+                            summary = ", ".join(t.get("name", "") for t in (tracks or []))
+                            summary = summary or "no audio"
+                        else:
+                            summary = ", ".join(tracks or []) or "no subs"
                         log("Search", "INFO", f"{entry['file']}: {summary}")
             finally:
                 # On abort (or completion) stop queueing probes and drop pending
@@ -535,9 +687,9 @@ async def run_scan(mode: str) -> None:
                 pool.shutdown(wait=False, cancel_futures=True)
 
         if mode == "full":
-            _state["full_scan_at"] = time.time()
+            _state["audio_full_scan_at" if kind == "audio" else "full_scan_at"] = time.time()
         else:
-            _state["change_scan_at"] = time.time()
+            _state["audio_change_scan_at" if kind == "audio" else "change_scan_at"] = time.time()
         _save_state()
         _fetch["status"] = "done"
         log(
@@ -691,6 +843,20 @@ async def subtitle_tracks_for(path: str) -> tuple[list[dict], list[dict]]:
                     internal = tracks
 
     return internal, external
+
+
+async def audio_tracks_for(path: str, force: bool = False) -> tuple[list[dict], str | None]:
+    """``(tracks, error)`` for a library video's embedded audio streams.
+
+    A fresh probe is the default: the audio dialog deletes by absolute stream
+    index, so the list it shows must match the file on disk right now. It also
+    refreshes the store entry, both halves, for free.
+    """
+    entry = _state["files"].get(path) or {}
+    if not force and entry.get("audio_scanned"):
+        return list(entry.get("audio") or []), None
+    fresh = await rescan_one(path)
+    return list(fresh.get("audio") or []), fresh.get("error")
 
 
 def _season_episode(path: str) -> tuple[int | None, int | None]:

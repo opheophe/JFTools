@@ -2,9 +2,9 @@
 
 const SE = {
   rows: [], jellyfin: "", radarr: "", sonarr: "",
-  subtitles: {}, subtitlesOk: new Set(),
+  scans: {}, subtitlesOk: new Set(),
   fetched: false, page: 1, sort: { col: null, dir: 1 },
-  filters: { lib: [], type: [], file: "", jf: "", fav: [], subs: [], subsok: [] },
+  filters: { lib: [], type: [], file: "", jf: "", fav: [], subs: [], audio: [], subsok: [] },
   ms: {},
 };
 
@@ -30,7 +30,13 @@ const SUBS_PREDS = {
   "No subs": (f) => !!f.nosubs,
 };
 
-function seSubsEntry(r) { return SE.subtitles[r.path] || null; }
+// Audio filter: probe state/count in front of one "Has <language>" entry per
+// language the scan found (filled in by populateOptions).
+const AUDIO_OPTIONS = ["Not scanned", "No audio", "Single track", "Multiple tracks"]
+  .map((v) => ({ value: v, label: v }));
+
+function seScanEntry(r) { return SE.scans[r.path] || null; }
+function seSubsEntry(r) { return seScanEntry(r); }
 function seFlags(r) { const e = seSubsEntry(r); return e && e.flags ? e.flags : null; }
 function seSubsOk(r) { return SE.subtitlesOk.has(r.path); }
 function seScanned(r) { const e = seSubsEntry(r); return !!(e && e.scanned); }
@@ -51,6 +57,38 @@ function seSubsText(r) {
   }
   const text = (e.subs || []).join(", ");
   return { text, title: text };
+}
+
+function seAudioText(r) {
+  const e = seScanEntry(r);
+  if (!e) return { text: "Not scanned", title: "Audio scan has not probed this file yet" };
+  if (e.folder) {
+    return { text: "—", title: "Series folder — its episodes hold the tracks" };
+  }
+  if (e.error) {
+    return { text: SE_SUBS_FAIL[e.error] || "Probe failed", title: e.error };
+  }
+  if (!e.audio_scanned) {
+    return { text: "Not scanned", title: "Audio scan has not probed this file yet" };
+  }
+  const tracks = e.audio || [];
+  if (!tracks.length) return { text: "No audio", title: "ffprobe found no audio track" };
+  const text = tracks.map((t) => t.name || "").join(", ");
+  return { text, title: text };
+}
+
+// A row matches when *any* selected audio option matches, like the other
+// multiselects. "lang:X" is the dynamic "Has X" case.
+function seAudioMatch(r, value) {
+  const e = seScanEntry(r);
+  if (e && e.folder) return false;
+  const tracks = (e && e.audio) || [];
+  if (value === "Not scanned") return !(e && e.audio_scanned);
+  if (value === "No audio") return !!(e && e.audio_scanned) && tracks.length === 0;
+  if (value === "Single track") return tracks.length === 1;
+  if (value === "Multiple tracks") return tracks.length > 1;
+  if (value.startsWith("lang:")) return tracks.some((t) => t.lang === value.slice(5));
+  return false;
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -103,6 +141,7 @@ function seVisible() {
       });
       if (!ok) return false;
     }
+    if (f.audio.length && !f.audio.some((v) => seAudioMatch(r, v))) return false;
     if (f.subsok.length) {
       const ok = seSubsOk(r) ? "yes" : "no";
       if (!f.subsok.includes(ok)) return false;
@@ -131,6 +170,7 @@ function loadFilters() {
       SE.filters.jf = typeof f.jf === "string" ? f.jf : "";
       SE.filters.fav = Array.isArray(f.fav) ? f.fav : [];
       SE.filters.subs = Array.isArray(f.subs) ? f.subs : [];
+      SE.filters.audio = Array.isArray(f.audio) ? f.audio : [];
       SE.filters.subsok = Array.isArray(f.subsok) ? f.subsok : [];
     }
   } catch (e) {}
@@ -147,6 +187,7 @@ const SORTABLE = {
   fav: (r) => (r.favorited_by || []).join(", "),
   subsok: (r) => (seSubsOk(r) ? 1 : 0),
   subs: (r) => { const e = seSubsEntry(r); return (e && e.subs || []).join(", "); },
+  audio: (r) => seAudioText(r).text,
 };
 
 function saveSort() {
@@ -215,13 +256,13 @@ function renderSeTable() {
   updateSortIndicators();
 
   if (!SE.fetched) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "9", text: "Not fetched yet — click Fetch." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "10", text: "Not fetched yet — click Fetch." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
   }
   if (visible.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "9", text: "No items match the filters." })]));
+    body.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "10", text: "No items match the filters." })]));
     countEl.textContent = "";
     renderPager(0);
     return;
@@ -259,6 +300,9 @@ function renderSeTable() {
 
     const subs = seSubsText(r);
     tr.appendChild(el("td", { class: "muted", text: subs.text, title: subs.title || subs.text }));
+
+    const audio = seAudioText(r);
+    tr.appendChild(el("td", { class: "muted", text: audio.text, title: audio.title || audio.text }));
 
     tr.appendChild(seBuildActions(r));
     body.appendChild(tr);
@@ -303,6 +347,7 @@ function applyFilterUI() {
   SE.ms.type.setValues(SE.filters.type);
   SE.ms.fav.setValues(SE.filters.fav);
   SE.ms.subs.setValues(SE.filters.subs);
+  SE.ms.audio.setValues(SE.filters.audio);
   SE.ms.subsok.setValues(SE.filters.subsok);
   document.getElementById("se-search-file").value = SE.filters.file;
   document.getElementById("se-search-jf").value = SE.filters.jf;
@@ -313,8 +358,18 @@ function populateOptions() {
   const types = [...new Set(SE.rows.map((r) => r.type).filter(Boolean))].sort();
   const favs = [...new Set(SE.rows.flatMap((r) => r.favorited_by || []))]
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const audioLangs = new Set();
+  Object.values(SE.scans).forEach((e) => (e.audio || []).forEach((t) => {
+    if (t.lang && t.lang !== "Unknown") audioLangs.add(t.lang);
+  }));
   SE.ms.lib.setOptions(libs.map((v) => ({ value: v, label: v })));
   SE.ms.type.setOptions(types.map((v) => ({ value: v, label: v })));
+  SE.ms.audio.setOptions([
+    ...AUDIO_OPTIONS,
+    ...[...audioLangs]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+      .map((v) => ({ value: "lang:" + v, label: "Has " + v })),
+  ]);
   SE.ms.fav.setOptions([
     { value: FAV_ANY, label: "Any" },
     { value: FAV_NONE, label: "None" },
@@ -330,7 +385,7 @@ async function seLoad() {
     SE.jellyfin = data.jellyfin_url || "";
     SE.radarr = data.radarr_url || "";
     SE.sonarr = data.sonarr_url || "";
-    SE.subtitles = data.subtitles || {};
+    SE.scans = data.scans || {};
     SE.subtitlesOk = new Set(data.subtitles_ok || []);
     SE.fetched = !!data.fetched;
     document.getElementById("se-sync-age").textContent = fmtAgo(data.last_sync);
@@ -378,35 +433,44 @@ async function seFetch() {
   );
 }
 
-async function seScan() {
-  const btn = document.getElementById("se-scan");
+async function seScan(kind) {
+  const btnSubs = document.getElementById("se-scan");
+  const btnAudio = document.getElementById("se-audio-scan");
   const prog = document.getElementById("se-progress");
   const fill = document.getElementById("se-progress-fill");
   const statusEl = document.getElementById("se-status");
-  btn.disabled = true;
+  const audio = kind === "audio";
+  const label = audio ? "Audio scan" : "Subtitle scan";
+  btnSubs.disabled = true;
+  btnAudio.disabled = true;
   prog.hidden = false;
+  statusEl.textContent = label + " starting…";
   try {
-    await postJSON("/api/subtitles/scan", "mode=scan");
+    await postJSON(audio ? "/api/audio/scan" : "/api/subtitles/scan", "mode=scan");
   } catch (e) {
     prog.hidden = true;
-    btn.disabled = false;
+    btnSubs.disabled = false;
+    btnAudio.disabled = false;
     statusEl.textContent = String(e);
     return;
   }
   startStatusPoll(
-    "/api/subtitles/status",
+    audio ? "/api/audio/status" : "/api/subtitles/status",
     (s) => {
       if (s.status === "running") {
         const pct = s.total ? Math.round(100 * s.scanned / s.total) : 0;
         fill.style.width = pct + "%";
-        statusEl.textContent = "Scanning… " + s.scanned + "/" + (s.total || "?") + " (" + pct + "%)";
+        // Both buttons share one engine; say which scan is actually running.
+        const running = s.kind === "audio" ? "Audio scan" : "Subtitle scan";
+        statusEl.textContent = running + "… " + s.scanned + "/" + (s.total || "?") + " (" + pct + "%)";
       } else {
-        statusEl.textContent = s.status === "error" ? "Scan failed: " + (s.error || "") : "Subtitle scan complete.";
+        statusEl.textContent = s.status === "error" ? label + " failed: " + (s.error || "") : label + " complete.";
       }
     },
     async (s) => {
       prog.hidden = true;
-      btn.disabled = false;
+      btnSubs.disabled = false;
+      btnAudio.disabled = false;
       if (s.status !== "error") await seLoad();
     },
     600
@@ -430,6 +494,9 @@ function bindSeControls() {
   SE.ms.subs = MultiSelect(document.getElementById("se-subs"), SUBS_OPTIONS, (vals) => {
     SE.filters.subs = vals; onFilter();
   });
+  SE.ms.audio = MultiSelect(document.getElementById("se-audio"), AUDIO_OPTIONS, (vals) => {
+    SE.filters.audio = vals; onFilter();
+  });
   SE.ms.subsok = MultiSelect(document.getElementById("se-subsok"), SUBSOK_OPTIONS, (vals) => {
     SE.filters.subsok = vals; onFilter();
   });
@@ -444,7 +511,8 @@ function bindSeControls() {
   });
 
   document.getElementById("se-fetch").addEventListener("click", seFetch);
-  document.getElementById("se-scan").addEventListener("click", seScan);
+  document.getElementById("se-scan").addEventListener("click", () => seScan("subs"));
+  document.getElementById("se-audio-scan").addEventListener("click", () => seScan("audio"));
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -453,6 +521,14 @@ document.addEventListener("DOMContentLoaded", () => {
   bindSeControls();
   bindSortHeaders();
   window.subdlRefresh = () => seLoad();
+  // An audio delete returns the freshly probed entry; fold it straight into the
+  // table instead of refetching the whole (large) items payload.
+  window.audioRefresh = (path, entry) => {
+    if (path && entry) SE.scans[path] = entry;
+    populateOptions();
+    applyFilterUI();
+    renderSeTable();
+  };
   FilterProfiles(document.getElementById("se-profiles"),
     "jftools.search.profiles",
     () => ({ filters: SE.filters, sort: SE.sort }),
@@ -465,6 +541,7 @@ document.addEventListener("DOMContentLoaded", () => {
         jf: typeof f.jf === "string" ? f.jf : "",
         fav: Array.isArray(f.fav) ? f.fav : [],
         subs: Array.isArray(f.subs) ? f.subs : [],
+        audio: Array.isArray(f.audio) ? f.audio : [],
         subsok: Array.isArray(f.subsok) ? f.subsok : [],
       };
       const s = (p && p.sort) || {};

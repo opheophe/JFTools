@@ -497,7 +497,7 @@ async def search_page(request: Request, user: str = Depends(require_login)):
 
 @router.get("/api/jellyfin-id/items")
 async def jellyfin_id_items(request: Request, user: str = Depends(require_login)):
-    from .subtitles import subtitles_map, subtitles_ok
+    from .subtitles import scans_map, subtitles_ok
 
     return JSONResponse(
         {
@@ -509,7 +509,9 @@ async def jellyfin_id_items(request: Request, user: str = Depends(require_login)
             "jellyfin_url": config.settings.jellyfin_url,
             "radarr_url": config.settings.radarr_url,
             "sonarr_url": config.settings.sonarr_url,
-            "subtitles": subtitles_map(),
+            # One entry per path: subtitle half (internal/external/subs/flags)
+            # and audio half (audio), each with its own scanned flag.
+            "scans": scans_map(),
             "subtitles_ok": subtitles_ok(),
         }
     )

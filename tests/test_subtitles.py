@@ -202,7 +202,7 @@ def test_probe_one_success_marks_scanned(monkeypatch, tmp_path):
 
     f = tmp_path / "movie.mkv"
     f.write_bytes(b"")
-    monkeypatch.setattr(sub, "_probe_subtitles", lambda ff, local: ([], 0.0, None))
+    monkeypatch.setattr(sub, "_probe_streams", lambda ff, local: ([], [], 0.0, None))
     monkeypatch.setattr(sub, "_external_subtitles", lambda local: [])
     key, entry = sub._probe_one("ffprobe", str(f), str(f), f.stat())
     assert entry["scanned"] is True
@@ -221,10 +221,10 @@ def test_resolve_ffprobe_env(tmp_path, monkeypatch):
 
 def test_subtitles_ok_getter_is_callable():
     # Regression: the getter must not be shadowed by the /api/subtitles/ok route.
-    from app.subtitles import subtitles_map, subtitles_ok
+    from app.subtitles import scans_map, subtitles_ok
 
     assert isinstance(subtitles_ok(), list)
-    assert isinstance(subtitles_map(), dict)
+    assert isinstance(scans_map(), dict)
 
 
 async def test_rescan_one_without_ffprobe(monkeypatch):
@@ -238,13 +238,13 @@ async def test_rescan_one_without_ffprobe(monkeypatch):
 
 async def test_rescan_one_returns_the_stored_entry(monkeypatch, tmp_path):
     """The Search table applies the rescan response in place, so the entry it
-    gets back has to be the one subtitles_map() serves, keyed by the path."""
+    gets back has to be the one scans_map() serves, keyed by the path."""
     import app.subtitles as sub
 
     f = tmp_path / "movie.mkv"
     f.write_bytes(b"")
     monkeypatch.setattr(sub, "resolve_ffprobe", lambda: "ffprobe")
-    monkeypatch.setattr(sub, "_probe_subtitles", lambda ff, local: ([], 60.0, None))
+    monkeypatch.setattr(sub, "_probe_streams", lambda ff, local: ([], [], 60.0, None))
     monkeypatch.setattr(sub, "_external_subtitles", lambda local: [])
     monkeypatch.setattr(sub, "_save_state", lambda: None)
 
@@ -252,7 +252,7 @@ async def test_rescan_one_returns_the_stored_entry(monkeypatch, tmp_path):
     try:
         entry = await sub.rescan_one(str(f))
         assert entry["path"] == str(f)
-        assert sub.subtitles_map()[str(f)] == entry
+        assert sub.scans_map()[str(f)] == entry
     finally:
         sub._state["files"] = before
 
@@ -271,7 +271,7 @@ async def test_scan_clears_not_scanned_for_series_folders(monkeypatch, tmp_path)
     rows = [{"path": str(show), "file": show.name}, {"path": str(movie), "file": movie.name}]
 
     monkeypatch.setattr(sub, "resolve_ffprobe", lambda: "ffprobe")
-    monkeypatch.setattr(sub, "_probe_subtitles", lambda ff, local: ([], 60.0, None))
+    monkeypatch.setattr(sub, "_probe_streams", lambda ff, local: ([], [], 60.0, None))
     monkeypatch.setattr(sub, "_external_subtitles", lambda local: [])
     monkeypatch.setattr(sub, "_save_state", lambda: None)
     monkeypatch.setattr(sub, "_reconcile", lambda files, ok, paths: (dict(files), list(ok)))
@@ -285,10 +285,11 @@ async def test_scan_clears_not_scanned_for_series_folders(monkeypatch, tmp_path)
 
         assert sub._fetch["status"] == "done"
         assert sub._fetch["total"] == 2
-        entry = sub.subtitles_map()[str(show)]
+        entry = sub.scans_map()[str(show)]
         assert entry["scanned"] is True
         assert entry["folder"] is True
-        assert sub.subtitles_map()[str(movie)]["scanned"] is True
+        assert sub.scans_map()[str(movie)]["scanned"] is True
+        assert sub.scans_map()[str(movie)]["audio_scanned"] is True
     finally:
         sub._state["files"] = files_before
         id_state["rows"] = rows_before
