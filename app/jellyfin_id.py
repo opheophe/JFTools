@@ -283,7 +283,14 @@ def _item_display(it: dict) -> str:
     return name
 
 
-def _library_for_path(path: str, locations: list[tuple[str, str]]) -> str:
+def library_for_path(path: str, locations: list[tuple[str, str]]) -> str:
+    """Name the Jellyfin library an item's ``Path`` sits in.
+
+    ``locations`` is ``[(library name, location path), ...]`` as Jellyfin
+    reports them. Longest prefix wins, so a library nested inside another (say
+    ``/Filmer/Kids`` under ``/Filmer``) still answers with itself. Used by the
+    "Library" column on both Movie Match and the Libraries page.
+    """
     p = (path or "").lower()
     best = ""
     best_len = -1
@@ -335,7 +342,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
                     "series_id": it.get("SeriesId") or "",
                     "display": _item_display(it),
                     "year": it.get("ProductionYear"),
-                    "library": _library_for_path(path, locations),
+                    "library": library_for_path(path, locations),
                     "added": (it.get("DateCreated") or "")[:10],
                     "imdb": provider.get("Imdb", ""),
                     "tmdb": provider.get("Tmdb", ""),

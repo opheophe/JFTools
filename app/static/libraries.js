@@ -1,5 +1,9 @@
 "use strict";
 
+// Jellyfin/Radarr/Sonarr base URLs for the row action pills (Open ▾, Sync ▾).
+// Empty until /api/libraries answers; the pills then render without those links.
+let libUrls = { jellyfin: "", radarr: "", sonarr: "" };
+
 function setUpdated(lastSync, fetching, error) {
   renderSyncLabel("lib-updated", { lastSync, fetching, error });
 }
@@ -28,6 +32,11 @@ async function loadLibraries() {
       return;
     }
     renderLibraries(data.libraries || []);
+    libUrls = {
+      jellyfin: data.jellyfin_url || "",
+      radarr: data.radarr_url || "",
+      sonarr: data.sonarr_url || "",
+    };
     renderRecent(data.recent || []);
     setUpdated(data.last_sync, data.fetching, data.fetch_error);
     if (data.fetching) pollLibrariesUntilDone();
@@ -81,16 +90,18 @@ function renderRecent(items) {
   const body = document.getElementById("recent-body");
   body.innerHTML = "";
   if (items.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "muted", text: "No recent additions." })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No recent additions." })]));
     return;
   }
   items.forEach((it) => {
     const tr = el("tr");
     tr.appendChild(el("td", { class: "muted nowrap", text: it.added || "—" }));
+    tr.appendChild(el("td", { class: "muted", text: it.library || "—" }));
     const nameTd = el("td", { text: it.name });
     tr.appendChild(nameTd);
     tr.appendChild(el("td", { class: "muted", text: it.type }));
     tr.appendChild(el("td", { class: "muted", text: it.year || "—" }));
+    tr.appendChild(rowActions(it, { urls: libUrls, google: true }));
     body.appendChild(tr);
     if (it.id) registerPopup(nameTd, { key: it.id, itemId: it.id });
   });
@@ -126,6 +137,9 @@ async function refreshLibraries() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  // The recent table has no subtitle column, so a subtitle change needs no
+  // refresh of its own (the dialog still re-probes the file server-side).
+  window.subdlRefresh = null;
   loadLibraries();
   document.getElementById("lib-refresh").addEventListener("click", refreshLibraries);
 });

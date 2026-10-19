@@ -341,6 +341,20 @@ section.card { margin-top: 1.25rem; }
 #id-table th:nth-child(8), #id-table td:nth-child(8) { width: 220px; }
 #id-table td.id-actions { overflow: visible; }
 
+/* Libraries tab: the newest items, with the same action pills as the other
+   tabs. The pills wrap onto more lines rather than run past the table edge. */
+#recent-table { width: 100%; table-layout: fixed; }
+#recent-table th, #recent-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+#recent-table th:nth-child(1), #recent-table td:nth-child(1) { width: 100px; }
+#recent-table th:nth-child(2), #recent-table td:nth-child(2) { width: 110px; }
+#recent-table th:nth-child(4), #recent-table td:nth-child(4) { width: 80px; }
+#recent-table th:nth-child(5), #recent-table td:nth-child(5) { width: 60px; }
+#recent-table th:nth-child(6), #recent-table td:nth-child(6) { width: 220px; }
+#recent-table td.id-actions { overflow: visible; }
+/* The table rule above would otherwise beat ".card td.nowrap" and split the
+   date across two lines. */
+#recent-table td.nowrap { white-space: nowrap; }
+
 /* Search tab */
 #se-progress { margin-top: 0.75rem; }
 #se-table { width: 100%; table-layout: fixed; }

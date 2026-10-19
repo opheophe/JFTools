@@ -185,7 +185,7 @@ class JellyfinClient:
                 "IncludeItemTypes": "Movie,Series,Episode",
                 "Recursive": "true",
                 "Limit": str(limit),
-                "Fields": "DateCreated,ProductionYear,SeriesName,Album",
+                "Fields": "DateCreated,ProductionYear,SeriesName,Album,Path",
                 "Filters": "IsNotFolder",
             },
         )

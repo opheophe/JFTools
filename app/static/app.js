@@ -371,6 +371,165 @@ function hoverMenuAction(text, onClick) {
   return item;
 }
 
+// ---- row actions -----------------------------------------------------------
+//
+// The action pills a row carries: Open ▾ · Sync ▾ · Play · Subtitles and,
+// where asked for, Google ▾. One builder so the Search, Movie Match and
+// Libraries tables cannot drift apart; ``cfg.urls`` supplies the base URLs
+// (Jellyfin/Radarr/Sonarr, empty when unconfigured) and ``cfg.google`` adds
+// the trailing Google menu.
+
+function rowActions(r, cfg) {
+  cfg = cfg || {};
+  const urls = cfg.urls || {};
+  const enc = encodeURIComponent;
+  const td = el("td", { class: "id-actions" });
+
+  const openItems = [];
+  if (r.id && urls.jellyfin) {
+    openItems.push(hoverMenuLink(urls.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + enc(r.id), "Jellyfin"));
+  }
+  if ((r.type === "Movie" || r.type === "Video") && urls.radarr) {
+    openItems.push(hoverMenuLink(urls.radarr + enc(r.name), "Radarr"));
+  } else if ((r.type === "Series" || r.type === "Episode") && urls.sonarr) {
+    openItems.push(hoverMenuLink(urls.sonarr + enc(r.series || r.name), "Sonarr"));
+  }
+  if (r.path) {
+    openItems.push(hoverMenuLink("/files?path=" + enc(r.path), "File browser"));
+  }
+  td.appendChild(hoverMenuButton("Open", openItems, "open"));
+
+  const syncItems = [];
+  if (r.path) {
+    syncItems.push(hoverMenuAction("Resync Jellyfin library", (node) => rescanFile(node, r.path)));
+    syncItems.push(hoverMenuAction("Resync Subtitles", (node) => rescanSubtitle(node, r.path)));
+  }
+  // Hover lists the two halves; clicking the pill runs both.
+  td.appendChild(hoverMenuButton(
+    "Sync", syncItems, "sync", r.path ? (node) => resyncBoth(node, r.path) : null
+  ));
+
+  // A series row's path is a folder: there is no file to play or probe.
+  const playable = r.path && r.type !== "Series";
+  td.appendChild(pillButton("Play", "play", playable ? () => playVideo(r.path) : null));
+  td.appendChild(pillButton("Subtitles", "subs", playable ? () => subdlOpen(r.path) : null));
+
+  if (cfg.google) td.appendChild(rowGoogleMenu(r));
+  return td;
+}
+
+// Title used for external lookups: the show for series/episodes, else the name.
+function rowLookupTitle(r) {
+  if (r.type === "Series" || r.type === "Episode") return r.series || r.name || "";
+  return r.name || "";
+}
+
+// Candidate years: the on-disk year(s) from the filename/folder, then Jellyfin's.
+function rowYears(r) {
+  const yrs = [];
+  const grab = (s) => {
+    if (!s) return;
+    const re = /\b(?:19|20)\d{2}\b/g;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const y = parseInt(m[0], 10);
+      if (y >= 1900 && y <= 2100 && yrs.indexOf(y) === -1) yrs.push(y);
+    }
+  };
+  grab(r.file);
+  if (r.path) {
+    grab(r.path.replace(/[\\/][^\\/]*$/, "").split(/[\\/]/).pop());
+  }
+  if (r.year != null && yrs.indexOf(r.year) === -1) yrs.push(r.year);
+  return yrs;
+}
+
+// A cleaned title from the on-disk filename (extension/release tags stripped).
+function rowDiskTitle(r) {
+  let s = (r.file || "").replace(/\.[A-Za-z0-9]{2,5}$/, "");
+  s = s.replace(/[._]+/g, " ");
+  s = s.replace(/[\[\](){}]/g, " ");
+  s = s.replace(/\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|hdr|dv|sdr|bluray|blu-?ray|brrip|bdrip|bd-?remux|remux|webrip|web-?dl|webdl|web|hdrip|dvdrip|dvd|hdtv|cam|x264|x265|h264|h265|hevc|avc|xvid|divx|10bit|8bit|aac|ac3|eac3|ddp?|dts|truehd|atmos|flac|mp3|5\.1|7\.1|2\.0|yts|yify|rarbg|proper|repack|extended|unrated|remastered|multi|dual\s?audio|amzn|nf|hulu|itunes)\b/gi, " ");
+  s = s.replace(/[^\p{L}\p{N}]+/gu, " ");
+  return s.replace(/\s+/g, " ").trim();
+}
+
+// Google search queries for the hover menu on the "Google" button.
+function rowGoogleQueries(r) {
+  const title = rowLookupTitle(r);
+  if (!title) return [];
+  const year = r.year ? String(r.year) : "";
+  const years = rowYears(r);
+
+  let yq = "Which year was " + title + " released";
+  if (years.length >= 2) yq += "; was it " + years[0] + " or " + years[1];
+  else if (years.length === 1) yq += "; was it " + years[0];
+
+  const items = [
+    { label: "Ask about year", q: yq },
+    { label: "IMDB", q: title + (year ? " " + year : "") + " imdb" },
+    { label: "Language", q: "What is the original language of " + title + (year ? " " + year : "") },
+  ];
+  const disk = rowDiskTitle(r);
+  if (disk) {
+    items.unshift({ label: "Same movie", q: 'Is "' + disk + '" the same movie as "' + title + '"' });
+  }
+  return items;
+}
+
+function rowGoogleMenu(r) {
+  const wrap = el("span", { class: "id-google" });
+  const btn = el("button", { type: "button", class: "id-google-btn id-btn-google", text: "Google" });
+  btn.appendChild(el("span", { class: "id-google-caret", text: "▾" }));
+  wrap.appendChild(btn);
+
+  const items = rowGoogleQueries(r);
+  if (!items.length) {
+    btn.disabled = true;
+    return wrap;
+  }
+
+  const menu = el("div", { class: "id-google-menu" });
+  menu.hidden = true;
+  items.forEach((it) => {
+    menu.appendChild(el("a", {
+      class: "id-google-item",
+      href: "https://www.google.com/search?q=" + encodeURIComponent(it.q),
+      target: "_blank",
+      rel: "noopener",
+      text: it.label,
+      title: it.q,
+    }));
+  });
+  wrap.appendChild(menu);
+
+  let hideTimer = null;
+  const show = () => {
+    clearTimeout(hideTimer);
+    menu.hidden = false;
+    const rct = wrap.getBoundingClientRect();
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let left = Math.round(rct.left);
+    left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
+    let top = Math.round(rct.bottom + 4);
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, rct.top - mh - 4);
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+  };
+  const scheduleHide = () => {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { menu.hidden = true; }, 180);
+  };
+
+  wrap.addEventListener("mouseenter", show);
+  wrap.addEventListener("mouseleave", scheduleHide);
+  menu.addEventListener("mouseenter", () => clearTimeout(hideTimer));
+  menu.addEventListener("mouseleave", scheduleHide);
+
+  return wrap;
+}
+
 let statusTimer = null;
 
 // Poll a "/status" endpoint until it reports no longer "running".

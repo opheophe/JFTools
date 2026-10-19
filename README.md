@@ -26,7 +26,9 @@ existing server over the API.
 - Backup: export all settings to a JSON file and import them back on another
   instance.
 - Jellyfin connection test, library listing, recently added, library stats,
-  active sessions and scheduled scans.
+  active sessions and scheduled scans. **Latest additions** names each item's
+  library and carries the same action pills as the other tabs (Open, Sync, Play,
+  Subtitles, Google).
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT), and an
@@ -286,8 +288,8 @@ not the legacy XML-RPC API that VLSub used (that one is being shut down).
 
 ## Player
 
-The **Play** action on a row (Movie Match and Search tabs) opens the file in a
-small player window. It streams the original video straight from disk — the
+The **Play** action on a row (Movie Match, Search and Libraries tabs) opens the
+file in a small player window. It streams the original video straight from disk — the
 server supports HTTP range requests, so the native timeline seeks normally — and
 the row of controls adds a time readout, −30/−5/+5/+30 second jumps, a **Go to**
 box (`mm:ss` or `hh:mm:ss`), a speed selector and a **Subtitles** selector.

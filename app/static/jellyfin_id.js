@@ -13,8 +13,6 @@ const PAGE_SIZE = 50;
 
 // ---- helpers ---------------------------------------------------------------
 
-function idEnc(s) { return encodeURIComponent(s || ""); }
-
 // A row's "ok" identity is the file + Jellyfin id, so a replaced file (or a
 // re-matched item) is no longer considered ok.
 function idMarkKey(r) {
@@ -37,152 +35,15 @@ function idInRanges(score, ranges) {
   return false;
 }
 
-// Title used for external lookups: the show for series/episodes, else the name.
-function idSearchTitle(r) {
-  if (r.type === "Series" || r.type === "Episode") return r.series || r.name || "";
-  return r.name || "";
-}
-
-// Candidate years: the on-disk year(s) from the filename/folder, then Jellyfin's.
-function idYears(r) {
-  const yrs = [];
-  const grab = (s) => {
-    if (!s) return;
-    const re = /\b(?:19|20)\d{2}\b/g;
-    let m;
-    while ((m = re.exec(s)) !== null) {
-      const y = parseInt(m[0], 10);
-      if (y >= 1900 && y <= 2100 && yrs.indexOf(y) === -1) yrs.push(y);
-    }
-  };
-  grab(r.file);
-  if (r.path) {
-    grab(r.path.replace(/[\\/][^\\/]*$/, "").split(/[\\/]/).pop());
-  }
-  if (r.year != null && yrs.indexOf(r.year) === -1) yrs.push(r.year);
-  return yrs;
-}
-
-// A cleaned title from the on-disk filename (extension/release tags stripped).
-function idDiskTitle(r) {
-  let s = (r.file || "").replace(/\.[A-Za-z0-9]{2,5}$/, "");
-  s = s.replace(/[._]+/g, " ");
-  s = s.replace(/[\[\](){}]/g, " ");
-  s = s.replace(/\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|hdr|dv|sdr|bluray|blu-?ray|brrip|bdrip|bd-?remux|remux|webrip|web-?dl|webdl|web|hdrip|dvdrip|dvd|hdtv|cam|x264|x265|h264|h265|hevc|avc|xvid|divx|10bit|8bit|aac|ac3|eac3|ddp?|dts|truehd|atmos|flac|mp3|5\.1|7\.1|2\.0|yts|yify|rarbg|proper|repack|extended|unrated|remastered|multi|dual\s?audio|amzn|nf|hulu|itunes)\b/gi, " ");
-  s = s.replace(/[^\p{L}\p{N}]+/gu, " ");
-  return s.replace(/\s+/g, " ").trim();
-}
-
-// Google search queries for the hover menu on the "Google" button.
-function idGoogleQueries(r) {
-  const title = idSearchTitle(r);
-  if (!title) return [];
-  const year = r.year ? String(r.year) : "";
-  const years = idYears(r);
-
-  let yq = "Which year was " + title + " released";
-  if (years.length >= 2) yq += "; was it " + years[0] + " or " + years[1];
-  else if (years.length === 1) yq += "; was it " + years[0];
-
-  const items = [
-    { label: "Ask about year", q: yq },
-    { label: "IMDB", q: title + (year ? " " + year : "") + " imdb" },
-    { label: "Language", q: "What is the original language of " + title + (year ? " " + year : "") },
-  ];
-  const disk = idDiskTitle(r);
-  if (disk) {
-    items.unshift({ label: "Same movie", q: 'Is "' + disk + '" the same movie as "' + title + '"' });
-  }
-  return items;
-}
-
-function idGoogleMenu(r) {
-  const wrap = el("span", { class: "id-google" });
-  const btn = el("button", { type: "button", class: "id-google-btn id-btn-google", text: "Google" });
-  btn.appendChild(el("span", { class: "id-google-caret", text: "▾" }));
-  wrap.appendChild(btn);
-
-  const items = idGoogleQueries(r);
-  if (!items.length) {
-    btn.disabled = true;
-    return wrap;
-  }
-
-  const menu = el("div", { class: "id-google-menu" });
-  menu.hidden = true;
-  items.forEach((it) => {
-    menu.appendChild(el("a", {
-      class: "id-google-item",
-      href: "https://www.google.com/search?q=" + idEnc(it.q),
-      target: "_blank",
-      rel: "noopener",
-      text: it.label,
-      title: it.q,
-    }));
-  });
-  wrap.appendChild(menu);
-
-  let hideTimer = null;
-  const show = () => {
-    clearTimeout(hideTimer);
-    menu.hidden = false;
-    const rct = wrap.getBoundingClientRect();
-    const mw = menu.offsetWidth;
-    const mh = menu.offsetHeight;
-    let left = Math.round(rct.left);
-    left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
-    let top = Math.round(rct.bottom + 4);
-    if (top + mh > window.innerHeight - 8) top = Math.max(8, rct.top - mh - 4);
-    menu.style.left = left + "px";
-    menu.style.top = top + "px";
-  };
-  const scheduleHide = () => {
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => { menu.hidden = true; }, 180);
-  };
-
-  wrap.addEventListener("mouseenter", show);
-  wrap.addEventListener("mouseleave", scheduleHide);
-  menu.addEventListener("mouseenter", () => clearTimeout(hideTimer));
-  menu.addEventListener("mouseleave", scheduleHide);
-
-  return wrap;
-}
+// Title used for external lookups, the year candidates and the Google menu all
+// live in app.js (rowLookupTitle / rowYears / rowGoogleMenu) so the Movie Match,
+// Search and Libraries tables share one implementation.
 
 function idBuildActions(r) {
-  const td = el("td", { class: "id-actions" });
-
-  const openItems = [];
-  if (r.id && ID.jellyfin) {
-    openItems.push(hoverMenuLink(ID.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + r.id, "Jellyfin"));
-  }
-  if ((r.type === "Movie" || r.type === "Video") && ID.radarr) {
-    openItems.push(hoverMenuLink(ID.radarr + idEnc(r.name), "Radarr"));
-  } else if ((r.type === "Series" || r.type === "Episode") && ID.sonarr) {
-    openItems.push(hoverMenuLink(ID.sonarr + idEnc(r.series || r.name), "Sonarr"));
-  }
-  if (r.path) {
-    openItems.push(hoverMenuLink("/files?path=" + encodeURIComponent(r.path), "File browser"));
-  }
-  td.appendChild(hoverMenuButton("Open", openItems, "open"));
-
-  const syncItems = [];
-  if (r.path) {
-    syncItems.push(hoverMenuAction("Resync Jellyfin library", (node) => rescanFile(node, r.path)));
-    syncItems.push(hoverMenuAction("Resync Subtitles", (node) => rescanSubtitle(node, r.path)));
-  }
-  // Hover lists the two halves; clicking the pill runs both.
-  td.appendChild(hoverMenuButton(
-    "Sync", syncItems, "sync", r.path ? (node) => resyncBoth(node, r.path) : null
-  ));
-
-  // A series row's path is a folder: there is no file to play or probe.
-  const fileRow = r.type !== "Series";
-  td.appendChild(pillButton("Play", "play", r.path && fileRow ? () => playVideo(r.path) : null));
-  td.appendChild(pillButton("Subtitles", "subs", r.path && fileRow ? () => subdlOpen(r.path) : null));
-
-  td.appendChild(idGoogleMenu(r));
-  return td;
+  return rowActions(r, {
+    urls: { jellyfin: ID.jellyfin, radarr: ID.radarr, sonarr: ID.sonarr },
+    google: true,
+  });
 }
 
 const MATCH_OPTIONS = ["0-20", "20-40", "40-60", "60-80", "80-99", "100"].map((v) => ({ value: v, label: v }));

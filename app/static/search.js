@@ -55,44 +55,17 @@ function seSubsText(r) {
 
 // ---- helpers ---------------------------------------------------------------
 
-function seEnc(s) { return encodeURIComponent(s || ""); }
-
 function seSafeRe(text) {
   if (!text || !text.trim()) return null;
   try { return new RegExp(text, "i"); } catch (e) { return null; }
 }
 
 function seBuildActions(r) {
-  const td = el("td", { class: "id-actions" });
-
-  const openItems = [];
-  if (r.id && SE.jellyfin) {
-    openItems.push(hoverMenuLink(SE.jellyfin.replace(/\/+$/, "") + "/web/#/details?id=" + r.id, "Jellyfin"));
-  }
-  if ((r.type === "Movie" || r.type === "Video") && SE.radarr) {
-    openItems.push(hoverMenuLink(SE.radarr + seEnc(r.name), "Radarr"));
-  } else if ((r.type === "Series" || r.type === "Episode") && SE.sonarr) {
-    openItems.push(hoverMenuLink(SE.sonarr + seEnc(r.series || r.name), "Sonarr"));
-  }
-  if (r.path) {
-    openItems.push(hoverMenuLink("/files?path=" + encodeURIComponent(r.path), "File browser"));
-  }
-  td.appendChild(hoverMenuButton("Open", openItems, "open"));
-
-  const syncItems = [];
-  if (r.path) {
-    syncItems.push(hoverMenuAction("Resync Jellyfin library", (node) => rescanFile(node, r.path)));
-    syncItems.push(hoverMenuAction("Resync Subtitles", (node) => rescanSubtitle(node, r.path)));
-  }
-  // Hover lists the two halves; clicking the pill runs both.
-  td.appendChild(hoverMenuButton(
-    "Sync", syncItems, "sync", r.path ? (node) => resyncBoth(node, r.path) : null
-  ));
-
-  td.appendChild(pillButton("Play", "play", r.path && r.type !== "Series" ? () => playVideo(r.path) : null));
-  td.appendChild(pillButton("Subtitles", "subs", r.path && r.type !== "Series" ? () => subdlOpen(r.path) : null));
-
-  return td;
+  // The Search tab carries no Google menu (its Google links live in the row
+  // popup); everything else is the shared pill set from app.js.
+  return rowActions(r, {
+    urls: { jellyfin: SE.jellyfin, radarr: SE.radarr, sonarr: SE.sonarr },
+  });
 }
 
 async function seToggleSubsOk(path, marked) {

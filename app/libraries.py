@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import config
 from .jellyfin.client import JellyfinError, get_client
+from .jellyfin_id import library_for_path
 from .logs import log
 from .web import require_login, templates
 
@@ -91,13 +93,30 @@ async def _build_libraries(client: JellyfinClient) -> list[dict]:
     return libraries
 
 
-async def _build_recent(client: JellyfinClient, limit: int = 50) -> list[dict]:
+def _library_locations(libraries: list[dict]) -> list[tuple[str, str]]:
+    """``[(library name, location), ...]`` from the cached library rows.
+
+    ``_build_libraries`` stores Jellyfin's ``Locations`` verbatim, which is the
+    same namespace an item's ``Path`` comes from — so an item can be labelled
+    with its library without asking Jellyfin again.
+    """
+    locations = []
+    for lib in libraries:
+        for loc in lib.get("locations") or []:
+            locations.append((lib.get("name") or "", loc))
+    return locations
+
+
+async def _build_recent(
+    client: JellyfinClient, locations: list[tuple[str, str]], limit: int = 50
+) -> list[dict]:
     data = await client.get_recent(limit=limit)
     rows = []
     for it in data.get("Items") or []:
         name = it.get("Name") or "?"
         parent = it.get("SeriesName") or it.get("Album") or ""
         title = f"{parent} — {name}" if parent else name
+        path = it.get("Path") or ""
         rows.append(
             {
                 "id": it.get("Id"),
@@ -105,6 +124,12 @@ async def _build_recent(client: JellyfinClient, limit: int = 50) -> list[dict]:
                 "type": it.get("Type") or "",
                 "year": it.get("ProductionYear"),
                 "added": (it.get("DateCreated") or "")[:10],
+                # The row actions (Play, Subtitles, Sync, Open) and the Google
+                # queries work off the file on disk, so carry its path too.
+                "path": path,
+                "file": Path(path).name if path else "",
+                "series": it.get("SeriesName") or "",
+                "library": library_for_path(path, locations),
             }
         )
     return rows
@@ -115,7 +140,7 @@ async def _run_fetch() -> None:
     try:
         client = get_client()
         libraries = await _build_libraries(client)
-        recent = await _build_recent(client)
+        recent = await _build_recent(client, _library_locations(libraries))
         _state["libraries"] = libraries
         _state["recent"] = recent
         _state["last_sync"] = time.time()
@@ -142,10 +167,12 @@ async def libraries_page(request: Request, user: str = Depends(require_login)):
 
 @router.get("/api/libraries")
 async def api_libraries(request: Request, user: str = Depends(require_login)):
-    # First view with no cached data (or an empty recent list, e.g. a cache
-    # written before that field existed): kick off a background fetch. Also
-    # refresh a cache whose recent rows predate item ids (needed for the popup).
-    stale = bool(_state["recent"]) and not any(r.get("id") for r in _state["recent"])
+    # First view with no cached data: kick off a background fetch. Also refill a
+    # cache written by an older version — one whose recent rows have no item id
+    # (needed for the popup) or no path (needed by the row action pills).
+    stale = bool(_state["recent"]) and any(
+        not r.get("id") or "path" not in r for r in _state["recent"]
+    )
     if _fetch["status"] == "idle" and (not _state["last_sync"] or not _state["recent"] or stale):
         from .scheduler import trigger_operation
 
@@ -158,6 +185,11 @@ async def api_libraries(request: Request, user: str = Depends(require_login)):
             "last_sync": _state["last_sync"],
             "fetching": _fetch["status"] == "running",
             "fetch_error": _fetch.get("error"),
+            # Row action pills link out to Jellyfin/Radarr/Sonarr; same keys the
+            # Movie Match and Search payloads carry.
+            "jellyfin_url": config.settings.jellyfin_url,
+            "radarr_url": config.settings.radarr_url,
+            "sonarr_url": config.settings.sonarr_url,
         }
     )
 
