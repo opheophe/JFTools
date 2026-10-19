@@ -185,7 +185,7 @@ async def check_watching() -> None:
         play = s.get("PlayState") or {}
         rec = {
             "user": s.get("UserName") or s.get("UserId") or "?",
-            "title": _item_label(np),
+            "title": _item_label(np, episode=True),
         }
         (paused if play.get("IsPaused") else watching).append(rec)
 
@@ -251,7 +251,7 @@ async def api_users(request: Request, user: str = Depends(require_login)):
                 total = np.get("RunTimeTicks") or 0
                 pct = round(pos / total * 100) if total else 0
                 active = {
-                    "name": _item_label(np),
+                    "name": _item_label(np, episode=True),
                     "type": np.get("Type"),
                     "pct": pct,
                     "pos_s": int(pos // 10_000_000),

@@ -5,6 +5,18 @@ def test_item_label_episode_prefixes_series():
     assert _item_label({"Type": "Episode", "Name": "Pilot", "SeriesName": "Show"}) == "Show — Pilot"
 
 
+def test_item_label_episode_code_when_requested():
+    ep = {
+        "Type": "Episode", "Name": "Pilot", "SeriesName": "Show",
+        "ParentIndexNumber": 2, "IndexNumber": 14,
+    }
+    assert _item_label(ep, episode=True) == "Show — S02E14 — Pilot"
+    # Without the numbers it falls back to the plain label.
+    assert _item_label({"Type": "Episode", "Name": "Pilot", "SeriesName": "Show"}, episode=True) == "Show — Pilot"
+    # Movies never grow an episode code.
+    assert _item_label({"Type": "Movie", "Name": "Dune"}, episode=True) == "Dune"
+
+
 def test_item_label_movie_uses_name():
     assert _item_label({"Type": "Movie", "Name": "Dune"}) == "Dune"
 

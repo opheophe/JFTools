@@ -61,6 +61,46 @@ def test_path_maps_round_trip(tmp_path, monkeypatch):
     assert cfg3.settings.path_maps == [{"from": "/Filmer", "to": "Z:\\Filmer"}]
 
 
+def test_filter_profiles_round_trip_and_export(tmp_path, monkeypatch):
+    monkeypatch.delenv("JFTOOLS_PATH_MAP", raising=False)
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    profile = {
+        "filters": {"type": ["Movie"], "audioRe": "swe"},
+        "sort": {"col": "file", "dir": 1},
+    }
+    cfg = Config()
+    cfg.save_filter_profiles("search", {"Mine": profile})
+
+    # Another settings save must keep them: config.json is written as a whole.
+    cfg.save_file_mgmt(True)
+    cfg2 = Config()
+    assert cfg2.settings.filter_profiles["search"]["Mine"] == profile
+
+    # They travel with the settings export.
+    exported = cfg2.export_settings()
+    assert exported["filter_profiles"]["search"]["Mine"] == profile
+    cfg3 = Config()
+    cfg3.save_filter_profiles("search", {})
+    cfg3.import_settings(exported)
+    assert cfg3.settings.filter_profiles["search"]["Mine"] == profile
+
+    # An older export without the key leaves the current profiles alone.
+    cfg3.save_filter_profiles("moviematch", {"Other": {"filters": {}}})
+    cfg3.import_settings({"timezone": "UTC"})
+    assert cfg3.settings.filter_profiles["moviematch"]["Other"] == {"filters": {}}
+    assert cfg3.settings.filter_profiles["search"]["Mine"] == profile
+
+
+def test_filter_profiles_drop_invalid_entries(tmp_path, monkeypatch):
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    cfg.save_filter_profiles("search", {"ok": {"filters": {}}, "bad": "nope", "": {}})
+
+    assert cfg.settings.filter_profiles["search"] == {"ok": {"filters": {}}}
+
+
 def test_path_map_env_parsing(tmp_path, monkeypatch):
     monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JFTOOLS_PATH_MAP", r"/Filmer=\\NAS\Filmer;/Ero=Z:\Ero")

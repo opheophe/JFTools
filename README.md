@@ -23,15 +23,15 @@ existing server over the API.
   lockout included.
 - Settings page to change the Jellyfin connection **and** the dashboard login at
   runtime (persisted to a volume; the password is stored as a scrypt hash).
-- Backup: export all settings to a JSON file and import them back on another
-  instance.
+- Backup: export all settings — including saved filter profiles — to a JSON file
+  and import them back on another instance.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans. **Latest additions** names each item's
   library and carries the same action pills as the other tabs (Open, Sync, Play,
   Subtitles, Audio, Google).
 - Audio tracks: the **Audio** column lists every embedded track, a filter can
-  match scan state, track count or a language, and the **Audio** pill opens a
-  per-track dialog that can delete a track in place.
+  match scan state or track count plus a case-insensitive track-name regex, and
+  the **Audio** pill opens a per-track dialog that can delete a track in place.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT), and an
@@ -250,9 +250,11 @@ Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
 
 The **Audio** column lists each file's embedded tracks as
 `English (E-AC-3 5.1), Swedish (AAC stereo)`; a trailing `*` marks the default
-track. The **Audio** filter offers the scan state and track counts (**Not
-scanned**, **No audio**, **Single track**, **Multiple tracks**) followed by one
-**Has <language>** entry per language the scan has seen.
+track. The **Audio** filter offers **No track**, **Single track**,
+**Multi track**, **Not scanned** (not probed yet) and **Probe failed** (the path
+was unreachable, not a file, or ffprobe failed — the column names the exact
+reason). The **Audio regex** box next to it filters on the track names,
+case-insensitively (`swe|nor`, `5\.1`, …).
 
 The **Audio** pill on a row opens a per-track dialog with a **Delete** button on
 each track. Deleting rewrites the video in place with ffmpeg — every other
@@ -388,6 +390,10 @@ Jellyfin's live sessions and drives a status dot next to the **Users** nav link:
 - **green** — someone is watching
 - **orange** — a session is paused
 - **red** — nobody watching
+
+The **Currently watching** column on the Users page shows what is playing, and
+for episodes it includes the season and episode (`Show — S02E14 — Episode
+title`).
 
 Disable the job in the Scheduler to hide the dot entirely.
 

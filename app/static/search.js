@@ -4,7 +4,7 @@ const SE = {
   rows: [], jellyfin: "", radarr: "", sonarr: "",
   scans: {}, subtitlesOk: new Set(),
   fetched: false, page: 1, sort: { col: null, dir: 1 },
-  filters: { lib: [], type: [], file: "", jf: "", fav: [], subs: [], audio: [], subsok: [] },
+  filters: { lib: [], type: [], file: "", jf: "", fav: [], subs: [], audio: [], audioRe: "", subsok: [] },
   ms: {},
 };
 
@@ -30,9 +30,10 @@ const SUBS_PREDS = {
   "No subs": (f) => !!f.nosubs,
 };
 
-// Audio filter: probe state/count in front of one "Has <language>" entry per
-// language the scan found (filled in by populateOptions).
-const AUDIO_OPTIONS = ["Not scanned", "No audio", "Single track", "Multiple tracks"]
+// Audio filter: what the scan found for a file. "Probe failed" covers the three
+// error labels the Audio column shows (Not reachable, Not a file, ffprobe
+// error); "Not scanned" is reserved for files the scan has not attempted yet.
+const AUDIO_OPTIONS = ["No track", "Single track", "Multi track", "Not scanned", "Probe failed"]
   .map((v) => ({ value: v, label: v }));
 
 function seScanEntry(r) { return SE.scans[r.path] || null; }
@@ -72,22 +73,22 @@ function seAudioText(r) {
     return { text: "Not scanned", title: "The media scan has not probed this file yet" };
   }
   const tracks = e.audio || [];
-  if (!tracks.length) return { text: "No audio", title: "ffprobe found no audio track" };
+  if (!tracks.length) return { text: "No track", title: "ffprobe found no audio track" };
   const text = tracks.map((t) => t.name || "").join(", ");
   return { text, title: text };
 }
 
 // A row matches when *any* selected audio option matches, like the other
-// multiselects. "lang:X" is the dynamic "Has X" case.
+// multiselects. The audio regex is applied separately (ANDed) in seVisible().
 function seAudioMatch(r, value) {
   const e = seScanEntry(r);
   if (e && e.folder) return false;
   const tracks = (e && e.audio) || [];
-  if (value === "Not scanned") return !(e && e.scanned);
-  if (value === "No audio") return !!(e && e.scanned) && tracks.length === 0;
+  if (value === "Not scanned") return !e || (!e.scanned && !e.error);
+  if (value === "Probe failed") return !!(e && e.error);
+  if (value === "No track") return !!(e && e.scanned) && tracks.length === 0;
   if (value === "Single track") return tracks.length === 1;
-  if (value === "Multiple tracks") return tracks.length > 1;
-  if (value.startsWith("lang:")) return tracks.some((t) => t.lang === value.slice(5));
+  if (value === "Multi track") return tracks.length > 1;
   return false;
 }
 
@@ -120,6 +121,7 @@ function seVisible() {
   const f = SE.filters;
   const fileRe = seSafeRe(f.file);
   const jfRe = seSafeRe(f.jf);
+  const audioRe = seSafeRe(f.audioRe);
   return SE.rows.filter((r) => {
     if (f.lib.length && !f.lib.includes(r.library)) return false;
     if (f.type.length && !f.type.includes(r.type)) return false;
@@ -142,6 +144,11 @@ function seVisible() {
       if (!ok) return false;
     }
     if (f.audio.length && !f.audio.some((v) => seAudioMatch(r, v))) return false;
+    if (audioRe) {
+      const e = seScanEntry(r);
+      const tracks = (e && e.audio) || [];
+      if (!tracks.some((t) => audioRe.test(t.name || ""))) return false;
+    }
     if (f.subsok.length) {
       const ok = seSubsOk(r) ? "yes" : "no";
       if (!f.subsok.includes(ok)) return false;
@@ -171,6 +178,7 @@ function loadFilters() {
       SE.filters.fav = Array.isArray(f.fav) ? f.fav : [];
       SE.filters.subs = Array.isArray(f.subs) ? f.subs : [];
       SE.filters.audio = Array.isArray(f.audio) ? f.audio : [];
+      SE.filters.audioRe = typeof f.audioRe === "string" ? f.audioRe : "";
       SE.filters.subsok = Array.isArray(f.subsok) ? f.subsok : [];
     }
   } catch (e) {}
@@ -351,6 +359,7 @@ function applyFilterUI() {
   SE.ms.subsok.setValues(SE.filters.subsok);
   document.getElementById("se-search-file").value = SE.filters.file;
   document.getElementById("se-search-jf").value = SE.filters.jf;
+  document.getElementById("se-audio-re").value = SE.filters.audioRe;
 }
 
 function populateOptions() {
@@ -358,18 +367,9 @@ function populateOptions() {
   const types = [...new Set(SE.rows.map((r) => r.type).filter(Boolean))].sort();
   const favs = [...new Set(SE.rows.flatMap((r) => r.favorited_by || []))]
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  const audioLangs = new Set();
-  Object.values(SE.scans).forEach((e) => (e.audio || []).forEach((t) => {
-    if (t.lang && t.lang !== "Unknown") audioLangs.add(t.lang);
-  }));
   SE.ms.lib.setOptions(libs.map((v) => ({ value: v, label: v })));
   SE.ms.type.setOptions(types.map((v) => ({ value: v, label: v })));
-  SE.ms.audio.setOptions([
-    ...AUDIO_OPTIONS,
-    ...[...audioLangs]
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-      .map((v) => ({ value: "lang:" + v, label: "Has " + v })),
-  ]);
+  SE.ms.audio.setOptions(AUDIO_OPTIONS);
   SE.ms.fav.setOptions([
     { value: FAV_ANY, label: "Any" },
     { value: FAV_NONE, label: "None" },
@@ -502,6 +502,12 @@ function bindSeControls() {
     onFilter();
   });
 
+  const audioRe = document.getElementById("se-audio-re");
+  audioRe.addEventListener("input", () => {
+    SE.filters.audioRe = audioRe.value;
+    onFilter();
+  });
+
   document.getElementById("se-fetch").addEventListener("click", seFetch);
   document.getElementById("se-scan").addEventListener("click", seScan);
 }
@@ -521,7 +527,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderSeTable();
   };
   FilterProfiles(document.getElementById("se-profiles"),
-    "jftools.search.profiles",
+    "search",
     () => ({ filters: SE.filters, sort: SE.sort }),
     (p) => {
       const f = (p && p.filters) ? p.filters : (p || {});
@@ -533,6 +539,7 @@ document.addEventListener("DOMContentLoaded", () => {
         fav: Array.isArray(f.fav) ? f.fav : [],
         subs: Array.isArray(f.subs) ? f.subs : [],
         audio: Array.isArray(f.audio) ? f.audio : [],
+        audioRe: typeof f.audioRe === "string" ? f.audioRe : "",
         subsok: Array.isArray(f.subsok) ? f.subsok : [],
       };
       const s = (p && p.sort) || {};

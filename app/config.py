@@ -43,6 +43,26 @@ def _sanitize_path_maps(value) -> list[dict]:
     return out
 
 
+def _sanitize_profiles(value) -> dict:
+    """Normalise saved filter profiles: ``{page: {name: profile}}``.
+
+    Profile names and page keys come from the browser, so anything that is not
+    a non-empty string is dropped; the profile body stays opaque JSON.
+    """
+    out: dict[str, dict[str, dict]] = {}
+    if not isinstance(value, dict):
+        return out
+    for page, items in value.items():
+        if not isinstance(page, str) or not page or not isinstance(items, dict):
+            continue
+        clean: dict[str, dict] = {}
+        for name, profile in items.items():
+            if isinstance(name, str) and name and isinstance(profile, dict):
+                clean[name] = profile
+        out[page] = clean
+    return out
+
+
 def _parse_path_map_env(raw: str) -> list[dict]:
     """Parse ``JFTOOLS_PATH_MAP`` (``/from=/to;/from2=/to2``)."""
     if not raw:
@@ -103,6 +123,9 @@ class Settings:
     opensubtitles_username: str = ""
     opensubtitles_password: str = ""
     opensubtitles_languages: str = "en,sv"
+    # Saved filter profiles per page ("search", "moviematch"), managed from that
+    # page's profile bar. Kept here so they survive browser clears/backups.
+    filter_profiles: dict = field(default_factory=dict)
 
 
 class Config:
@@ -187,6 +210,8 @@ class Config:
                     settings.opensubtitles_password = data["opensubtitles_password"]
                 if data.get("opensubtitles_languages"):
                     settings.opensubtitles_languages = data["opensubtitles_languages"]
+                if "filter_profiles" in data:
+                    settings.filter_profiles = _sanitize_profiles(data["filter_profiles"])
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -208,6 +233,7 @@ class Config:
             "opensubtitles_username": s.opensubtitles_username,
             "opensubtitles_password": s.opensubtitles_password,
             "opensubtitles_languages": s.opensubtitles_languages,
+            "filter_profiles": s.filter_profiles,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -286,6 +312,15 @@ class Config:
             s.opensubtitles_languages = languages.strip() or "en,sv"
         self._persist()
 
+    def save_filter_profiles(self, page: str, profiles: dict) -> None:
+        """Replace one page's saved profiles, leaving the other page untouched."""
+        current = dict(self._settings.filter_profiles or {})
+        clean = _sanitize_profiles({page: profiles})
+        if page in clean:
+            current[page] = clean[page]
+        self._settings.filter_profiles = current
+        self._persist()
+
     # ---- backup / restore ---------------------------------------------------
 
     _EXPORT_FIELDS = (
@@ -302,6 +337,7 @@ class Config:
         "opensubtitles_username",
         "opensubtitles_password",
         "opensubtitles_languages",
+        "filter_profiles",
     )
 
     def export_settings(self) -> dict:
@@ -321,6 +357,8 @@ class Config:
             if field in data and data[field] is not None:
                 if field == "path_maps":
                     self._settings.path_maps = _sanitize_path_maps(data[field])
+                elif field == "filter_profiles":
+                    self._settings.filter_profiles = _sanitize_profiles(data[field])
                 elif field == "file_mgmt":
                     self._settings.file_mgmt = bool(data[field])
                 else:

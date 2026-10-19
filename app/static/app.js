@@ -229,22 +229,44 @@ function MultiSelect(container, options, onChange) {
 }
 
 // Filter profiles (Search + Movie Match): a "Save profile / Delete profile"
-// row with one button per saved profile. Profiles persist to localStorage under
-// their own key per page. getFilters() snapshots the current filter state;
-// applyFilters(profile) restores it into the page.
-function FilterProfiles(host, storageKey, getFilters, applyFilters) {
+// row with one button per saved profile. Profiles are part of the server config
+// (data/config.json) so they survive browser clears and travel with settings
+// backups. getFilters() snapshots the current filter state; applyFilters()
+// restores a profile into the page.
+function FilterProfiles(host, page, getFilters, applyFilters) {
   let profiles = {};
-  try { profiles = JSON.parse(localStorage.getItem(storageKey)) || {}; } catch (e) {}
+  let epoch = 0;
 
   const row = el("div", { class: "prof-row" });
   const chips = el("div", { class: "prof-chips" });
+  const status = el("span", { class: "muted prof-status", text: "" });
 
   const delWrap = el("div", { class: "prof-del-wrap" });
   const menu = el("div", { class: "prof-menu" });
   menu.hidden = true;
 
-  function persist() {
-    try { localStorage.setItem(storageKey, JSON.stringify(profiles)); } catch (e) {}
+  function setStatus(text, isError) {
+    status.textContent = text;
+    status.classList.toggle("error", !!isError);
+  }
+
+  // Save this page's whole map; the chips change only after the server accepts
+  // it, so a failed write never leaves a profile that looks saved.
+  function persist(next) {
+    const mine = ++epoch;
+    const body = "page=" + encodeURIComponent(page) +
+      "&profiles=" + encodeURIComponent(JSON.stringify(next));
+    postJSON("/api/profiles", body)
+      .then((data) => {
+        if (mine !== epoch) return;  // a newer save superseded this one
+        if (!data.ok) throw new Error(data.error || "Save failed");
+        profiles = (data.profiles && data.profiles[page]) || {};
+        setStatus("");
+        renderChips();
+      })
+      .catch((err) => {
+        if (mine === epoch) setStatus("Not saved: " + err.message, true);
+      });
   }
 
   const names = () => Object.keys(profiles)
@@ -265,9 +287,11 @@ function FilterProfiles(host, storageKey, getFilters, applyFilters) {
   saveBtn.addEventListener("click", () => {
     const name = (window.prompt("Profile name:") || "").trim();
     if (!name) return;
-    profiles[name] = JSON.parse(JSON.stringify(getFilters()));
-    persist();
-    renderChips();
+    setStatus("Saving…");
+    const next = Object.assign({}, profiles, {
+      [name]: JSON.parse(JSON.stringify(getFilters())),
+    });
+    persist(next);
   });
 
   const delBtn = el("button", { type: "button", class: "prof-btn prof-del", text: "Delete profile" });
@@ -282,9 +306,10 @@ function FilterProfiles(host, storageKey, getFilters, applyFilters) {
         const item = el("button", { type: "button", class: "prof-menu-item", text: "✕ " + name });
         item.title = "Delete " + name;
         item.addEventListener("click", () => {
-          delete profiles[name];
-          persist();
-          renderChips();
+          const next = Object.assign({}, profiles);
+          delete next[name];
+          setStatus("Saving…");
+          persist(next);
           menu.hidden = true;
         });
         menu.appendChild(item);
@@ -301,8 +326,18 @@ function FilterProfiles(host, storageKey, getFilters, applyFilters) {
   row.appendChild(saveBtn);
   row.appendChild(delWrap);
   row.appendChild(chips);
+  row.appendChild(status);
   host.appendChild(row);
   renderChips();
+
+  // Ignore a slow initial load if a save already superseded it.
+  getJSON("/api/profiles")
+    .then((data) => {
+      if (epoch) return;
+      profiles = (data.profiles && data.profiles[page]) || {};
+      renderChips();
+    })
+    .catch((err) => setStatus("Could not load profiles: " + err.message, true));
 }
 
 // A hover dropdown button (like the Google menu): shows a fixed-position menu

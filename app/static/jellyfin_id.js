@@ -374,7 +374,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindSortHeaders();
   window.subdlRefresh = null;  // Movie Match shows no subtitle column; nothing to refresh
   FilterProfiles(document.getElementById("id-profiles"),
-    "jftools.moviematch.profiles",
+    "moviematch",
     () => ({ filters: ID.filters, sort: ID.sort }),
     (p) => {
       const f = (p && p.filters) ? p.filters : (p || {});

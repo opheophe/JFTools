@@ -417,6 +417,36 @@ async def settings_export(request: Request, user: str = Depends(require_login)):
     )
 
 
+@app.get("/api/profiles")
+async def api_profiles(user: str = Depends(require_login)):
+    return JSONResponse({"ok": True, "profiles": config.settings.filter_profiles})
+
+
+@app.post("/api/profiles")
+async def api_profiles_save(
+    request: Request,
+    user: str = Depends(require_login),
+    page: str = Form(""),
+    profiles: str = Form(""),
+):
+    """Replace the saved filter profiles for one page (Search / Movie Match)."""
+    page = page.strip()
+    if not page:
+        return JSONResponse({"ok": False, "error": "No page given."}, status_code=400)
+    try:
+        data = json.loads(profiles)
+    except ValueError:
+        return JSONResponse(
+            {"ok": False, "error": "Profiles are not valid JSON."}, status_code=400
+        )
+    if not isinstance(data, dict):
+        return JSONResponse(
+            {"ok": False, "error": "Profiles must be a JSON object."}, status_code=400
+        )
+    config.save_filter_profiles(page, data)
+    return JSONResponse({"ok": True, "profiles": config.settings.filter_profiles})
+
+
 @app.post("/settings/import")
 async def settings_import(
     request: Request,

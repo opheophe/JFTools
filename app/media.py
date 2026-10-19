@@ -68,10 +68,21 @@ async def _any_user(client: JellyfinClient) -> str:
     return _any_user_id or ""
 
 
-def _item_label(it: dict) -> str:
+def _item_label(it: dict, episode: bool = False) -> str:
     name = it.get("Name") or "?"
     if it.get("Type") == "Episode" and it.get("SeriesName"):
-        return f"{it['SeriesName']} — {name}"
+        label = f"{it['SeriesName']} — {name}"
+        if episode:
+            season = it.get("ParentIndexNumber")
+            number = it.get("IndexNumber")
+            if season is not None and number is not None:
+                try:
+                    code = f"S{int(season):02d}E{int(number):02d}"
+                except (TypeError, ValueError):
+                    code = ""
+                if code:
+                    label = f"{it['SeriesName']} — {code} — {name}"
+        return label
     return name
 
 
