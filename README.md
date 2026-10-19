@@ -29,8 +29,9 @@ existing server over the API.
   active sessions and scheduled scans.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
-  (embedded streams extracted, external files converted to WebVTT), and a
-  one-click ffmpeg remux for files the browser cannot decode.
+  (embedded streams extracted, external files converted to WebVTT), and an
+  ffmpeg remux for files the browser cannot decode (a file with DTS or TrueHD
+  audio plays with no sound otherwise, so the player starts one on its own).
 - Single small container image, published to GitHub Container Registry for both
   `linux/amd64` and `linux/arm64`.
 - `/healthz` healthcheck.
@@ -310,13 +311,26 @@ Playback is read-only, so it needs no File management toggle — only a login.
 Paths are resolved through **Media paths** and must land inside the browsable
 media folders, exactly like the file browser.
 
-**A browser can only decode what it supports.** A remuxed MKV with AC3/DTS
-audio, for example, plays silently (or not at all). When that happens the
-player offers **Make browser copy**: ffmpeg remuxes the file into
+**A browser can only decode what it supports.** A remuxed MKV with DTS or
+TrueHD audio plays with picture and *no sound at all* — the video element does
+not even fire an error for it. The player therefore probes the file's first
+audio stream when it opens, and when the codec is one no browser decodes it says
+so and starts making **a browser copy** right away: ffmpeg remuxes the file into
 `play_cache/` in the data folder — video stream copied untouched, audio
-converted to AAC — and the player switches to it, keeping the position. The
-first copy takes a minute or two for a feature film; later plays reuse it. The
-cache is pruned at startup (older than a week, and oldest-first above ~5 GB).
+converted to AAC — and the player switches to it, keeping the position. If a
+copy has already been made, the player opens on it directly. The status line
+shows which codec is at fault and how far the remux is; the first copy takes a
+minute or two for a feature film; later plays reuse it. The cache is pruned at
+startup (older than a week, then oldest-first above ~5 GB, always keeping the
+newest copy — a film's copy is nearly the size of the film itself).
+
+ffprobe cannot answer for every codec: AC-3 and E-AC-3 are decoded through the
+operating system in some browsers and are silent in others. Those play as they
+are, and the player watches whether audio is actually being decoded — a few
+seconds of silence with an audio track present starts the same copy. When the
+file cannot be played at all, the player offers **Make browser copy** in its
+bar. Nothing switches away from the original until the copy is finished — it
+keeps playing meanwhile.
 
 **Requirements:** ffmpeg (bundled in the Docker image, or in `Tools/` next to
 the app) for embedded subtitle extraction and browser copies. Without it the

@@ -191,4 +191,6 @@ tools/
 
 # Local dev helper script.
 Rebuild JFTools.bat
+rebuild_jftools.ps1
+rebuild_jftools.py
 

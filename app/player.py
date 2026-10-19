@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import mimetypes
 import os
 import re
@@ -70,6 +71,20 @@ CONVERTIBLE_SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".sub", ".vtt", ".sbv
 PLAY_CACHE_MAX_BYTES = 5 * 1024**3
 PLAY_CACHE_MAX_AGE = 7 * 24 * 3600
 PREPARE_TIMEOUT = 2 * 3600
+
+# Audio codecs no browser can decode, on any platform. A file whose audio is one
+# of these plays with picture and no sound at all, and the video element never
+# fires an error for it, so those files need a browser copy.
+#
+# Dolby AC-3 and E-AC-3 are deliberately not here: some browsers decode them
+# through the operating system and some do not, so the page waits to see whether
+# audio is really being decoded before remuxing one (see play.js). Neither are
+# AAC and the open codecs, which every browser plays.
+UNPLAYABLE_AUDIO = {"dts", "truehd", "mlp"}
+
+# First-audio-stream probe, keyed like the play cache: path|size|mtime.
+_AUDIO_CACHE: dict[tuple[str, int, int], dict] = {}
+_AUDIO_CACHE_MAX = 64
 
 # Converted WebVTT text, keyed by (path, track, mtime). Tiny: a subtitle file is
 # a few hundred kilobytes at most.
@@ -258,6 +273,86 @@ def _vtt_embedded(local: str, kind: str, key: str) -> str:
     return _ffmpeg_to_vtt(["-i", local, "-map", map_arg])
 
 
+# ---- audio probe -------------------------------------------------------------
+
+
+def _audio_key(local: str) -> tuple[str, int, int]:
+    """Cache key for an audio probe: it changes when the file does."""
+    try:
+        st = os.stat(local)
+        return (os.path.normcase(os.path.abspath(local)), st.st_size, int(st.st_mtime))
+    except OSError:
+        return (os.path.normcase(os.path.abspath(local)), 0, 0)
+
+
+def _audio_from_probe(payload: str) -> dict:
+    """First audio stream of an ffprobe JSON payload: ``{}`` when there is none."""
+    try:
+        data = json.loads(payload or "{}")
+    except (TypeError, ValueError):
+        return {}
+    streams = data.get("streams") or []
+    if not streams:
+        return {}
+    stream = streams[0] or {}
+    return {
+        "codec": (stream.get("codec_name") or "").lower(),
+        "channels": stream.get("channels") or 0,
+        "layout": stream.get("channel_layout") or "",
+    }
+
+
+def _probe_audio(ffprobe: str, local: str) -> dict | None:
+    """Read the first audio stream of ``local``; None when ffprobe can't."""
+    try:
+        result = subprocess.run(
+            [
+                ffprobe, "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name,channels,channel_layout",
+                "-of", "json", local,
+            ],
+            capture_output=True, text=True, timeout=60,
+            encoding="utf-8", errors="replace", creationflags=_no_window(),
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if result.returncode != 0:
+        return None
+    return _audio_from_probe(result.stdout)
+
+
+def _audio_info(local: str) -> dict | None:
+    """First audio stream of a library file: None unprobed, {} when it has none."""
+    key = _audio_key(local)
+    if key in _AUDIO_CACHE:
+        return _AUDIO_CACHE[key]
+    ffprobe = resolve_ffprobe()
+    info = _probe_audio(ffprobe, local) if ffprobe else None
+    if info is None:
+        return None  # don't remember a failed probe
+    if len(_AUDIO_CACHE) >= _AUDIO_CACHE_MAX:
+        _AUDIO_CACHE.clear()
+    _AUDIO_CACHE[key] = info
+    return info
+
+
+def audio_copy_reason(audio: dict | None) -> str:
+    """Why a browser certainly can't decode this audio, or "" when unsure.
+
+    A video element asked to play DTS or TrueHD gives picture and silence with
+    no error event, which looks exactly like a muted system — so the player has
+    to know before it starts that those files need a browser copy. Everything
+    else gets a chance to play; the page watches whether audio actually comes
+    out and asks for a copy if it does not.
+    """
+    codec = ((audio or {}).get("codec") or "").lower()
+    if codec not in UNPLAYABLE_AUDIO:
+        return ""
+    names = {"truehd": "TrueHD", "mlp": "MLP"}
+    return f"{names.get(codec, codec.upper())} audio"
+
+
 # ---- browser copies (remux) --------------------------------------------------
 
 
@@ -285,7 +380,12 @@ def _prepared_file(path: str) -> str | None:
 
 
 def prune_play_cache() -> None:
-    """Drop stale browser copies: older than a week, then oldest-first over 5 GB."""
+    """Drop stale browser copies: older than a week, then oldest-first over 5 GB.
+
+    The newest copy always stays, even when it alone is over the cap: the video
+    stream is copied, so a feature film's copy is nearly as large as the film,
+    and deleting the copy just made would remux it again on every play.
+    """
     folder = _play_cache_dir()
     if not folder.is_dir():
         return
@@ -304,7 +404,7 @@ def prune_play_cache() -> None:
             continue
         files.append((st.st_mtime, st.st_size, f))
     total = sum(size for _m, size, _f in files)
-    for _m, size, f in sorted(files):
+    for _m, size, f in sorted(files)[:-1]:
         if total <= PLAY_CACHE_MAX_BYTES:
             break
         try:
@@ -487,7 +587,8 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
     path = (path or "").strip()
     if not path:
         return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
-    if not _local_video(path):
+    local = _local_video(path)
+    if not local:
         return JSONResponse(
             {
                 "ok": False,
@@ -538,10 +639,19 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
     if default >= 0:
         tracks[default]["default"] = True
 
+    # What the browser will make of this file's audio. The page needs to know
+    # before it starts: an undecodable track plays silently without any error.
+    audio = await asyncio.to_thread(_audio_info, local)
+    reason = audio_copy_reason(audio)
+
     return JSONResponse({
         "ok": True,
         "file": os.path.basename(path.replace("\\", "/")),
         "tracks": tracks,
+        "audio": audio,
+        "needs_copy": bool(reason),
+        "copy_reason": reason,
+        "copy_ready": _prepared_file(path) is not None,
     })
 
 

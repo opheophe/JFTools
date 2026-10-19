@@ -3,7 +3,9 @@
 Playback is read-only, so these routes need a login but not the File management
 setting — but they still must never serve a file outside the media roots.
 """
+import json
 import os
+import subprocess
 import time
 
 import httpx
@@ -235,6 +237,74 @@ async def test_tracks_route_needs_a_reachable_video(logged_in, media_root):
     assert resp.status_code == 404
 
 
+async def test_tracks_route_reports_audio_the_browser_cannot_decode(
+    logged_in, media_root, monkeypatch
+):
+    """DTS and TrueHD play with picture and no sound, so the page is told."""
+    video = _video(media_root, name="movie.mkv")
+
+    async def no_tracks(path):
+        return ([], [])
+
+    monkeypatch.setattr(player, "subtitle_tracks_for", no_tracks)
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: media_root / "cache")
+    monkeypatch.setattr(
+        player, "_audio_info",
+        lambda local: {"codec": "dts", "channels": 6, "layout": "5.1(side)"},
+    )
+
+    async with _client() as client:
+        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+    data = resp.json()
+    assert data["audio"]["codec"] == "dts"
+    assert data["needs_copy"] is True
+    assert data["copy_reason"] == "DTS audio"
+    assert data["copy_ready"] is False
+
+
+async def test_tracks_route_leaves_audio_the_browser_can_decode_alone(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+
+    async def no_tracks(path):
+        return ([], [])
+
+    monkeypatch.setattr(player, "subtitle_tracks_for", no_tracks)
+    monkeypatch.setattr(
+        player, "_audio_info",
+        lambda local: {"codec": "aac", "channels": 2, "layout": "stereo"},
+    )
+
+    async with _client() as client:
+        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+    data = resp.json()
+    assert data["needs_copy"] is False
+    assert data["copy_reason"] == ""
+
+
+async def test_tracks_route_reports_a_browser_copy_that_already_exists(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+
+    async def no_tracks(path):
+        return ([], [])
+
+    monkeypatch.setattr(player, "subtitle_tracks_for", no_tracks)
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: media_root / "cache")
+    monkeypatch.setattr(
+        player, "_audio_info", lambda local: {"codec": "dts", "channels": 6, "layout": ""}
+    )
+    cached = player._cache_file(str(video), str(video))
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(b"mp4")
+
+    async with _client() as client:
+        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+    assert resp.json()["copy_ready"] is True
+
+
 def test_pick_default_prefers_the_configured_languages(monkeypatch):
     monkeypatch.setattr(
         player, "_preferred_languages", lambda: ["en", "english", "sv", "swedish"]
@@ -296,3 +366,123 @@ def test_prune_play_cache_drops_old_and_oversized_files(media_root, monkeypatch)
     assert not old.is_file()          # older than a week
     assert not large.is_file()        # kept the dir under the byte cap
     assert recent.is_file()
+
+
+def test_prune_play_cache_keeps_the_newest_copy_even_over_the_cap(media_root, monkeypatch):
+    cache = media_root / "cache"
+    cache.mkdir()
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: cache)
+    monkeypatch.setattr(player, "PLAY_CACHE_MAX_BYTES", 10)
+
+    now = time.time()
+    older = cache / "older.mp4"
+    older.write_bytes(b"y" * 8)
+    os.utime(older, (now - 600, now - 600))
+    # A feature film's copy is nearly as large as the film, so the newest one can
+    # exceed the whole cap on its own; it must survive or every play remuxes it.
+    newest = cache / "newest.mp4"
+    newest.write_bytes(b"z" * 64)
+    os.utime(newest, (now, now))
+
+    player.prune_play_cache()
+
+    assert not older.is_file()
+    assert newest.is_file()
+
+
+# ---- the audio probe ---------------------------------------------------------
+
+
+def test_audio_from_probe_reads_the_first_audio_stream():
+    payload = json.dumps({"streams": [
+        {"codec_name": "DTS", "channels": 6, "channel_layout": "5.1(side)"},
+    ]})
+    assert player._audio_from_probe(payload) == {
+        "codec": "dts", "channels": 6, "layout": "5.1(side)",
+    }
+
+
+def test_audio_from_probe_copes_with_no_audio_and_broken_output():
+    assert player._audio_from_probe("") == {}
+    assert player._audio_from_probe("not json") == {}
+    assert player._audio_from_probe(json.dumps({"streams": []})) == {}
+    # A stream with no channel count is still a stream ffprobe found.
+    assert player._audio_from_probe(json.dumps({"streams": [{"codec_name": "aac"}]})) == {
+        "codec": "aac", "channels": 0, "layout": "",
+    }
+
+
+def test_probe_audio_asks_ffprobe_for_the_first_audio_stream(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            cmd, 0, json.dumps({"streams": [{"codec_name": "truehd"}]}), ""
+        )
+
+    monkeypatch.setattr(player.subprocess, "run", fake_run)
+    assert player._probe_audio("ffprobe", "movie.mkv")["codec"] == "truehd"
+    assert "-select_streams" in seen["cmd"]
+    assert "a:0" in seen["cmd"]
+    assert seen["cmd"][-1] == "movie.mkv"
+
+
+def test_probe_audio_gives_none_when_ffprobe_fails(monkeypatch):
+    def failing(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, "", "boom")
+
+    monkeypatch.setattr(player.subprocess, "run", failing)
+    assert player._probe_audio("ffprobe", "movie.mkv") is None
+
+    def missing(cmd, **kwargs):
+        raise OSError("no such binary")
+
+    monkeypatch.setattr(player.subprocess, "run", missing)
+    assert player._probe_audio("ffprobe", "movie.mkv") is None
+
+
+def test_audio_info_probes_a_file_once(media_root, monkeypatch):
+    video = _video(media_root)
+    calls = []
+
+    def fake_probe(ffprobe, local):
+        calls.append(local)
+        return {"codec": "dts", "channels": 6, "layout": "5.1(side)"}
+
+    monkeypatch.setattr(player, "_AUDIO_CACHE", {})
+    monkeypatch.setattr(player, "resolve_ffprobe", lambda: "ffprobe")
+    monkeypatch.setattr(player, "_probe_audio", fake_probe)
+
+    assert player._audio_info(str(video))["codec"] == "dts"
+    assert player._audio_info(str(video))["codec"] == "dts"
+    assert len(calls) == 1
+
+
+def test_audio_info_does_not_remember_a_failed_probe(media_root, monkeypatch):
+    video = _video(media_root)
+    monkeypatch.setattr(player, "_AUDIO_CACHE", {})
+    monkeypatch.setattr(player, "resolve_ffprobe", lambda: "ffprobe")
+    monkeypatch.setattr(player, "_probe_audio", lambda ffprobe, local: None)
+    assert player._audio_info(str(video)) is None
+    assert player._AUDIO_CACHE == {}
+
+
+def test_audio_info_without_ffprobe_is_unknown(media_root, monkeypatch):
+    video = _video(media_root)
+    monkeypatch.setattr(player, "_AUDIO_CACHE", {})
+    monkeypatch.setattr(player, "resolve_ffprobe", lambda: None)
+    assert player._audio_info(str(video)) is None
+
+
+def test_audio_copy_reason_flags_only_what_no_browser_can_decode():
+    assert player.audio_copy_reason({"codec": "dts"}) == "DTS audio"
+    assert player.audio_copy_reason({"codec": "truehd"}) == "TrueHD audio"
+    assert player.audio_copy_reason({"codec": "mlp"}) == "MLP audio"
+    # Everything else gets a chance to play: the page watches for silence. Some
+    # browsers decode AC-3 and E-AC-3 through the operating system and some do
+    # not, which is not something ffprobe can answer.
+    for codec in ("aac", "ac3", "eac3", "opus", "flac", "pcm_s16le", "wmav2", ""):
+        assert player.audio_copy_reason({"codec": codec}) == ""
+    assert player.audio_copy_reason({}) == ""
+    assert player.audio_copy_reason(None) == ""
