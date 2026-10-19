@@ -16,3 +16,6 @@ services:
     volumes:
       # Change the left side to your data folder on the NAS.
       - /Volume1/public/Docker/Configs/JFTools:/data
+      # Optional: keep automatic backups on a separate disk, then set the
+      # backup folder on the Settings page to /backups.
+      # - /Volume1/public/Docker/Backups:/backups

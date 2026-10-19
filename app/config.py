@@ -126,6 +126,11 @@ class Settings:
     # Saved filter profiles per page ("search", "moviematch"), managed from that
     # page's profile bar. Kept here so they survive browser clears/backups.
     filter_profiles: dict = field(default_factory=dict)
+    # Full-backup destination and retention. An empty directory means
+    # data/backups; keep=0 keeps every archive.
+    backup_dir: str = ""
+    backup_keep: int = 7
+    backup_include_logs: bool = False
 
 
 class Config:
@@ -212,6 +217,15 @@ class Config:
                     settings.opensubtitles_languages = data["opensubtitles_languages"]
                 if "filter_profiles" in data:
                     settings.filter_profiles = _sanitize_profiles(data["filter_profiles"])
+                if isinstance(data.get("backup_dir"), str):
+                    settings.backup_dir = data["backup_dir"]
+                if "backup_keep" in data:
+                    try:
+                        settings.backup_keep = max(0, min(100, int(data["backup_keep"])))
+                    except (TypeError, ValueError):
+                        pass
+                if isinstance(data.get("backup_include_logs"), bool):
+                    settings.backup_include_logs = data["backup_include_logs"]
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -234,6 +248,9 @@ class Config:
             "opensubtitles_password": s.opensubtitles_password,
             "opensubtitles_languages": s.opensubtitles_languages,
             "filter_profiles": s.filter_profiles,
+            "backup_dir": s.backup_dir,
+            "backup_keep": s.backup_keep,
+            "backup_include_logs": s.backup_include_logs,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -321,6 +338,13 @@ class Config:
         self._settings.filter_profiles = current
         self._persist()
 
+    def save_backup_settings(self, directory: str, keep: int, include_logs: bool) -> None:
+        """Persist the automatic-backup folder, retention and log flag."""
+        self._settings.backup_dir = (directory or "").strip()
+        self._settings.backup_keep = max(0, min(100, int(keep)))
+        self._settings.backup_include_logs = bool(include_logs)
+        self._persist()
+
     # ---- backup / restore ---------------------------------------------------
 
     _EXPORT_FIELDS = (
@@ -338,6 +362,9 @@ class Config:
         "opensubtitles_password",
         "opensubtitles_languages",
         "filter_profiles",
+        "backup_dir",
+        "backup_keep",
+        "backup_include_logs",
     )
 
     def export_settings(self) -> dict:
@@ -359,6 +386,15 @@ class Config:
                     self._settings.path_maps = _sanitize_path_maps(data[field])
                 elif field == "filter_profiles":
                     self._settings.filter_profiles = _sanitize_profiles(data[field])
+                elif field == "backup_keep":
+                    try:
+                        self._settings.backup_keep = max(0, min(100, int(data[field])))
+                    except (TypeError, ValueError):
+                        pass
+                elif field == "backup_include_logs":
+                    self._settings.backup_include_logs = bool(data[field])
+                elif field == "backup_dir":
+                    self._settings.backup_dir = str(data[field] or "").strip()
                 elif field == "file_mgmt":
                     self._settings.file_mgmt = bool(data[field])
                 else:

@@ -23,8 +23,9 @@ existing server over the API.
   lockout included.
 - Settings page to change the Jellyfin connection **and** the dashboard login at
   runtime (persisted to a volume; the password is stored as a scrypt hash).
-- Backup: export all settings — including saved filter profiles — to a JSON file
-  and import them back on another instance.
+- Backup: export/import settings as JSON, or download and restore a full ZIP of
+  settings and runtime data (scan results, Movie Match marks, schedules), with
+  scheduled backups and retention.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans. **Latest additions** names each item's
   library and carries the same action pills as the other tabs (Open, Sync, Play,
@@ -141,9 +142,10 @@ values.
 
 All runtime state lives in the data directory (`/data` in the container):
 `config.json` (Jellyfin connection + login hash), `.secret_key`, `schedules.json`,
-`users.json`, `libraries.json`, `jellyfin_id.json`, `scans.json`, and `logs/`.
-An old `subtitles.json` is imported automatically the first time the app starts
-with `scans.json` missing; it is left on disk as a backup.
+`users.json`, `libraries.json`, `jellyfin_id.json`, `scans.json`, `logs/`, the
+disposable `play_cache/` and, once backups run, `backups/`. An old `subtitles.json`
+is imported automatically the first time the app starts with `scans.json` missing;
+it is left on disk as a backup.
 
 - **Bind mount:** point the `volumes` path at a NAS folder. The container starts
   as root only to align its internal user with `PUID`/`PGID` and `chown` the data
@@ -154,6 +156,50 @@ with `scans.json` missing; it is left on disk as a backup.
   `jftools-data:/data` and keep `PUID`/`PGID` at `1000`.
 - **Single process:** JFTools keeps state in memory (scheduler, caches), so run
   **one container, one uvicorn worker**. Do not scale replicas.
+
+## Backup & restore
+
+Settings → **Backup** offers two levels:
+
+- **Export settings (JSON)** — configuration only (Jellyfin connection, login
+  hash, integrations, path maps, filter profiles, backup settings). Portable
+  between installs.
+- **Download full backup** — a ZIP with everything needed to rebuild this
+  instance: `config.json`, `.secret_key`, `schedules.json`, `libraries.json`,
+  `users.json`, `jellyfin_id.json` (Movie Match marks and favourites) and
+  `scans.json` (subtitle/audio probe results). `play_cache/` is always excluded;
+  logs are optional. Roughly 20 MB raw, a few MB zipped.
+
+Each archive carries a `manifest.json` with the app version and a SHA-256 per
+file. **Restore from backup** validates the manifest, refuses while a scan or
+fetch is running, and replaces those files after every checksum passes (each
+write is atomic). Restart the container afterwards — configuration, schedules
+and caches load at startup, and settings writes are refused until then. The
+restore also replaces the login and session key, so you may be signed out.
+
+### Automatic backups
+
+**Settings → Automatic backups** sets the folder, how many archives to keep
+(`0` keeps all) and whether logs are included. Timing is a **Backup** job on the
+Scheduler page (daily 03:30, disabled by default). Each run writes
+`jftools-backup-YYYYMMDD-HHMMSS.zip`; archives beyond the keep limit are deleted,
+and only files matching that name pattern are touched.
+
+The default folder is `data/backups` inside the data volume — convenient, but it
+shares that volume's fate. For a copy on another disk, mount one and point the
+folder at it:
+
+```yaml
+volumes:
+  - /Volume1/public/Docker/Configs/JFTools:/data
+  - /Volume1/public/Docker/Backups:/backups
+```
+
+Then set the backup folder to `/backups`.
+
+Archives contain the Jellyfin API key, login hash and OpenSubtitles password, so
+treat them like the settings export: keep them private (they are written with
+mode `0600`).
 
 ## Media paths
 

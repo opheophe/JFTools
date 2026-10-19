@@ -6,11 +6,13 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import backup
 from .about import check_for_updates, router as about_router
 from .audio import router as audio_router
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
@@ -71,6 +73,29 @@ async def _pages_are_not_cached(request: Request, call_next):
     if response.headers.get("content-type", "").startswith("text/html"):
         response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.middleware("http")
+async def _wait_for_restart(request: Request, call_next):
+    """Refuse settings writes after a restore has replaced config.json.
+
+    The running process still has the old settings in memory; letting a save
+    through would write them back over the restored file.
+    """
+    if (
+        backup.RESTORED
+        and request.method == "POST"
+        and (
+            request.url.path.startswith("/settings")
+            or request.url.path == "/api/profiles"
+        )
+    ):
+        return JSONResponse(
+            {"ok": False, "error": "Restart JFTools to finish applying the restored backup."},
+            status_code=409,
+            headers={"Cache-Control": "no-store"},
+        )
+    return await call_next(request)
 
 app.include_router(about_router)
 app.include_router(audio_router)
@@ -245,6 +270,9 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "os_api_key_is_set": bool(config.settings.opensubtitles_api_key),
             "os_username": config.settings.opensubtitles_username,
             "os_languages": config.settings.opensubtitles_languages,
+            "backup_dir": config.settings.backup_dir,
+            "backup_keep": config.settings.backup_keep,
+            "backup_include_logs": config.settings.backup_include_logs,
         },
     )
 
@@ -403,6 +431,162 @@ async def paths_test(request: Request, user: str = Depends(require_login)):
         result["readable"] = False
         result["writable"] = False
     return JSONResponse(result)
+
+
+@app.post("/settings/backup")
+async def settings_backup_save(
+    request: Request,
+    user: str = Depends(require_login),
+    backup_dir: str = Form(""),
+    backup_keep: str = Form("7"),
+    backup_include_logs: str = Form(""),
+):
+    raw = backup_dir.strip()
+    if raw:
+        folder = Path(raw).expanduser()
+        if not folder.is_absolute():
+            return JSONResponse(
+                {"ok": False, "error": "Backup folder must be an absolute path, e.g. /backups."},
+                status_code=400,
+            )
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            probe = folder / ".jftools-write-test"
+            probe.write_text("", encoding="utf-8")
+            probe.unlink()
+        except OSError as exc:
+            return JSONResponse(
+                {"ok": False, "error": f"Cannot write to {folder}: {exc}"},
+                status_code=400,
+            )
+        raw = str(folder)
+    try:
+        keep = int(backup_keep)
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"ok": False, "error": "Keep last must be a whole number between 0 and 100."},
+            status_code=400,
+        )
+    if keep < 0 or keep > 100:
+        return JSONResponse(
+            {"ok": False, "error": "Keep last must be between 0 and 100."},
+            status_code=400,
+        )
+    include_logs = backup_include_logs.strip().lower() in ("1", "true", "yes", "on")
+    config.save_backup_settings(raw, keep, include_logs)
+    log("Backup", "INFO", f"Backup settings saved (keep={keep}, logs={include_logs})")
+    return _saved(request, "Backup settings saved.")
+
+
+@app.get("/settings/backup/download")
+async def settings_backup_download(user: str = Depends(require_login)):
+    try:
+        data = await asyncio.to_thread(backup.build_zip)
+    except backup.BackupError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    name = time.strftime("jftools-backup-%Y%m%d-%H%M%S.zip")
+    log("Backup", "INFO", f"Backup downloaded ({len(data)} bytes)")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@app.get("/api/backup/list")
+async def api_backup_list(user: str = Depends(require_login)):
+    return JSONResponse(
+        {
+            "ok": True,
+            "backups": backup.list_backups(),
+            "keep": config.settings.backup_keep,
+            "dir": str(backup.backup_dir()),
+        }
+    )
+
+
+@app.post("/api/backup/now")
+async def api_backup_now(user: str = Depends(require_login)):
+    try:
+        info = await asyncio.to_thread(backup.create_backup)
+    except backup.BackupError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": f"Backup created: {info['name']}",
+            "backup": info,
+            "backups": backup.list_backups(),
+            "keep": config.settings.backup_keep,
+        }
+    )
+
+
+@app.get("/api/backup/file")
+async def api_backup_file(name: str, user: str = Depends(require_login)):
+    try:
+        path = backup.path_for(name)
+    except backup.BackupError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    if not path.is_file():
+        return JSONResponse({"ok": False, "error": "Backup not found."}, status_code=404)
+    return FileResponse(path, media_type="application/zip", filename=name)
+
+
+@app.post("/api/backup/delete")
+async def api_backup_delete(
+    user: str = Depends(require_login),
+    name: str = Form(""),
+):
+    try:
+        path = backup.path_for(name)
+    except backup.BackupError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    if not path.is_file():
+        return JSONResponse({"ok": False, "error": "Backup not found."}, status_code=404)
+    try:
+        path.unlink()
+    except OSError as exc:
+        return JSONResponse(
+            {"ok": False, "error": f"Could not delete the backup: {exc}"},
+            status_code=400,
+        )
+    log("Backup", "INFO", f"Backup deleted: {name}")
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": f"Deleted {name}.",
+            "backups": backup.list_backups(),
+            "keep": config.settings.backup_keep,
+        }
+    )
+
+
+@app.post("/api/backup/restore")
+async def api_backup_restore(
+    user: str = Depends(require_login),
+    file: UploadFile = File(...),
+):
+    raw = await file.read(backup.MAX_RESTORE_BYTES + 1)
+    if len(raw) > backup.MAX_RESTORE_BYTES:
+        return JSONResponse(
+            {"ok": False, "error": "The archive is too large to restore."},
+            status_code=413,
+        )
+    try:
+        info = await asyncio.to_thread(backup.restore_archive, raw)
+    except backup.BackupError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": (
+                f"Restored {info['restored']} file(s). "
+                "Restart JFTools to apply the backup."
+            ),
+            "restart_required": True,
+        }
+    )
 
 
 @app.get("/settings/export")

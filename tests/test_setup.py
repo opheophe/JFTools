@@ -101,6 +101,43 @@ def test_filter_profiles_drop_invalid_entries(tmp_path, monkeypatch):
     assert cfg.settings.filter_profiles["search"] == {"ok": {"filters": {}}}
 
 
+def test_backup_settings_round_trip(tmp_path, monkeypatch):
+    monkeypatch.delenv("JFTOOLS_PATH_MAP", raising=False)
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    assert cfg.settings.backup_keep == 7
+    assert cfg.settings.backup_dir == ""
+    cfg.save_backup_settings(str(tmp_path / "backups"), 3, True)
+
+    cfg2 = Config()
+    assert cfg2.settings.backup_dir == str(tmp_path / "backups")
+    assert cfg2.settings.backup_keep == 3
+    assert cfg2.settings.backup_include_logs is True
+
+    # Another settings save must not drop the backup fields.
+    cfg2.save_file_mgmt(True)
+    cfg3 = Config()
+    assert cfg3.settings.backup_keep == 3
+
+    # Export -> import round trip.
+    cfg3.save_backup_settings("", 9, False)
+    cfg3.import_settings(cfg2.export_settings())
+    assert cfg3.settings.backup_dir == str(tmp_path / "backups")
+    assert cfg3.settings.backup_keep == 3
+    assert cfg3.settings.backup_include_logs is True
+
+
+def test_backup_keep_is_clamped(tmp_path, monkeypatch):
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    cfg.save_backup_settings("", 500, False)
+    assert cfg.settings.backup_keep == 100
+    cfg.save_backup_settings("", -5, False)
+    assert cfg.settings.backup_keep == 0
+
+
 def test_path_map_env_parsing(tmp_path, monkeypatch):
     monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JFTOOLS_PATH_MAP", r"/Filmer=\\NAS\Filmer;/Ero=Z:\Ero")

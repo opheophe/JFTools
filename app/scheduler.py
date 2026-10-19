@@ -82,6 +82,12 @@ async def _op_users_watching() -> None:
     await check_watching()
 
 
+async def _op_backup() -> None:
+    from .backup import create_backup
+
+    await asyncio.to_thread(create_backup)
+
+
 def _scan_progress() -> dict | None:
     """Live progress (done/total) for the running media scan."""
     from .subtitles import _fetch
@@ -114,6 +120,8 @@ OPERATIONS = [
      "description": "Refresh the cached library list from Jellyfin."},
     {"id": "check_updates", "label": "Check for updates", "tab": "System", "handler": _op_check_updates,
      "description": "Query GitHub for the latest JFTools release."},
+    {"id": "backup", "label": "Backup", "tab": "Settings", "handler": _op_backup,
+     "description": "Write a ZIP of settings and runtime data to the backup folder."},
     {"id": "subtitle_scan_full", "label": "Media scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
      "description": "Re-probe every media file for subtitle and audio tracks with ffprobe.",
      "progress": _scan_progress},
@@ -140,6 +148,7 @@ _DEFAULT_SCHEDULES = {
     "clear_cache": {"kind": "interval", "minutes": 720},
     "refresh_libraries": {"kind": "interval", "minutes": 30},
     "check_updates": {"kind": "interval", "minutes": 60},
+    "backup": {"kind": "cron", "hour": 3, "minute": 30},
     "subtitle_scan_full": {"kind": "cron", "hour": 3, "minute": 0},
     "subtitle_scan": {"kind": "interval", "minutes": 720},
     "users_watching": {"kind": "interval", "seconds": 30},

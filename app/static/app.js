@@ -692,6 +692,14 @@ function bindSettings() {
   });
 }
 
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+  return (n / 1024 / 1024 / 1024).toFixed(1) + " GB";
+}
+
 function bindSettingsBackup() {
   const exportBtn = document.getElementById("export-btn");
   const importBtn = document.getElementById("import-btn");
@@ -727,6 +735,152 @@ function bindSettingsBackup() {
       fileInput.value = "";
     }
   });
+
+  const downloadBtn = document.getElementById("backup-download");
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", () => {
+      window.location.href = "/settings/backup/download";
+    });
+  }
+
+  const restoreBtn = document.getElementById("backup-restore-btn");
+  const restoreFile = document.getElementById("backup-restore-file");
+  if (restoreBtn && restoreFile) {
+    restoreBtn.addEventListener("click", () => restoreFile.click());
+    restoreFile.addEventListener("change", async () => {
+      const file = restoreFile.files && restoreFile.files[0];
+      if (!file) return;
+      const ok = window.confirm(
+        "Restore " + file.name + "?\n\n" +
+        "This replaces settings, schedules, scan results and Movie Match data. " +
+        "JFTools must be restarted afterwards."
+      );
+      if (!ok) {
+        restoreFile.value = "";
+        return;
+      }
+      const body = new FormData();
+      body.append("file", file);
+      showSpinner(resultEl);
+      try {
+        const resp = await fetch("/api/backup/restore", { method: "POST", body });
+        if (resp.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        const data = await resp.json();
+        showMessage(resultEl, data);
+      } catch (err) {
+        resultEl.innerHTML = "";
+        resultEl.appendChild(el("p", { class: "error", text: String(err) }));
+      } finally {
+        restoreFile.value = "";
+      }
+    });
+  }
+
+  const form = document.getElementById("backup-form");
+  const settingsResult = document.getElementById("backup-settings-result");
+  const listBody = document.getElementById("backup-list");
+  const listWrap = document.getElementById("backup-list-wrap");
+  const listCount = document.getElementById("backup-list-count");
+  const nowBtn = document.getElementById("backup-now");
+
+  function renderList(data) {
+    if (!listBody || !listWrap) return;
+    const backups = (data && data.backups) || [];
+    listWrap.hidden = false;
+    listBody.innerHTML = "";
+    if (!backups.length) {
+      listBody.appendChild(el("tr", {}, [
+        el("td", { colspan: "4", class: "muted", text: "No backups yet." }),
+      ]));
+    } else {
+      backups.forEach((b) => {
+        const tr = el("tr");
+        tr.appendChild(el("td", { text: b.name }));
+        tr.appendChild(el("td", { class: "muted", text: fmtBytes(b.size) }));
+        tr.appendChild(el("td", {
+          class: "muted",
+          text: fmtDate(new Date(b.created_at * 1000).toISOString()),
+        }));
+        const actions = el("td", { class: "nowrap" });
+        const dl = el("a", {
+          href: "/api/backup/file?name=" + encodeURIComponent(b.name),
+          class: "btn-edit",
+          style: "text-decoration:none",
+          text: "Download",
+        });
+        dl.setAttribute("download", b.name);
+        const del = el("button", { type: "button", class: "btn-edit", text: "Delete" });
+        del.addEventListener("click", async () => {
+          if (!window.confirm("Delete " + b.name + "?")) return;
+          try {
+            const d = await postJSON("/api/backup/delete", "name=" + encodeURIComponent(b.name));
+            if (settingsResult) showMessage(settingsResult, d);
+            if (d.ok) await refreshList();
+          } catch (err) {
+            if (settingsResult) {
+              settingsResult.innerHTML = "";
+              settingsResult.appendChild(el("p", { class: "error", text: String(err) }));
+            }
+          }
+        });
+        actions.appendChild(dl);
+        actions.appendChild(del);
+        tr.appendChild(actions);
+        listBody.appendChild(tr);
+      });
+    }
+    if (listCount) {
+      const keep = data && data.keep ? data.keep : 0;
+      listCount.textContent = backups.length + " saved" +
+        (keep ? " — keeping the newest " + keep : " — no limit");
+    }
+  }
+
+  async function refreshList() {
+    if (!listBody) return;
+    try {
+      renderList(await getJSON("/api/backup/list"));
+    } catch (err) {
+      if (listCount) listCount.textContent = "Could not load backups.";
+    }
+  }
+
+  if (form && settingsResult) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      showSpinner(settingsResult);
+      try {
+        const data = await postJSON("/settings/backup", serializeForm(form));
+        showMessage(settingsResult, data);
+        if (data.ok) await refreshList();
+      } catch (err) {
+        settingsResult.innerHTML = "";
+        settingsResult.appendChild(el("p", { class: "error", text: String(err) }));
+      }
+    });
+  }
+
+  if (nowBtn && settingsResult) {
+    nowBtn.addEventListener("click", async () => {
+      showSpinner(settingsResult);
+      nowBtn.disabled = true;
+      try {
+        const data = await postJSON("/api/backup/now");
+        showMessage(settingsResult, data);
+        if (data.ok) renderList({ backups: data.backups || [], keep: data.keep });
+      } catch (err) {
+        settingsResult.innerHTML = "";
+        settingsResult.appendChild(el("p", { class: "error", text: String(err) }));
+      } finally {
+        nowBtn.disabled = false;
+      }
+    });
+  }
+
+  refreshList();
 }
 
 function bindPathMaps() {

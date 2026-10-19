@@ -99,6 +99,22 @@ def test_check_updates_runs_hourly_by_default():
     assert "check_updates" in sch._ACTIVE_BY_DEFAULT
 
 
+def test_backup_job_is_off_by_default():
+    assert "backup" in sch._OP_BY_ID
+    assert sch._DEFAULT_SCHEDULES["backup"] == {"kind": "cron", "hour": 3, "minute": 30}
+    assert "backup" not in sch._ACTIVE_BY_DEFAULT
+
+
+def test_seeded_backup_job_is_disabled(monkeypatch):
+    monkeypatch.setattr(sch, "_jobs", {})
+    monkeypatch.setattr(sch, "_save_jobs", lambda: None)
+
+    sch._ensure_default_jobs()
+
+    assert sch._jobs["backup"]["enabled"] is False
+    assert sch._jobs["backup"]["trigger"] == {"kind": "cron", "hour": 3, "minute": 30}
+
+
 def test_describe_seconds_interval():
     assert _describe_schedule({"kind": "interval", "seconds": 30}) == "Every 30 seconds"
 

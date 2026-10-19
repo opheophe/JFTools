@@ -163,14 +163,71 @@
 
 <section class="card">
   <h2>Backup</h2>
-  <p class="muted">Export every setting above to a JSON file, or restore them from a previously exported file.</p>
+  <p class="muted">
+    Download everything — settings, media-scan results, Movie Match data, schedules and
+    caches — as one ZIP, or restore a previous archive.
+  </p>
   <div class="row">
-    <button type="button" id="export-btn" class="primary">Export settings</button>
-    <button type="button" id="import-btn" class="btn-edit">Import settings</button>
+    <button type="button" id="backup-download" class="primary">Download full backup</button>
+    <button type="button" id="backup-restore-btn" class="btn-edit">Restore from backup…</button>
+    <input type="file" id="backup-restore-file" accept="application/zip,.zip" hidden>
+  </div>
+  <p class="hint">
+    The archive contains your Jellyfin API key, login hash and OpenSubtitles login, so keep
+    it private. Player cache is excluded. Restoring requires a restart.
+  </p>
+  <div class="row">
+    <button type="button" id="export-btn">Export settings (JSON)</button>
+    <button type="button" id="import-btn">Import settings (JSON)</button>
     <input type="file" id="import-file" accept="application/json,.json" hidden>
   </div>
-  <p class="hint">The exported file contains your Jellyfin API key and login hash, so keep it private.</p>
   <div class="result" id="backup-result" hidden></div>
+</section>
+
+<section class="card">
+  <h2>Automatic backups</h2>
+  <p class="muted">
+    The Scheduler's <strong>Backup</strong> job writes archives to this folder and keeps
+    only the newest N (0 keeps all). <a href="/scheduler">Open the Scheduler</a> to set the time.
+  </p>
+  <form id="backup-form" method="post" action="/settings/backup">
+    <label for="backup-dir">Backup folder</label>
+    <input type="text" id="backup-dir" name="backup_dir" value="{{ backup_dir }}" placeholder="data/backups">
+    <p class="hint">
+      Absolute path. The default is <code>data/backups</code> inside the data volume; mount a
+      second volume (e.g. <code>/backups</code>) to survive losing that volume.
+    </p>
+
+    <label for="backup-keep">Keep last</label>
+    <div class="row" style="align-items:center">
+      <input type="number" id="backup-keep" name="backup_keep" min="0" max="100"
+             value="{{ backup_keep }}" style="width:6rem">
+      <span class="muted">backup(s) — 0 keeps all</span>
+    </div>
+
+    <div class="row" style="align-items:center; margin-top:.5rem">
+      <input type="checkbox" id="backup-logs" name="backup_include_logs" value="1"
+             {% if backup_include_logs %}checked{% endif %}>
+      <label for="backup-logs">Include logs</label>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="primary">Save backup settings</button>
+      <button type="button" id="backup-now" class="btn-edit">Back up now</button>
+    </div>
+  </form>
+  <div class="result" id="backup-settings-result" hidden></div>
+
+  <div id="backup-list-wrap" hidden>
+    <h3>Recent backups</h3>
+    <p class="muted" id="backup-list-count"></p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody id="backup-list"></tbody>
+      </table>
+    </div>
+  </div>
 </section>
 
 <footer class="muted" style="margin-top:2rem; display:flex; justify-content:center">
