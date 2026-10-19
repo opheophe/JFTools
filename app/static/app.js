@@ -401,10 +401,14 @@ function rowActions(r, cfg) {
 
   const syncItems = [];
   if (r.path) {
-    syncItems.push(hoverMenuAction("Resync Jellyfin library", (node) => rescanFile(node, r.path)));
-    syncItems.push(hoverMenuAction("Resync Subtitles", (node) => rescanSubtitle(node, r.path)));
+    syncItems.push(hoverMenuAction(
+      "Jellyfin library", (node) => resyncOne(node, r.path, resyncLibrary, "Resyncing…")
+    ));
+    syncItems.push(hoverMenuAction(
+      "Subtitles & audio", (node) => resyncOne(node, r.path, resyncTracks, "Resyncing…")
+    ));
   }
-  // Hover lists the two halves; clicking the pill runs both.
+  // Hover lists the two targets; clicking the pill runs both.
   td.appendChild(hoverMenuButton(
     "Sync", syncItems, "sync", r.path ? (node) => resyncBoth(node, r.path) : null
   ));
@@ -1247,7 +1251,7 @@ function playVideo(path, track) {
   );
 }
 
-// Each resync reports on its own, so the Sync pill can show which half worked.
+// Each resync reports on its own, so the Sync pill can show which target worked.
 async function resyncLibrary(path) {
   try {
     const data = await postJSON("/api/media/rescan", "path=" + encodeURIComponent(path));
@@ -1259,31 +1263,35 @@ async function resyncLibrary(path) {
   }
 }
 
-// A subtitle rescan updates the server-side store, so mirror the fresh entry
-// into the page's data: the Subtitles column then shows it straight away
-// instead of waiting for a reload (SE comes from search.js and is absent on
-// the Movie Match page, which has no subtitle column).
-function applySubtitleEntry(path, entry) {
+// A media rescan updates the server-side store, so mirror the fresh entry into
+// the page's data: the Subtitles and Audio columns then show it straight away
+// instead of waiting for a reload (SE comes from search.js and is absent on the
+// Movie Match page, which has no scan columns).
+function applyScanEntry(path, entry) {
   if (!entry || typeof SE === "undefined" || !SE.scans) return;
   SE.scans[path] = entry;
   renderSeTable();
 }
 
-async function resyncSubtitles(path) {
+async function resyncTracks(path) {
   try {
     const data = await postJSON("/api/subtitles/rescan", "path=" + encodeURIComponent(path));
-    if (!data.ok) return { ok: false, text: data.error || "Subtitle rescan failed" };
+    if (!data.ok) return { ok: false, text: data.error || "Rescan failed" };
     const e = data.entry || {};
-    applySubtitleEntry(path, data.entry);
+    applyScanEntry(path, data.entry);
     if (e.folder) return { ok: true, text: "series folder, nothing to probe" };
     if (e.error) return { ok: false, text: e.error };
-    return { ok: true, text: (e.subs || []).join(", ") || "no subs" };
+    const subs = (e.subs || []).length;
+    const audio = (e.audio || []).length;
+    const subsLabel = subs + (subs === 1 ? " sub" : " subs");
+    const audioLabel = audio + (audio === 1 ? " audio track" : " audio tracks");
+    return { ok: true, text: subsLabel + ", " + audioLabel };
   } catch (err) {
-    return { ok: false, text: "Subtitle rescan failed" };
+    return { ok: false, text: "Rescan failed" };
   }
 }
 
-// One half at a time, from the Sync menu: the item reports its own result.
+// One target at a time, from the Sync menu: the item reports its own result.
 async function resyncOne(node, path, run, busyText) {
   if (node.dataset.busy) return;
   node.dataset.busy = "1";
@@ -1299,24 +1307,16 @@ async function resyncOne(node, path, run, busyText) {
   }, 2500);
 }
 
-function rescanFile(node, path) {
-  return resyncOne(node, path, resyncLibrary, "Resyncing…");
-}
-
-function rescanSubtitle(node, path) {
-  return resyncOne(node, path, resyncSubtitles, "Resyncing…");
-}
-
-// The Sync pill: both halves, each marked so a failure is visible.
+// The Sync pill: both targets, each marked so a failure is visible.
 async function resyncBoth(node, path) {
   if (!path || node.dataset.busy) return;
   node.dataset.busy = "1";
   const prev = node.textContent;
   node.textContent = "Syncing…";
-  const [lib, subs] = await Promise.all([resyncLibrary(path), resyncSubtitles(path)]);
+  const [lib, tracks] = await Promise.all([resyncLibrary(path), resyncTracks(path)]);
   const mark = (r) => (r.ok ? "✓" : "✗");
-  node.textContent = mark(lib) + " Library · " + mark(subs) + " Subtitles";
-  node.title = "Library: " + lib.text + " · Subtitles: " + subs.text;
+  node.textContent = mark(lib) + " Library · " + mark(tracks) + " Tracks";
+  node.title = "Jellyfin library: " + lib.text + " · Subtitles & audio: " + tracks.text;
   setTimeout(() => {
     node.textContent = prev;
     node.title = "";

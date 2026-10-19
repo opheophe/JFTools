@@ -230,9 +230,10 @@ Two scheduler jobs do the work:
 
 The **Media scan** button on the Search page starts the incremental job.
 
-You can also re-probe a single file with the **Resync Subtitles** action on its
-row (or the **Sync** pill, which does both halves), which ignores the `scanned`
-flag — handy after dropping a new `.srt` next to a movie.
+You can also re-probe a single file from a row's **Sync** menu: **Subtitles &
+audio** re-runs ffprobe for both columns (ignoring the `scanned` flag — handy
+after dropping a new `.srt` next to a movie), while **Jellyfin library** asks
+Jellyfin to rescan the path. Clicking the **Sync** pill itself runs both.
 
 **Requirements:**
 
