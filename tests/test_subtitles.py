@@ -289,7 +289,7 @@ async def test_scan_clears_not_scanned_for_series_folders(monkeypatch, tmp_path)
         assert entry["scanned"] is True
         assert entry["folder"] is True
         assert sub.scans_map()[str(movie)]["scanned"] is True
-        assert sub.scans_map()[str(movie)]["audio_scanned"] is True
+        assert sub.scans_map()[str(movie)]["audio"] == []
     finally:
         sub._state["files"] = files_before
         id_state["rows"] = rows_before

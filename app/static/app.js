@@ -1272,14 +1272,14 @@ function applySubtitleEntry(path, entry) {
 async function resyncSubtitles(path) {
   try {
     const data = await postJSON("/api/subtitles/rescan", "path=" + encodeURIComponent(path));
-    if (!data.ok) return { ok: false, text: data.error || "Subtitle scan failed" };
+    if (!data.ok) return { ok: false, text: data.error || "Subtitle rescan failed" };
     const e = data.entry || {};
     applySubtitleEntry(path, data.entry);
     if (e.folder) return { ok: true, text: "series folder, nothing to probe" };
     if (e.error) return { ok: false, text: e.error };
     return { ok: true, text: (e.subs || []).join(", ") || "no subs" };
   } catch (err) {
-    return { ok: false, text: "Subtitle scan failed" };
+    return { ok: false, text: "Subtitle rescan failed" };
   }
 }
 

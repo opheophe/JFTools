@@ -94,16 +94,16 @@ def test_probe_streams_reports_ffprobe_failure(monkeypatch):
 # ---- worklists and the merged store ----------------------------------------
 
 
-def test_audio_worklist_only_covers_the_unscanned_half(tmp_path, monkeypatch):
+def test_worklist_covers_every_unscanned_file(tmp_path, monkeypatch):
     video = tmp_path / "movie.mkv"
     video.write_bytes(b"")
     monkeypatch.setattr(config._settings, "path_maps", [])
     rows = [{"path": str(video)}]
-    files = {str(video): {"path": str(video), "scanned": True, "audio_scanned": False}}
+    files = {str(video): {"path": str(video), "scanned": False}}
 
-    assert len(sub._build_worklist(rows, files, "audio")) == 1
-    files[str(video)]["audio_scanned"] = True
-    assert sub._build_worklist(rows, files, "audio") == []
+    assert len(sub._build_worklist(rows, files)) == 1
+    files[str(video)]["scanned"] = True
+    assert sub._build_worklist(rows, files) == []
 
 
 def test_load_state_imports_the_subtitle_only_store(tmp_path, monkeypatch):
@@ -124,7 +124,6 @@ def test_load_state_imports_the_subtitle_only_store(tmp_path, monkeypatch):
     assert state["full_scan_at"] == 1
     entry = state["files"]["/m.mkv"]
     assert entry["scanned"] is True
-    assert entry["audio_scanned"] is False
     assert entry["audio"] == []
 
 
@@ -161,10 +160,13 @@ def test_load_state_prefers_the_merged_store(tmp_path, monkeypatch):
     state = sub._load_state()
 
     assert state["legacy"] is False
-    assert state["files"]["/m.mkv"]["audio"][0]["name"] == "English (AAC stereo)"
+    entry = state["files"]["/m.mkv"]
+    assert entry["audio"][0]["name"] == "English (AAC stereo)"
+    # The 1.20.0-only flag is dropped; one flag covers the whole entry now.
+    assert "audio_scanned" not in entry
 
 
-async def test_audio_scan_backfills_files_missing_audio(monkeypatch, tmp_path):
+async def test_scan_fills_both_halves(monkeypatch, tmp_path):
     import app.jellyfin_id as jid
 
     movie = tmp_path / "movie.mkv"
@@ -184,18 +186,19 @@ async def test_audio_scan_backfills_files_missing_audio(monkeypatch, tmp_path):
         sub._state, "files",
         {str(movie): {
             "path": str(movie), "file": movie.name,
-            "scanned": True, "audio_scanned": False, "subs": ["English"],
+            "scanned": False, "subs": [], "audio": [],
         }},
     )
 
-    await sub.run_scan("scan", "audio")
+    await sub.run_scan("scan")
 
     assert sub._fetch["status"] == "done"
-    assert sub._fetch["kind"] == "audio"
+    assert "kind" not in sub._fetch
     assert sub._fetch["scanned"] == 1
     entry = sub._state["files"][str(movie)]
-    assert entry["audio_scanned"] is True
+    assert entry["scanned"] is True
     assert entry["audio"][0]["name"] == "English (AAC stereo)*"
+    assert "audio_scanned" not in entry
 
 
 # ---- delete endpoint --------------------------------------------------------
@@ -286,7 +289,7 @@ async def test_delete_rewrites_and_refreshes_the_store(audio_env, monkeypatch):
     calls = {}
     remaining = [{"index": 2, "lang": "Swedish", "name": "Swedish (AAC stereo)", "default": False}]
     entry = {"path": path, "file": video.name, "audio": remaining, "scanned": True,
-             "audio_scanned": True, "error": None}
+             "error": None}
 
     monkeypatch.setattr(
         audio, "_probe_streams", lambda ff, local: ([], _tracks(), 1.0, None)

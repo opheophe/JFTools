@@ -76,38 +76,17 @@ async def _op_subtitle_scan() -> None:
     await run_scan("scan")
 
 
-async def _op_audio_scan_full() -> None:
-    from .subtitles import run_scan
-
-    await run_scan("full", "audio")
-
-
-async def _op_audio_scan() -> None:
-    from .subtitles import run_scan
-
-    await run_scan("scan", "audio")
-
-
 async def _op_users_watching() -> None:
     from .users import check_watching
 
     await check_watching()
 
 
-def _subtitle_scan_progress() -> dict | None:
-    """Live progress (done/total) for the running subtitle scans."""
+def _scan_progress() -> dict | None:
+    """Live progress (done/total) for the running media scan."""
     from .subtitles import _fetch
 
-    if _fetch.get("status") != "running" or _fetch.get("kind") == "audio":
-        return None
-    return {"done": _fetch.get("scanned", 0), "total": _fetch.get("total", 0)}
-
-
-def _audio_scan_progress() -> dict | None:
-    """Live progress (done/total) for the running audio scans."""
-    from .subtitles import _fetch
-
-    if _fetch.get("status") != "running" or _fetch.get("kind") != "audio":
+    if _fetch.get("status") != "running":
         return None
     return {"done": _fetch.get("scanned", 0), "total": _fetch.get("total", 0)}
 
@@ -135,18 +114,12 @@ OPERATIONS = [
      "description": "Refresh the cached library list from Jellyfin."},
     {"id": "check_updates", "label": "Check for updates", "tab": "System", "handler": _op_check_updates,
      "description": "Query GitHub for the latest JFTools release."},
-    {"id": "subtitle_scan_full", "label": "Subtitle scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
-     "description": "Probe every media file for subtitle tracks with ffprobe and refresh the whole subtitle store.",
-     "progress": _subtitle_scan_progress},
-    {"id": "subtitle_scan", "label": "Subtitle scan", "tab": "Search", "handler": _op_subtitle_scan,
-     "description": "Sync the store with the library, then probe every file not yet scanned.",
-     "progress": _subtitle_scan_progress},
-    {"id": "audio_scan_full", "label": "Audio scan (full)", "tab": "Search", "handler": _op_audio_scan_full,
-     "description": "Probe every media file for audio tracks with ffprobe and refresh the whole audio store.",
-     "progress": _audio_scan_progress},
-    {"id": "audio_scan", "label": "Audio scan", "tab": "Search", "handler": _op_audio_scan,
-     "description": "Sync the store with the library, then probe every file whose audio has not been scanned.",
-     "progress": _audio_scan_progress},
+    {"id": "subtitle_scan_full", "label": "Media scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
+     "description": "Re-probe every media file for subtitle and audio tracks with ffprobe.",
+     "progress": _scan_progress},
+    {"id": "subtitle_scan", "label": "Media scan", "tab": "Search", "handler": _op_subtitle_scan,
+     "description": "Sync the store with the library, then probe every file not yet scanned (subtitles and audio).",
+     "progress": _scan_progress},
     {"id": "users_watching", "label": "User watching", "tab": "Jellyfin", "handler": _op_users_watching,
      "description": "Check Jellyfin sessions for an actively-watching user (powers the Users nav dot).",
      "quiet": True},
@@ -169,8 +142,6 @@ _DEFAULT_SCHEDULES = {
     "check_updates": {"kind": "interval", "minutes": 60},
     "subtitle_scan_full": {"kind": "cron", "hour": 3, "minute": 0},
     "subtitle_scan": {"kind": "interval", "minutes": 720},
-    "audio_scan_full": {"kind": "cron", "hour": 4, "minute": 0},
-    "audio_scan": {"kind": "interval", "minutes": 720},
     "users_watching": {"kind": "interval", "seconds": 30},
 }
 _ACTIVE_BY_DEFAULT = {"refresh_libraries", "check_updates", "users_watching"}

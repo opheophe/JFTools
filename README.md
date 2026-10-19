@@ -200,17 +200,16 @@ Notes:
 - **Verify:** use the **Test** button on a mapping, or in Docker
   `docker exec jftools ls "/Filmer"`.
 
-## Subtitle and audio scan
+## Media scan
 
 JFTools can probe every media file with **ffprobe** and list its subtitle and
 audio tracks — embedded streams plus external `.srt`/`.ass`/… files next to the
-video. One probe fills both halves, cached in `scans.json` and shown in the
-**Search** tab: a **Subtitles** column with a **Not scanned** state, a
-**Subtitles** filter, a manual **Subtitle Ok** mark/filter, an **Audio** column
-and an **Audio** filter. Each half carries its own `scanned` / `audio_scanned`
-flag: probing sets it to `true` only when the result is definitive (tracks found
-or none); errors leave it `false` and are retried. The split also lets the audio
-scan backfill a store created by the subtitle-only version.
+video. One probe fills both, cached in `scans.json` and shown in the **Search**
+tab: a **Subtitles** column with a **Not scanned** state, a **Subtitles**
+filter, a manual **Subtitle Ok** mark/filter, an **Audio** column and an
+**Audio** filter. An entry's `scanned` flag means both halves have been probed;
+it is set to `true` only when the result is definitive (tracks found or none),
+so errors leave it `false` and the next scan retries.
 
 Jellyfin lists a **series** as an item whose path is the show's folder. There is
 no file to probe — the episodes are rows of their own — so the scan records the
@@ -218,18 +217,18 @@ folder as done and both columns show `—` for it. Without that, every series
 stayed "Not scanned" forever and was re-probed on every scan.
 
 A file that genuinely cannot be probed keeps its flag off and is retried by the
-next scan; the column names the reason (**Not reachable** when the path is
+next scan; the columns name the reason (**Not reachable** when the path is
 missing, **Probe failed** for a damaged file, with ffprobe's own message in the
 tooltip). The scan's log line counts those separately, so "complete" never
 hides them.
 
-Four scheduler jobs do the work:
+Two scheduler jobs do the work:
 
-- **Subtitle scan (full)** / **Audio scan (full)** — marks every file unscanned,
-  then re-probes them all.
-- **Subtitle scan** / **Audio scan** — syncs the store with the library (adds new
-  files as unscanned, drops removed ones), then probes every file whose half has
-  not been scanned. The two buttons on the Search page start the same jobs.
+- **Media scan (full)** — marks every file unscanned, then re-probes them all.
+- **Media scan** — syncs the store with the library (adds new files as
+  unscanned, drops removed ones), then probes every file not yet scanned.
+
+The **Media scan** button on the Search page starts the incremental job.
 
 You can also re-probe a single file with the **Resync Subtitles** action on its
 row (or the **Sync** pill, which does both halves), which ignores the `scanned`
@@ -294,7 +293,7 @@ Jellyfin's own view update. It only does that when something was downloaded or
 deleted; a sync needs no rescan since the filename and language are unchanged.
 
 A download or delete marks the item as **Not scanned** until that close-time
-rescan (or the **Subtitle scan** button / scheduled scan) re-probes it. A manual
+rescan (or the **Media scan** button / scheduled scan) re-probes it. A manual
 "Subtitle Ok" mark is cleared when the subtitle files change.
 
 **Requirements:**

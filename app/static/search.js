@@ -61,15 +61,15 @@ function seSubsText(r) {
 
 function seAudioText(r) {
   const e = seScanEntry(r);
-  if (!e) return { text: "Not scanned", title: "Audio scan has not probed this file yet" };
+  if (!e) return { text: "Not scanned", title: "The media scan has not probed this file yet" };
   if (e.folder) {
     return { text: "—", title: "Series folder — its episodes hold the tracks" };
   }
   if (e.error) {
     return { text: SE_SUBS_FAIL[e.error] || "Probe failed", title: e.error };
   }
-  if (!e.audio_scanned) {
-    return { text: "Not scanned", title: "Audio scan has not probed this file yet" };
+  if (!e.scanned) {
+    return { text: "Not scanned", title: "The media scan has not probed this file yet" };
   }
   const tracks = e.audio || [];
   if (!tracks.length) return { text: "No audio", title: "ffprobe found no audio track" };
@@ -83,8 +83,8 @@ function seAudioMatch(r, value) {
   const e = seScanEntry(r);
   if (e && e.folder) return false;
   const tracks = (e && e.audio) || [];
-  if (value === "Not scanned") return !(e && e.audio_scanned);
-  if (value === "No audio") return !!(e && e.audio_scanned) && tracks.length === 0;
+  if (value === "Not scanned") return !(e && e.scanned);
+  if (value === "No audio") return !!(e && e.scanned) && tracks.length === 0;
   if (value === "Single track") return tracks.length === 1;
   if (value === "Multiple tracks") return tracks.length > 1;
   if (value.startsWith("lang:")) return tracks.some((t) => t.lang === value.slice(5));
@@ -433,44 +433,36 @@ async function seFetch() {
   );
 }
 
-async function seScan(kind) {
-  const btnSubs = document.getElementById("se-scan");
-  const btnAudio = document.getElementById("se-audio-scan");
+async function seScan() {
+  const btn = document.getElementById("se-scan");
   const prog = document.getElementById("se-progress");
   const fill = document.getElementById("se-progress-fill");
   const statusEl = document.getElementById("se-status");
-  const audio = kind === "audio";
-  const label = audio ? "Audio scan" : "Subtitle scan";
-  btnSubs.disabled = true;
-  btnAudio.disabled = true;
+  btn.disabled = true;
   prog.hidden = false;
-  statusEl.textContent = label + " starting…";
+  statusEl.textContent = "Media scan starting…";
   try {
-    await postJSON(audio ? "/api/audio/scan" : "/api/subtitles/scan", "mode=scan");
+    await postJSON("/api/subtitles/scan", "mode=scan");
   } catch (e) {
     prog.hidden = true;
-    btnSubs.disabled = false;
-    btnAudio.disabled = false;
+    btn.disabled = false;
     statusEl.textContent = String(e);
     return;
   }
   startStatusPoll(
-    audio ? "/api/audio/status" : "/api/subtitles/status",
+    "/api/subtitles/status",
     (s) => {
       if (s.status === "running") {
         const pct = s.total ? Math.round(100 * s.scanned / s.total) : 0;
         fill.style.width = pct + "%";
-        // Both buttons share one engine; say which scan is actually running.
-        const running = s.kind === "audio" ? "Audio scan" : "Subtitle scan";
-        statusEl.textContent = running + "… " + s.scanned + "/" + (s.total || "?") + " (" + pct + "%)";
+        statusEl.textContent = "Media scan… " + s.scanned + "/" + (s.total || "?") + " (" + pct + "%)";
       } else {
-        statusEl.textContent = s.status === "error" ? label + " failed: " + (s.error || "") : label + " complete.";
+        statusEl.textContent = s.status === "error" ? "Media scan failed: " + (s.error || "") : "Media scan complete.";
       }
     },
     async (s) => {
       prog.hidden = true;
-      btnSubs.disabled = false;
-      btnAudio.disabled = false;
+      btn.disabled = false;
       if (s.status !== "error") await seLoad();
     },
     600
@@ -511,8 +503,7 @@ function bindSeControls() {
   });
 
   document.getElementById("se-fetch").addEventListener("click", seFetch);
-  document.getElementById("se-scan").addEventListener("click", () => seScan("subs"));
-  document.getElementById("se-audio-scan").addEventListener("click", () => seScan("audio"));
+  document.getElementById("se-scan").addEventListener("click", seScan);
 }
 
 document.addEventListener("DOMContentLoaded", () => {

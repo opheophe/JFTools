@@ -16,14 +16,13 @@ import os
 import subprocess
 import tempfile
 
-from fastapi import APIRouter, Depends, Form, Header, Request
+from fastapi import APIRouter, Depends, Form, Header
 from fastapi.responses import JSONResponse
 
 from .config import config
 from .logs import log
 from .paths import resolve_path
 from .subtitles import (
-    _fetch,
     _library_row,
     _probe_one,
     _probe_streams,
@@ -45,30 +44,6 @@ _delete_locks: dict[str, asyncio.Lock] = {}
 
 
 # ---- routes -----------------------------------------------------------------
-
-
-@router.post("/api/audio/scan")
-async def audio_scan(
-    request: Request,
-    user: str = Depends(require_login),
-    mode: str = Form("scan"),
-):
-    if mode not in ("full", "scan"):
-        return JSONResponse({"ok": False, "error": "Unknown scan mode."}, status_code=400)
-    from .scheduler import trigger_operation
-
-    op = "audio_scan_full" if mode == "full" else "audio_scan"
-    started, _ = trigger_operation(op)
-    return JSONResponse(
-        {"ok": True, "message": "Scan started." if started else "Already scanning."}
-    )
-
-
-@router.get("/api/audio/status")
-async def audio_status(request: Request, user: str = Depends(require_login)):
-    # The scan engine is shared with the subtitle scan, so this reports whichever
-    # scan is running (the ``kind`` field says which).
-    return JSONResponse({"ok": True, **_fetch})
 
 
 @router.post("/api/audio/existing")

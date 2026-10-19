@@ -5,11 +5,9 @@ ffprobe once to list the embedded subtitle and audio streams, and detect
 external subtitle files sitting next to the video. Results are cached to
 ``data/scans.json`` and shown in the Search tab.
 
-One probe fills both halves of an entry. Each half keeps its own "scanned"
-flag (``scanned`` for subtitles, ``audio_scanned`` for audio), so the audio scan
-can backfill a store written by a subtitle-only version, and each job's
-worklist only covers the files its half has not seen. New files are added
-unscanned by the reconcile step and picked up by whichever scan runs next.
+One probe fills both halves of an entry, so a single scan collects subtitles and
+audio together: an entry's ``scanned`` flag means both have been probed. New
+files are added unscanned by the reconcile step and picked up by the next scan.
 
 The subtitle classification mirrors Subber's "Movie List" tab so the two tools
 agree on what "acceptable", "AI sub", "forced", "foreign" and "no subs" mean.
@@ -38,7 +36,7 @@ from .web import require_login
 router = APIRouter()
 
 _SCANS_FILE = config.data_dir / "scans.json"
-# The pre-audio store. Read once on upgrade, then removed by the first save.
+# The pre-audio store. Read once on upgrade, then kept on disk as a backup.
 _LEGACY_SUBS_FILE = config.data_dir / "subtitles.json"
 
 # External subtitle file extensions.
@@ -122,9 +120,8 @@ def _load_state() -> dict:
     except (OSError, ValueError):
         data = {}
     if not isinstance(data, dict) or not data.get("files"):
-        # Upgrading from the subtitle-only store. Its entries were probed for
-        # subtitles but carry no audio, so they start with audio_scanned false
-        # and the audio scan backfills them.
+        # Upgrading from the subtitle-only store. Its entries carry no audio;
+        # one full scan fills that in.
         try:
             data = json.loads(_LEGACY_SUBS_FILE.read_text(encoding="utf-8"))
             legacy = isinstance(data, dict) and bool(data.get("files"))
@@ -138,7 +135,8 @@ def _load_state() -> dict:
     for entry in files.values():
         if isinstance(entry, dict):
             entry.setdefault("audio", [])
-            entry.setdefault("audio_scanned", False)
+            # Dropped when audio joined the one scan engine.
+            entry.pop("audio_scanned", None)
     ok = data.get("ok")
     if not isinstance(ok, list):
         ok = []
@@ -147,19 +145,15 @@ def _load_state() -> dict:
         "ok": ok,
         "full_scan_at": data.get("full_scan_at"),
         "change_scan_at": data.get("change_scan_at"),
-        "audio_full_scan_at": data.get("audio_full_scan_at"),
-        "audio_change_scan_at": data.get("audio_change_scan_at"),
         "legacy": legacy,
     }
 
 
 def _save_state() -> None:
     payload = {
-        "version": 2,
+        "version": 3,
         "full_scan_at": _state["full_scan_at"],
         "change_scan_at": _state["change_scan_at"],
-        "audio_full_scan_at": _state["audio_full_scan_at"],
-        "audio_change_scan_at": _state["audio_change_scan_at"],
         "files": _state["files"],
         "ok": _state["ok"],
     }
@@ -183,7 +177,7 @@ def _save_state() -> None:
 
 
 _state = _load_state()
-_fetch = {"status": "idle", "kind": None, "scanned": 0, "total": 0, "error": None}
+_fetch = {"status": "idle", "scanned": 0, "total": 0, "error": None}
 
 
 def scans_map() -> dict:
@@ -504,7 +498,6 @@ def _stub(path: str) -> dict:
         "file": Path(path).name,
         "scanned": False,
         "audio": [],
-        "audio_scanned": False,
     }
 
 
@@ -520,19 +513,18 @@ def _reconcile(files: dict, ok: list[str], current_paths: set[str]) -> tuple[dic
 
 
 def _build_worklist(
-    rows: list[dict], files: dict, kind: str = "subs"
+    rows: list[dict], files: dict
 ) -> list[tuple[str, str, object]]:
-    """Return the (key, local, st) triples to probe — every entry whose half
-    (subtitles or audio) has not been scanned yet.
+    """Return the (key, local, st) triples to probe — every entry not yet
+    scanned.
 
     Runs in a worker thread: os.stat over SMB/NFS can be slow, and doing it on
     the event loop would freeze the app during a large scan.
     """
-    flag = "audio_scanned" if kind == "audio" else "scanned"
     to_scan = []
     for r in rows:
         key = r["path"]
-        if files.get(key, {}).get(flag):
+        if files.get(key, {}).get("scanned"):
             continue
         local = resolve_path(key, config.settings.path_maps)
         st = _stat_path(local)
@@ -548,7 +540,6 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
         "size": st.st_size if st else None,
         "mtime": st.st_mtime if st else None,
         "scanned": False,
-        "audio_scanned": False,
         "scanned_at": time.time(),
         "duration": 0.0,
         "internal": [],
@@ -568,7 +559,6 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
         # every worklist and in the "Not scanned" filter forever.
         entry["folder"] = True
         entry["scanned"] = True
-        entry["audio_scanned"] = True
         return key, entry
     if not stat.S_ISREG(st.st_mode):
         entry["error"] = "not a file"
@@ -594,29 +584,20 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
     entry["flags"] = _classify_tracks(internal, external)
     entry["audio"] = audio
     entry["scanned"] = True
-    entry["audio_scanned"] = True
     return key, entry
 
 
-async def run_scan(mode: str, kind: str = "subs") -> None:
+async def run_scan(mode: str) -> None:
     """Probe the Movie Match items for subtitle and audio tracks.
 
-    ``mode`` is ``"scan"`` (reconcile, then probe every file whose requested
-    half is unscanned) or ``"full"`` (mark that half unscanned first, then the
-    same scan).
-
-    ``kind`` selects which half's worklist drives the scan (``"subs"`` or
-    ``"audio"``). One probe fills both halves, so whichever job runs first also
-    backfills the other one for the files it touched.
+    ``mode`` is ``"scan"`` (reconcile, then probe every unscanned file) or
+    ``"full"`` (mark every file unscanned first, then the same scan). One
+    ffprobe fills both the subtitle and the audio half of an entry.
     """
     if _fetch["status"] == "running":
         return
-    kind = "audio" if kind == "audio" else "subs"
-    flag = "audio_scanned" if kind == "audio" else "scanned"
-    label = ("Audio scan" if kind == "audio" else "Subtitle scan") + (
-        " (full)" if mode == "full" else ""
-    )
-    _fetch.update({"status": "running", "kind": kind, "scanned": 0, "total": 0, "error": None})
+    label = "Media scan" + (" (full)" if mode == "full" else "")
+    _fetch.update({"status": "running", "scanned": 0, "total": 0, "error": None})
     log("Search", "INFO", f"{label} started")
     try:
         ffprobe = resolve_ffprobe()
@@ -642,13 +623,13 @@ async def run_scan(mode: str, kind: str = "subs") -> None:
         files, ok = _reconcile(dict(_state["files"]), list(_state["ok"]), current_paths)
         if mode == "full":
             for entry in files.values():
-                entry[flag] = False
+                entry["scanned"] = False
         _state["files"] = files
         _state["ok"] = ok
 
         # Resolve + stat each path off the event loop — os.stat over SMB/NFS can
         # be slow, and doing it inline would freeze the app during a big scan.
-        to_scan = await asyncio.to_thread(_build_worklist, rows, files, kind)
+        to_scan = await asyncio.to_thread(_build_worklist, rows, files)
 
         _fetch["total"] = len(to_scan)
         folders = 0
@@ -673,13 +654,13 @@ async def run_scan(mode: str, kind: str = "subs") -> None:
                         failed += 1
                         log("Search", "WARN", f"{entry['file']}: {entry['error']}")
                     else:
-                        tracks = entry.get("audio") if kind == "audio" else entry.get("subs")
-                        if kind == "audio":
-                            summary = ", ".join(t.get("name", "") for t in (tracks or []))
-                            summary = summary or "no audio"
-                        else:
-                            summary = ", ".join(tracks or []) or "no subs"
-                        log("Search", "INFO", f"{entry['file']}: {summary}")
+                        summary = ", ".join(entry.get("subs") or []) or "no subs"
+                        audio = ", ".join(t.get("name", "") for t in (entry.get("audio") or []))
+                        log(
+                            "Search",
+                            "INFO",
+                            f"{entry['file']}: {summary}; {audio or 'no audio'}",
+                        )
             finally:
                 # On abort (or completion) stop queueing probes and drop pending
                 # work without waiting for it; in-flight ffprobe calls finish on
@@ -687,9 +668,9 @@ async def run_scan(mode: str, kind: str = "subs") -> None:
                 pool.shutdown(wait=False, cancel_futures=True)
 
         if mode == "full":
-            _state["audio_full_scan_at" if kind == "audio" else "full_scan_at"] = time.time()
+            _state["full_scan_at"] = time.time()
         else:
-            _state["audio_change_scan_at" if kind == "audio" else "change_scan_at"] = time.time()
+            _state["change_scan_at"] = time.time()
         _save_state()
         _fetch["status"] = "done"
         log(
@@ -853,7 +834,7 @@ async def audio_tracks_for(path: str, force: bool = False) -> tuple[list[dict], 
     refreshes the store entry, both halves, for free.
     """
     entry = _state["files"].get(path) or {}
-    if not force and entry.get("audio_scanned"):
+    if not force and entry.get("scanned"):
         return list(entry.get("audio") or []), None
     fresh = await rescan_one(path)
     return list(fresh.get("audio") or []), fresh.get("error")
@@ -898,10 +879,10 @@ def _write_gate(x_jftools: str):
 
 
 def _mark_unscanned(path: str) -> None:
-    """Flag a library item for a fresh subtitle scan after its subs change.
+    """Flag a library item for a fresh scan after its subtitles change.
 
     The Search tab then shows "Not scanned", the flag filters stop matching
-    stale data, and the next scan (the Subtitle scan button, closing the dialog,
+    stale data, and the next scan (the Media scan button, closing the dialog,
     or the scheduled job) re-probes it. The embedded tracks are kept so the
     dialog can still list them without a fresh probe. The manual "Subtitle Ok"
     mark is dropped too — the state changed.
@@ -1250,7 +1231,7 @@ async def subtitles_download(
     )
 
     # Mark the item for a fresh scan rather than probing now: closing the dialog
-    # (or the Subtitle scan button / scheduled job) does the actual ffprobe pass.
+    # (or the Media scan button / scheduled job) does the actual ffprobe pass.
     # Until then the Search tab shows "Not scanned".
     _mark_unscanned(path)
 
