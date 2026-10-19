@@ -176,8 +176,10 @@ function idBuildActions(r) {
     "Sync", syncItems, "sync", r.path ? (node) => resyncBoth(node, r.path) : null
   ));
 
-  td.appendChild(pillButton("Play", "play", r.path ? () => playVideo(r.path) : null));
-  td.appendChild(pillButton("Subtitles", "subs", r.path ? () => subdlOpen(r.path) : null));
+  // A series row's path is a folder: there is no file to play or probe.
+  const fileRow = r.type !== "Series";
+  td.appendChild(pillButton("Play", "play", r.path && fileRow ? () => playVideo(r.path) : null));
+  td.appendChild(pillButton("Subtitles", "subs", r.path && fileRow ? () => subdlOpen(r.path) : null));
 
   td.appendChild(idGoogleMenu(r));
   return td;

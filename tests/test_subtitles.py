@@ -173,12 +173,25 @@ def test_probe_one_unreachable_not_scanned():
     assert entry["error"] == "unreachable"
 
 
-def test_probe_one_not_a_file_not_scanned():
+def test_probe_one_folder_is_scanned_not_failed():
+    """Jellyfin lists a series with its folder as the Path: nothing to probe."""
     import stat as statmod
 
     from app.subtitles import _probe_one
 
     st = SimpleNamespace(st_size=0, st_mtime=0.0, st_mode=statmod.S_IFDIR)
+    key, entry = _probe_one("ffprobe", "/x", "/x", st)
+    assert entry["scanned"] is True
+    assert entry["folder"] is True
+    assert entry["error"] is None
+
+
+def test_probe_one_rejects_other_special_files():
+    import stat as statmod
+
+    from app.subtitles import _probe_one
+
+    st = SimpleNamespace(st_size=0, st_mtime=0.0, st_mode=statmod.S_IFIFO)
     key, entry = _probe_one("ffprobe", "/x", "/x", st)
     assert entry["scanned"] is False
     assert entry["error"] == "not a file"
@@ -242,4 +255,41 @@ async def test_rescan_one_returns_the_stored_entry(monkeypatch, tmp_path):
         assert sub.subtitles_map()[str(f)] == entry
     finally:
         sub._state["files"] = before
+
+
+async def test_scan_clears_not_scanned_for_series_folders(monkeypatch, tmp_path):
+    """A series row's Path is its folder, which can never be probed. It used to
+    fail as "not a file" on every scan, so the Search tab kept listing it as
+    Not scanned forever; it must come out scanned instead."""
+    import app.subtitles as sub
+    from app.jellyfin_id import _state as id_state
+
+    show = tmp_path / "Some Show"
+    show.mkdir()
+    movie = tmp_path / "movie.mkv"
+    movie.write_bytes(b"")
+    rows = [{"path": str(show), "file": show.name}, {"path": str(movie), "file": movie.name}]
+
+    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: "ffprobe")
+    monkeypatch.setattr(sub, "_probe_subtitles", lambda ff, local: ([], 60.0, None))
+    monkeypatch.setattr(sub, "_external_subtitles", lambda local: [])
+    monkeypatch.setattr(sub, "_save_state", lambda: None)
+    monkeypatch.setattr(sub, "_reconcile", lambda files, ok, paths: (dict(files), list(ok)))
+
+    files_before = dict(sub._state["files"])
+    rows_before = id_state["rows"]
+    try:
+        id_state["rows"] = rows
+        sub._state["files"] = {}
+        await sub.run_scan("scan")
+
+        assert sub._fetch["status"] == "done"
+        assert sub._fetch["total"] == 2
+        entry = sub.subtitles_map()[str(show)]
+        assert entry["scanned"] is True
+        assert entry["folder"] is True
+        assert sub.subtitles_map()[str(movie)]["scanned"] is True
+    finally:
+        sub._state["files"] = files_before
+        id_state["rows"] = rows_before
 

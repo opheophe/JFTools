@@ -35,6 +35,24 @@ function seFlags(r) { const e = seSubsEntry(r); return e && e.flags ? e.flags : 
 function seSubsOk(r) { return SE.subtitlesOk.has(r.path); }
 function seScanned(r) { const e = seSubsEntry(r); return !!(e && e.scanned); }
 
+// A failed probe keeps the item unscanned so a later scan retries it, but the
+// column should say what went wrong rather than "Not scanned" again. The full
+// error (an ffprobe dump, say) stays in the cell's tooltip.
+const SE_SUBS_FAIL = { "unreachable": "Not reachable", "not a file": "Not a file" };
+
+function seSubsText(r) {
+  const e = seSubsEntry(r);
+  if (!e) return { text: "Not scanned", title: "" };
+  if (e.folder) {
+    return { text: "—", title: "Series folder — its episodes hold the tracks" };
+  }
+  if (!e.scanned) {
+    return { text: SE_SUBS_FAIL[e.error] || "Probe failed", title: e.error || "" };
+  }
+  const text = (e.subs || []).join(", ");
+  return { text, title: text };
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 function seEnc(s) { return encodeURIComponent(s || ""); }
@@ -71,8 +89,8 @@ function seBuildActions(r) {
     "Sync", syncItems, "sync", r.path ? (node) => resyncBoth(node, r.path) : null
   ));
 
-  td.appendChild(pillButton("Play", "play", r.path ? () => playVideo(r.path) : null));
-  td.appendChild(pillButton("Subtitles", "subs", r.path ? () => subdlOpen(r.path) : null));
+  td.appendChild(pillButton("Play", "play", r.path && r.type !== "Series" ? () => playVideo(r.path) : null));
+  td.appendChild(pillButton("Subtitles", "subs", r.path && r.type !== "Series" ? () => subdlOpen(r.path) : null));
 
   return td;
 }
@@ -266,14 +284,8 @@ function renderSeTable() {
     okTd.appendChild(okBtn);
     tr.appendChild(okTd);
 
-    const e = seSubsEntry(r);
-    let subsText = "";
-    if (!e || !e.scanned) {
-      subsText = "Not scanned";
-    } else {
-      subsText = e.error ? e.error : ((e.subs || []).join(", "));
-    }
-    tr.appendChild(el("td", { class: "muted", text: subsText, title: subsText }));
+    const subs = seSubsText(r);
+    tr.appendChild(el("td", { class: "muted", text: subs.text, title: subs.title || subs.text }));
 
     tr.appendChild(seBuildActions(r));
     body.appendChild(tr);

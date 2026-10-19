@@ -426,6 +426,14 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
     if st is None:
         entry["error"] = "unreachable"
         return key, entry
+    if stat.S_ISDIR(st.st_mode):
+        # Jellyfin lists a series as an item whose Path is the show's folder.
+        # There is no file to probe — its episodes are rows of their own — so
+        # record it as done instead of failing it: a failure would keep it in
+        # every worklist and in the "Not scanned" filter forever.
+        entry["folder"] = True
+        entry["scanned"] = True
+        return key, entry
     if not stat.S_ISREG(st.st_mode):
         entry["error"] = "not a file"
         return key, entry
@@ -496,6 +504,8 @@ async def run_scan(mode: str) -> None:
         to_scan = await asyncio.to_thread(_build_worklist, rows, files)
 
         _fetch["total"] = len(to_scan)
+        folders = 0
+        failed = 0
         if to_scan:
             loop = asyncio.get_running_loop()
             done = 0
@@ -510,7 +520,10 @@ async def run_scan(mode: str) -> None:
                     _state["files"][key] = entry
                     done += 1
                     _fetch["scanned"] = done
-                    if entry.get("error"):
+                    if entry.get("folder"):
+                        folders += 1
+                    elif entry.get("error"):
+                        failed += 1
                         log("Search", "WARN", f"{entry['file']}: {entry['error']}")
                     else:
                         summary = ", ".join(entry.get("subs") or []) or "no subs"
@@ -530,7 +543,9 @@ async def run_scan(mode: str) -> None:
         log(
             "Search",
             "INFO",
-            f"{label} complete: {len(to_scan)} probed, {len(rows) - len(to_scan)} skipped",
+            f"{label} complete: {len(to_scan)} probed, {len(rows) - len(to_scan)} skipped"
+            + (f", {folders} series folder(s)" if folders else "")
+            + (f", {failed} could not be probed (see warnings)" if failed else ""),
         )
     except asyncio.CancelledError:
         _fetch["status"] = "cancelled"
@@ -565,7 +580,9 @@ async def rescan_one(path: str) -> dict:
     key, entry = await asyncio.to_thread(_probe_one, ffprobe, path, local, st)
     _state["files"][key] = entry
     _save_state()
-    if entry.get("error"):
+    if entry.get("folder"):
+        log("Search", "INFO", f"Rescanned {entry['file']}: series folder, nothing to probe")
+    elif entry.get("error"):
         log("Search", "WARN", f"Rescanned {entry['file']}: {entry['error']}")
     else:
         summary = ", ".join(entry.get("subs") or []) or "no subs"

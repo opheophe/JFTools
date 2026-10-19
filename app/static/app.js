@@ -1115,6 +1115,7 @@ async function resyncSubtitles(path) {
     if (!data.ok) return { ok: false, text: data.error || "Subtitle scan failed" };
     const e = data.entry || {};
     applySubtitleEntry(path, data.entry);
+    if (e.folder) return { ok: true, text: "series folder, nothing to probe" };
     if (e.error) return { ok: false, text: e.error };
     return { ok: true, text: (e.subs || []).join(", ") || "no subs" };
   } catch (err) {

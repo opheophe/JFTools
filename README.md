@@ -203,6 +203,17 @@ manual **Subtitle Ok** mark/filter). Each file carries a `scanned` flag:
 probing sets it to `true` only when the result is definitive (subs found or
 none); errors leave it `false` and are retried.
 
+Jellyfin lists a **series** as an item whose path is the show's folder. There is
+no file to probe — the episodes are rows of their own — so the scan records the
+folder as done and the column shows `—` for it. Without that, every series
+stayed "Not scanned" forever and was re-probed on every scan.
+
+A file that genuinely cannot be probed keeps its `scanned` flag off and is
+retried by the next scan; the column names the reason (**Not reachable** when
+the path is missing, **Probe failed** for a damaged file, with ffprobe's own
+message in the tooltip). The scan's log line counts those separately, so
+"complete" never hides them.
+
 Two scheduler jobs do the work:
 
 - **Subtitle scan (full)** — marks every file unscanned, then re-probes them all.
