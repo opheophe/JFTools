@@ -97,7 +97,12 @@ function renderRecent(items) {
     const tr = el("tr");
     tr.appendChild(el("td", { class: "muted nowrap", text: it.added || "—" }));
     tr.appendChild(el("td", { class: "muted", text: it.library || "—" }));
-    const nameTd = el("td", { text: it.name });
+    const nameTd = el("td");
+    nameTd.appendChild(el("div", { text: it.name }));
+    const episodeLine = episodeSubLine(it);
+    if (episodeLine) {
+      nameTd.appendChild(el("div", { class: "muted name-sub", text: episodeLine }));
+    }
     tr.appendChild(nameTd);
     tr.appendChild(el("td", { class: "muted", text: it.type }));
     tr.appendChild(el("td", { class: "muted", text: it.year || "—" }));

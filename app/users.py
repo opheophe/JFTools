@@ -125,6 +125,9 @@ async def _build_last_watched(client: JellyfinClient) -> dict:
             "date": ud.get("LastPlayedDate"),
             "id": it.get("Id"),
             "type": it.get("Type"),
+            "series": it.get("SeriesName") or "",
+            "season": it.get("ParentIndexNumber"),
+            "episode": it.get("IndexNumber"),
             "image": _image_ref(it),
         }
 

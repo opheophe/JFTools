@@ -97,6 +97,25 @@ function fmtHM(sec) {
   return p(Math.floor(s / 3600)) + ":" + p(Math.floor((s % 3600) / 60));
 }
 
+// "Series S01E02" line shown under an item's name in lists. Prefers Jellyfin's
+// season/episode numbers when the row carries them, otherwise parses the file
+// name the way the media scan and OpenSubtitles search do (S01E02 / 1x02).
+function episodeSubLine(r) {
+  if (!r || r.type !== "Episode") return "";
+  let season = r.season;
+  let number = r.episode;
+  if (season == null || number == null) {
+    const text = r.file || r.path || "";
+    const m = /[sS](\d{1,2})[eE](\d{1,2})/.exec(text)
+      || /(?:^|[^0-9])(\d{1,2})[xX](\d{2})(?:[^0-9]|$)/.exec(text);
+    if (!m) return "";
+    season = m[1];
+    number = m[2];
+  }
+  const code = "S" + String(season).padStart(2, "0") + "E" + String(number).padStart(2, "0");
+  return r.series ? r.series + " " + code : code;
+}
+
 // Shared "Updated … / Refreshing… / Update failed" label (Users + Libraries).
 function renderSyncLabel(elementId, opts) {
   const elU = document.getElementById(elementId);

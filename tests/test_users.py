@@ -68,3 +68,36 @@ async def test_check_watching_idle(monkeypatch):
     await users.check_watching()
 
     assert users._watching["status"] == "idle"
+
+
+class _LastWatchedClient:
+    async def get_users(self):
+        return [{"Id": "u1"}]
+
+    async def get_user_items(self, uid, params):
+        return {
+            "Items": [
+                {
+                    "Id": "e1",
+                    "Type": "Episode",
+                    "Name": "Revelations",
+                    "SeriesName": "FROM",
+                    "ParentIndexNumber": 2,
+                    "IndexNumber": 14,
+                    "UserData": {"LastPlayedDate": "2026-01-02T03:04:05Z"},
+                }
+            ]
+        }
+
+
+async def test_build_last_watched_carries_episode_number():
+    # The Users page renders "series SxxExx" under the title, so the cached
+    # record must keep the series and Jellyfin's season/episode numbers.
+    out = await users._build_last_watched(_LastWatchedClient())
+
+    rec = out["u1"]
+    assert rec["name"] == "FROM — Revelations"
+    assert rec["type"] == "Episode"
+    assert rec["series"] == "FROM"
+    assert rec["season"] == 2
+    assert rec["episode"] == 14

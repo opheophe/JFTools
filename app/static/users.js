@@ -135,6 +135,10 @@ function renderLastWatched(u) {
   if (poster) wrap.appendChild(poster);
   const info = el("div", { class: "now-info" });
   info.appendChild(el("div", { text: lw.name }));
+  const episodeLine = episodeSubLine(lw);
+  if (episodeLine) {
+    info.appendChild(el("div", { class: "muted name-sub", text: episodeLine }));
+  }
   info.appendChild(el("div", { class: "now-time", text: fmtDate(lw.date) }));
   wrap.appendChild(info);
   td.appendChild(wrap);
