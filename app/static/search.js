@@ -261,6 +261,20 @@ function bindSortHeaders() {
 
 // ---- rendering -------------------------------------------------------------
 
+// Episodes show their series and SxxExx code under the Jellyfin name, so the
+// episode number is visible without reading the file name. Parsed from the
+// path the same way the media scan and the OpenSubtitles search do — the item
+// payload here has no ParentIndexNumber/IndexNumber.
+function seEpisodeLine(r) {
+  if (r.type !== "Episode") return "";
+  const text = r.file || r.path || "";
+  const m = /[sS](\d{1,2})[eE](\d{1,2})/.exec(text)
+    || /(?:^|[^0-9])(\d{1,2})[xX](\d{2})(?:[^0-9]|$)/.exec(text);
+  if (!m) return "";
+  const code = "S" + String(m[1]).padStart(2, "0") + "E" + String(m[2]).padStart(2, "0");
+  return r.series ? r.series + " " + code : code;
+}
+
 function renderSeTable() {
   const body = document.getElementById("se-body");
   const countEl = document.getElementById("se-count");
@@ -296,7 +310,12 @@ function renderSeTable() {
     const parent = r.path ? r.path.replace(/[\\/][^\\/]*$/, "") : "";
     tr.appendChild(el("td", { class: "muted", text: parent, title: parent }));
     tr.appendChild(el("td", { text: r.file, title: r.file }));
-    const nameTd = el("td", { text: r.display || r.name, title: r.display || r.name });
+    const nameTd = el("td", { title: r.display || r.name });
+    nameTd.appendChild(el("div", { text: r.display || r.name }));
+    const episodeLine = seEpisodeLine(r);
+    if (episodeLine) {
+      nameTd.appendChild(el("div", { class: "muted name-sub", text: episodeLine }));
+    }
     tr.appendChild(nameTd);
     tr.appendChild(el("td", { class: "muted", text: r.added || "—", title: r.added || "" }));
     const fav = (r.favorited_by || []).join(", ");
