@@ -54,7 +54,12 @@ function seSubsText(r) {
     return { text: "—", title: "Series folder — its episodes hold the tracks" };
   }
   if (!e.scanned) {
-    return { text: SE_SUBS_FAIL[e.error] || "Probe failed", title: e.error || "" };
+    // A failed probe keeps the entry unscanned so a later scan retries it; say
+    // what went wrong only then. No error means it simply hasn't been probed.
+    if (e.error) {
+      return { text: SE_SUBS_FAIL[e.error] || "Probe failed", title: e.error };
+    }
+    return { text: "Not scanned", title: "" };
   }
   const text = (e.subs || []).join(", ");
   return { text, title: text };
