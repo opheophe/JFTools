@@ -1,4 +1,6 @@
 """Libraries page: the library of each item, and the row action pills."""
+import asyncio
+
 import httpx
 import pytest
 
@@ -154,3 +156,24 @@ async def test_recent_cache_with_paths_is_not_refilled(monkeypatch, logged_in):
     assert resp.status_code == 200
     assert triggered == []
     assert resp.json()["recent"] == [row]
+
+async def test_run_fetch_cancelled_leaves_non_running_status(monkeypatch):
+    started = asyncio.Event()
+
+    async def fake_build(client):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(libraries_mod, "get_client", lambda: object())
+    monkeypatch.setattr(libraries_mod, "_build_libraries", fake_build)
+    monkeypatch.setattr(libraries_mod, "_save_state", lambda: None)
+    monkeypatch.setattr(libraries_mod, "log", lambda *a: None)
+    monkeypatch.setattr(libraries_mod, "_fetch", {"status": "idle", "error": None})
+
+    task = asyncio.create_task(libraries_mod._run_fetch())
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert libraries_mod._fetch["status"] == "cancelled"

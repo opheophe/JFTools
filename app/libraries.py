@@ -6,6 +6,7 @@ and on demand). Opening the page never blocks on Jellyfin.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -149,6 +150,11 @@ async def _run_fetch() -> None:
         _save_state()
         _fetch["status"] = "done"
         log("Jellyfin", "INFO", f"Libraries refresh complete: {len(libraries)} library(ies), {len(recent)} recent")
+    except asyncio.CancelledError:
+        _fetch["status"] = "cancelled"
+        _fetch["error"] = None
+        log("Jellyfin", "WARN", "Libraries refresh aborted")
+        raise
     except JellyfinError as exc:
         _fetch["status"] = "error"
         _fetch["error"] = str(exc)

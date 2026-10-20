@@ -1,5 +1,8 @@
+import asyncio
+
 import httpx
 
+import app.jellyfin_id as jid
 from app.jellyfin.client import JellyfinClient
 from app.jellyfin_id import (
     _fetch_favorites,
@@ -151,3 +154,26 @@ async def test_fetch_favorites_shapes_map_and_inverse():
     assert by_id["m1"] == {"Alice"}
     assert by_id["s1"] == {"Alice"}
     assert by_id["e1"] == {"Bob"}
+
+async def test_run_fetch_cancelled_leaves_non_running_status(monkeypatch):
+    started = asyncio.Event()
+
+    async def fake_items(client, progress):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(jid, "get_client", lambda: object())
+    monkeypatch.setattr(jid, "_fetch_items", fake_items)
+    monkeypatch.setattr(jid, "_save_state", lambda: None)
+    monkeypatch.setattr(jid, "log", lambda *a: None)
+    monkeypatch.setattr(jid, "_fetch", {"status": "idle", "fetched": 0, "total": 0, "error": None})
+
+    task = asyncio.create_task(jid._run_fetch())
+    await started.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert jid._fetch["status"] == "cancelled"

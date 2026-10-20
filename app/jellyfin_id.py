@@ -474,6 +474,13 @@ async def _run_fetch() -> None:
         _save_state()
         _fetch["status"] = "done"
         log("Movie Match", "INFO", f"Fetch complete: {len(rows)} item(s)")
+    except asyncio.CancelledError:
+        # Leave a truthful status: "running" here would block every later fetch
+        # (the self-guard above) and make the Movie Match page poll forever.
+        _fetch["status"] = "cancelled"
+        _fetch["error"] = None
+        log("Movie Match", "WARN", "Fetch aborted")
+        raise
     except JellyfinError as exc:
         _fetch["status"] = "error"
         _fetch["error"] = str(exc)
