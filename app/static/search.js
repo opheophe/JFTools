@@ -415,12 +415,19 @@ async function seFetch() {
   const statusEl = document.getElementById("se-status");
   btn.disabled = true;
   prog.hidden = false;
+  let res;
   try {
-    await postJSON("/api/jellyfin-id/refresh", null);
+    res = await postJSON("/api/jellyfin-id/refresh", null);
   } catch (e) {
     prog.hidden = true;
     btn.disabled = false;
     statusEl.textContent = String(e);
+    return;
+  }
+  if (res && res.started === false) {
+    prog.hidden = true;
+    btn.disabled = false;
+    statusEl.textContent = res.message || "Busy.";
     return;
   }
   startStatusPoll(
@@ -451,12 +458,19 @@ async function seScan() {
   btn.disabled = true;
   prog.hidden = false;
   statusEl.textContent = "Media scan starting…";
+  let res;
   try {
-    await postJSON("/api/subtitles/scan", "mode=scan");
+    res = await postJSON("/api/subtitles/scan", "mode=scan");
   } catch (e) {
     prog.hidden = true;
     btn.disabled = false;
     statusEl.textContent = String(e);
+    return;
+  }
+  if (res && res.started === false) {
+    prog.hidden = true;
+    btn.disabled = false;
+    statusEl.textContent = res.message || "Busy.";
     return;
   }
   startStatusPoll(

@@ -434,6 +434,8 @@ def _favorited_by(row: dict, fav_by_id: dict) -> list[str]:
 
 
 async def _run_fetch() -> None:
+    if _fetch["status"] == "running":
+        return
     _fetch.update({"status": "running", "fetched": 0, "total": 0, "error": None})
     log("Movie Match", "INFO", "Fetch started")
     try:
@@ -519,10 +521,15 @@ async def jellyfin_id_items(request: Request, user: str = Depends(require_login)
 
 @router.post("/api/jellyfin-id/refresh")
 async def jellyfin_id_refresh(request: Request, user: str = Depends(require_login)):
-    if _fetch["status"] == "running":
-        return JSONResponse({"ok": True, "message": "Already fetching."})
-    asyncio.create_task(_run_fetch())
-    return JSONResponse({"ok": True, "message": "Fetch started."})
+    # Routed through the scheduler job so a manual fetch is tracked in the
+    # scheduler's running set — otherwise the job could start a second fetch on
+    # top of this one when its schedule fires.
+    from .scheduler import busy_message, trigger_operation
+
+    started, _ = trigger_operation("jellyfin_id_fetch")
+    return JSONResponse(
+        {"ok": True, "started": started, "message": "Fetch started." if started else busy_message()}
+    )
 
 
 @router.get("/api/jellyfin-id/status")

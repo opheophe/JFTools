@@ -136,6 +136,8 @@ async def _build_recent(
 
 
 async def _run_fetch() -> None:
+    if _fetch["status"] == "running":
+        return
     _fetch.update({"status": "running", "error": None})
     try:
         client = get_client()
@@ -196,11 +198,11 @@ async def api_libraries(request: Request, user: str = Depends(require_login)):
 
 @router.post("/api/libraries/refresh")
 async def api_libraries_refresh(request: Request, user: str = Depends(require_login)):
-    from .scheduler import trigger_operation
+    from .scheduler import busy_message, trigger_operation
 
     started, _ = trigger_operation("refresh_libraries")
     return JSONResponse(
-        {"ok": True, "message": "Refresh started." if started else "Already refreshing."}
+        {"ok": True, "started": started, "message": "Refresh started." if started else busy_message()}
     )
 
 

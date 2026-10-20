@@ -90,7 +90,7 @@ function renderJobs() {
 
     let last = "—";
     if (j.last_run) {
-      last = fmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : (j.last_status === "cancelled" ? " ⚠" : "")));
+      last = fmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : (j.last_status === "cancelled" ? " ⚠" : (j.last_status === "skipped" ? " ⏭" : ""))));
     }
     tr.appendChild(el("td", { class: "muted", text: last }));
 
@@ -108,7 +108,11 @@ function renderJobs() {
 }
 
 async function schRun(id) {
-  await postJSON("/api/scheduler/jobs/" + id + "/run", null);
+  const data = await postJSON("/api/scheduler/jobs/" + id + "/run", null);
+  const msgEl = document.getElementById("sch-msg");
+  if (msgEl) {
+    msgEl.textContent = data && data.started === false ? (data.message || "Busy.") : "";
+  }
   schLoad();
 }
 

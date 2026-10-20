@@ -137,7 +137,13 @@ function bindScanButtons() {
 async function refreshLibraries() {
   const btn = document.getElementById("lib-refresh");
   btn.disabled = true;
-  try { await postJSON("/api/libraries/refresh", null); } catch (err) { /* ignore */ }
+  let res = null;
+  try { res = await postJSON("/api/libraries/refresh", null); } catch (err) { /* ignore */ }
+  if (res && res.started === false) {
+    document.getElementById("lib-updated").textContent = res.message || "Busy.";
+    btn.disabled = false;
+    return;
+  }
   pollLibrariesUntilDone();
 }
 

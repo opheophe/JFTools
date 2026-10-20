@@ -734,12 +734,12 @@ async def subtitles_scan(
 ):
     if mode not in ("full", "scan"):
         return JSONResponse({"ok": False, "error": "Unknown scan mode."}, status_code=400)
-    from .scheduler import trigger_operation
+    from .scheduler import busy_message, trigger_operation
 
     op = "subtitle_scan_full" if mode == "full" else "subtitle_scan"
     started, _ = trigger_operation(op)
     return JSONResponse(
-        {"ok": True, "message": "Scan started." if started else "Already scanning."}
+        {"ok": True, "started": started, "message": "Scan started." if started else busy_message()}
     )
 
 

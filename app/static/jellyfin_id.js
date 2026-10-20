@@ -306,12 +306,19 @@ async function idFetch() {
   const statusEl = document.getElementById("id-status");
   btn.disabled = true;
   prog.hidden = false;
+  let res;
   try {
-    await postJSON("/api/jellyfin-id/refresh", null);
+    res = await postJSON("/api/jellyfin-id/refresh", null);
   } catch (e) {
     prog.hidden = true;
     btn.disabled = false;
     statusEl.textContent = String(e);
+    return;
+  }
+  if (res && res.started === false) {
+    prog.hidden = true;
+    btn.disabled = false;
+    statusEl.textContent = res.message || "Busy.";
     return;
   }
   startStatusPoll(

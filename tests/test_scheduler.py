@@ -159,3 +159,75 @@ async def test_quiet_operation_skips_logs(monkeypatch):
     await sch._run_job("jq")
     assert logged == []
     assert sch._jobs["jq"]["last_status"] == "ok"
+
+
+async def test_heavy_job_skipped_when_another_heavy_runs(monkeypatch):
+    calls = []
+
+    async def handler():
+        calls.append("ran")
+
+    monkeypatch.setattr(sch, "_save_jobs", lambda: None)
+    monkeypatch.setattr(sch, "log", lambda *a: None)
+    monkeypatch.setitem(sch._OP_BY_ID, "jellyfin_id_fetch",
+        {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": handler})
+    monkeypatch.setitem(sch._jobs, "hf",
+        {"id": "hf", "operation": "jellyfin_id_fetch", "trigger": {}, "enabled": True})
+    monkeypatch.setattr(sch, "_running", set())
+    monkeypatch.setattr(sch, "_heavy_running", "subtitle_scan")
+
+    await sch._run_job("hf")
+
+    assert calls == []  # the fetch never started
+    assert sch._jobs["hf"]["last_status"] == "skipped"
+
+
+async def test_heavy_slot_is_released_after_run(monkeypatch):
+    async def handler():
+        return None
+
+    monkeypatch.setattr(sch, "_save_jobs", lambda: None)
+    monkeypatch.setitem(sch._OP_BY_ID, "subtitle_scan",
+        {"id": "subtitle_scan", "label": "Media scan", "tab": "Search", "handler": handler})
+    monkeypatch.setitem(sch._jobs, "hs",
+        {"id": "hs", "operation": "subtitle_scan", "trigger": {}, "enabled": True})
+    monkeypatch.setattr(sch, "_running", set())
+    monkeypatch.setattr(sch, "_heavy_running", None)
+
+    await sch._run_job("hs")
+
+    assert sch._jobs["hs"]["last_status"] == "ok"
+    assert sch._heavy_running is None
+
+
+async def test_light_job_runs_while_heavy_busy(monkeypatch):
+    ran = []
+
+    async def handler():
+        ran.append(1)
+
+    monkeypatch.setattr(sch, "_save_jobs", lambda: None)
+    monkeypatch.setitem(sch._OP_BY_ID, "clear_logs",
+        {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": handler})
+    monkeypatch.setitem(sch._jobs, "jl",
+        {"id": "jl", "operation": "clear_logs", "trigger": {}, "enabled": True})
+    monkeypatch.setattr(sch, "_running", set())
+    monkeypatch.setattr(sch, "_heavy_running", "subtitle_scan")
+
+    await sch._run_job("jl")
+
+    assert ran == [1]
+    assert sch._jobs["jl"]["last_status"] == "ok"
+
+
+def test_trigger_operation_refused_while_heavy_busy(monkeypatch):
+    monkeypatch.setattr(sch, "_heavy_running", "subtitle_scan")
+    monkeypatch.setattr(sch, "_jobs", {
+        "jf": {"id": "jf", "operation": "jellyfin_id_fetch", "trigger": {}, "enabled": False},
+    })
+
+    started, via_job = sch.trigger_operation("jellyfin_id_fetch")
+
+    assert started is False
+    assert via_job is False
+    assert sch.busy_message() == "Busy — Media scan is running."

@@ -138,6 +138,52 @@ OPERATIONS_PUBLIC = [
     for op in OPERATIONS
 ]
 
+# Operations heavy enough that only one should run at a time: a media scan, a
+# Movie Match fetch and a libraries refresh all read the same libraries and
+# share ffprobe/Jellyfin capacity, so a manual trigger, a page-load refresh and
+# a scheduled run must not stack up. The single-item rescan (the Search row
+# action) does not go through the scheduler, so it stays available during a
+# big run — which is exactly when you want it.
+HEAVY_OPS = {
+    "subtitle_scan",
+    "subtitle_scan_full",
+    "jellyfin_id_fetch",
+    "refresh_libraries",
+}
+
+# Operation id of the heavy operation holding the slot right now, or None.
+_heavy_running: str | None = None
+
+
+def active_heavy() -> str | None:
+    """Label of the heavy operation running now, or None."""
+    op = _OP_BY_ID.get(_heavy_running) if _heavy_running else None
+    return op.get("label") if op else _heavy_running
+
+
+def busy_message() -> str:
+    """Message for a refused trigger (call right after one returned False)."""
+    label = active_heavy()
+    return f"Busy — {label} is running." if label else "Already running."
+
+
+def _claim_heavy(operation: str) -> bool:
+    """Take the single heavy slot; False when another heavy op holds it."""
+    global _heavy_running
+    if operation not in HEAVY_OPS:
+        return True
+    if _heavy_running:
+        return False
+    _heavy_running = operation
+    return True
+
+
+def _release_heavy(operation: str) -> None:
+    global _heavy_running
+    if _heavy_running == operation:
+        _heavy_running = None
+
+
 # Default schedule + enabled flag used when seeding a first job for an
 # operation. Everything seeds disabled so a fresh install shows every operation
 # without running it; the cache refreshers are the exception.
@@ -281,6 +327,17 @@ async def _run_job(job_id: str) -> None:
         return
     if job_id in _running:
         return
+    operation = job.get("operation")
+    if not _claim_heavy(operation):
+        # A different heavy op (scan/fetch/refresh) holds the slot. Skip this
+        # run rather than queue it: the schedule fires again soon enough, and
+        # stacking them is what we are here to prevent.
+        busy = active_heavy()
+        job["last_status"] = "skipped"
+        job["last_error"] = f"Skipped: {busy} is running"
+        log(op["tab"], "WARN", f"Skipped {op['label']}: {busy} is running")
+        _save_jobs()
+        return
     _running.add(job_id)
     job["last_run"] = time.time()
     quiet = bool(op.get("quiet"))
@@ -302,6 +359,7 @@ async def _run_job(job_id: str) -> None:
             log(op["tab"], "ERROR", f"Scheduled run: {op['label']} failed: {exc}")
     finally:
         _running.discard(job_id)
+        _release_heavy(operation)
         _save_jobs()
 
 
@@ -470,9 +528,11 @@ async def run_job(job_id: str, request: Request, user: str = Depends(require_log
     if job_id not in _jobs:
         return JSONResponse({"ok": False, "error": "Job not found."}, status_code=404)
     if job_id in _running:
-        return JSONResponse({"ok": True, "message": "Already running."})
+        return JSONResponse({"ok": True, "started": False, "message": "Already running."})
+    if _jobs[job_id].get("operation") in HEAVY_OPS and _heavy_running:
+        return JSONResponse({"ok": True, "started": False, "message": busy_message()})
     _spawn(job_id)
-    return JSONResponse({"ok": True, "message": "Run started."})
+    return JSONResponse({"ok": True, "started": True, "message": "Run started."})
 
 
 @router.post("/api/scheduler/jobs/{job_id}/abort")
@@ -501,7 +561,12 @@ def trigger_operation(operation: str) -> tuple[bool, bool]:
     show up in the Scheduler's run history exactly like scheduled runs. Falls
     back to running the handler directly if the job was deleted. Returns
     (started, via_job).
+
+    Heavy operations (see ``HEAVY_OPS``) are refused with ``(False, ...)`` while
+    another heavy operation is running, so a scan and a fetch never overlap.
     """
+    if operation in HEAVY_OPS and _heavy_running:
+        return False, False
     job_id = next(
         (jid for jid, j in _jobs.items() if j.get("operation") == operation), None
     )
@@ -513,8 +578,19 @@ def trigger_operation(operation: str) -> tuple[bool, bool]:
     op = _OP_BY_ID.get(operation)
     if op is None:
         return False, False
-    asyncio.create_task(op["handler"]())
+    asyncio.create_task(_run_direct(op))
     return True, False
+
+
+async def _run_direct(op: dict) -> None:
+    """Run a job-less handler while still holding the heavy slot."""
+    operation = op["id"]
+    if not _claim_heavy(operation):
+        return
+    try:
+        await op["handler"]()
+    finally:
+        _release_heavy(operation)
 
 
 @router.post("/api/scheduler/jobs/{job_id}/toggle")
