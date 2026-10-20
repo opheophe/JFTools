@@ -4,6 +4,18 @@ const SCH = { jobs: [], operations: [], editing: null };
 
 function pad(n) { return String(n).padStart(2, "0"); }
 
+// Elapsed time of a run: "0.4s" is more useful than "0m" for scheduler jobs.
+function fmtDuration(sec) {
+  if (sec === null || sec === undefined) return "—";
+  const s = Math.max(0, sec);
+  if (s < 1) return "<1s";
+  const t = Math.round(s);
+  if (t < 60) return t + "s";
+  const m = Math.floor(t / 60);
+  if (m < 60) return m + "m " + (t % 60) + "s";
+  return Math.floor(m / 60) + "h " + (m % 60) + "m";
+}
+
 function populateTimeSelects() {
   const hSel = document.getElementById("sch-hour");
   const mSel = document.getElementById("sch-minute");
@@ -32,7 +44,7 @@ async function schLoad(refreshOps = true) {
     renderJobs();
   } catch (err) {
     body.innerHTML = "";
-    body.appendChild(el("tr", {}, [el("td", { colspan: "8", class: "error", text: String(err) })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "9", class: "error", text: String(err) })]));
   }
 }
 
@@ -52,7 +64,7 @@ function renderJobs() {
   const body = document.getElementById("sch-body");
   body.innerHTML = "";
   if (SCH.jobs.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { colspan: "8", class: "muted", text: "No schedules yet — click '+ New schedule'." })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "9", class: "muted", text: "No schedules yet — click '+ New schedule'." })]));
     return;
   }
   SCH.jobs.forEach((j) => {
@@ -93,6 +105,8 @@ function renderJobs() {
       last = fmtAgo(j.last_run) + (j.last_status === "error" ? " ✗" : (j.last_status === "ok" ? " ✓" : (j.last_status === "cancelled" ? " ⚠" : (j.last_status === "skipped" ? " ⏭" : ""))));
     }
     tr.appendChild(el("td", { class: "muted", text: last }));
+
+    tr.appendChild(el("td", { class: "muted nowrap", text: fmtDuration(j.last_duration) }));
 
     const atd = el("td", { class: "sch-actions" });
     if (j.running) {

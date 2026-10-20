@@ -170,7 +170,7 @@ async def test_heavy_job_skipped_when_another_heavy_runs(monkeypatch):
     monkeypatch.setattr(sch, "_save_jobs", lambda: None)
     monkeypatch.setattr(sch, "log", lambda *a: None)
     monkeypatch.setitem(sch._OP_BY_ID, "jellyfin_id_fetch",
-        {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": handler})
+        {"id": "jellyfin_id_fetch", "label": "Fetch Jellyfin movies", "tab": "Movie Match", "handler": handler})
     monkeypatch.setitem(sch._jobs, "hf",
         {"id": "hf", "operation": "jellyfin_id_fetch", "trigger": {}, "enabled": True})
     monkeypatch.setattr(sch, "_running", set())
@@ -231,3 +231,40 @@ def test_trigger_operation_refused_while_heavy_busy(monkeypatch):
     assert started is False
     assert via_job is False
     assert sch.busy_message() == "Busy — Media scan is running."
+
+
+async def test_run_job_records_last_duration(monkeypatch):
+    async def handler():
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(sch, "_save_jobs", lambda: None)
+    monkeypatch.setattr(sch, "log", lambda *a: None)
+    monkeypatch.setattr(sch, "_running", set())
+    monkeypatch.setattr(sch, "_heavy_running", None)
+    monkeypatch.setitem(sch._OP_BY_ID, "quick_op",
+        {"id": "quick_op", "label": "Quick Op", "tab": "Test", "handler": handler})
+    monkeypatch.setitem(sch._jobs, "jq",
+        {"id": "jq", "operation": "quick_op", "trigger": {}, "enabled": True})
+
+    await sch._run_job("jq")
+
+    assert sch._jobs["jq"]["last_duration"] >= 0.05
+
+
+def test_public_job_exposes_last_duration(monkeypatch):
+    monkeypatch.setattr(sch, "_jobs", {
+        "jq": {
+            "id": "jq", "operation": "quick_op", "trigger": {}, "enabled": True,
+            "last_run": 1000.0, "last_duration": 1.5, "last_status": "ok", "last_error": None,
+        }
+    })
+    monkeypatch.setitem(sch._OP_BY_ID, "quick_op", {"id": "quick_op", "label": "Quick Op"})
+    monkeypatch.setattr(sch, "_running", set())
+
+    payload = sch._public_job("jq")
+
+    assert payload["last_duration"] == 1.5
+
+
+def test_fetch_job_label_is_jellyfin_wording():
+    assert sch._OP_BY_ID["jellyfin_id_fetch"]["label"] == "Fetch Jellyfin movies"

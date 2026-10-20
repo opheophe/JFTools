@@ -107,7 +107,7 @@ def _jellyfin_id_progress() -> dict | None:
 
 
 OPERATIONS = [
-    {"id": "jellyfin_id_fetch", "label": "Fetch Movie Match", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
+    {"id": "jellyfin_id_fetch", "label": "Fetch Jellyfin movies", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
      "description": "Fetch all media items, re-score their name/year match, and record each user's favorites.",
      "progress": _jellyfin_id_progress},
     {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all,
@@ -242,6 +242,7 @@ def _ensure_default_jobs() -> None:
             "trigger": dict(_DEFAULT_SCHEDULES.get(operation, {"kind": "interval", "minutes": 60})),
             "enabled": operation in _ACTIVE_BY_DEFAULT,
             "last_run": None,
+            "last_duration": None,
             "last_status": None,
             "last_error": None,
         }
@@ -340,6 +341,7 @@ async def _run_job(job_id: str) -> None:
         return
     _running.add(job_id)
     job["last_run"] = time.time()
+    started = time.monotonic()
     quiet = bool(op.get("quiet"))
     try:
         await op["handler"]()
@@ -358,6 +360,9 @@ async def _run_job(job_id: str) -> None:
         if not quiet:
             log(op["tab"], "ERROR", f"Scheduled run: {op['label']} failed: {exc}")
     finally:
+        # Wall-clock elapsed only (monotonic), so a clock change during a long
+        # run cannot produce a negative or absurd duration.
+        job["last_duration"] = round(time.monotonic() - started, 1)
         _running.discard(job_id)
         _release_heavy(operation)
         _save_jobs()
@@ -452,6 +457,7 @@ def _public_job(job_id: str) -> dict:
         "progress": progress,
         "next_run": _next_run_label(job_id),
         "last_run": job.get("last_run"),
+        "last_duration": job.get("last_duration"),
         "last_status": job.get("last_status"),
         "last_error": job.get("last_error"),
     }
@@ -487,6 +493,7 @@ async def create_job(request: Request, user: str = Depends(require_login)):
         "trigger": trigger,
         "enabled": bool(data.get("enabled", True)),
         "last_run": None,
+        "last_duration": None,
         "last_status": None,
         "last_error": None,
     }
