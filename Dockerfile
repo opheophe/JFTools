@@ -6,8 +6,13 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     JFTOOLS_DATA_DIR=/data \
-    TZ=Europe/Stockholm \
-    JFTOOLS_VERSION=$VERSION
+    TZ=Europe/Stockholm
+
+# Deliberately no JFTOOLS_VERSION env: Docker freezes a container's env at
+# create time, so a version kept there goes stale whenever a container is
+# recreated from an older config. The version is written to app/VERSION below
+# and read from there (app/version.py); image-level lookups use the
+# org.opencontainers.image.version label.
 
 WORKDIR /app
 
