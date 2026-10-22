@@ -477,6 +477,11 @@ async function seScan() {
     "/api/subtitles/status",
     (s) => {
       if (s.status === "running") {
+        if (s.phase === "checking") {
+          fill.style.width = "0%";
+          statusEl.textContent = "Checking subtitle files…";
+          return;
+        }
         const pct = s.total ? Math.round(100 * s.scanned / s.total) : 0;
         fill.style.width = pct + "%";
         statusEl.textContent = "Media scan… " + s.scanned + "/" + (s.total || "?") + " (" + pct + "%)";

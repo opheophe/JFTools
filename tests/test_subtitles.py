@@ -140,6 +140,178 @@ def test_reconcile_preserves_existing_scanned():
     assert files["/a"]["scanned"] is False
 
 
+# ---- external subtitle change check -----------------------------------------
+
+
+def _scanned_entry(path, external=None, folder=False):
+    return {
+        "path": path,
+        "file": "movie.mkv",
+        "scanned": True,
+        "folder": folder,
+        "external": list(external or []),
+    }
+
+
+def test_changed_entries_flags_new_sidecar(tmp_path):
+    import app.subtitles as sub
+
+    movie = tmp_path / "movie.mkv"
+    movie.write_bytes(b"")
+    (tmp_path / "movie.en.srt").write_bytes(b"x" * 2000)
+    files = {str(movie): _scanned_entry(str(movie))}
+
+    # The store knows nothing about the new file, so it must be re-probed.
+    assert sub._changed_entries([{"path": str(movie)}], files) == [str(movie)]
+
+    # Once the store has it, the same listing is not a change.
+    files[str(movie)]["external"] = sub._external_subtitles(str(movie))
+    assert sub._changed_entries([{"path": str(movie)}], files) == []
+
+
+def test_changed_entries_flags_removed_sidecar(tmp_path):
+    import app.subtitles as sub
+
+    movie = tmp_path / "movie.mkv"
+    movie.write_bytes(b"")
+    files = {str(movie): _scanned_entry(str(movie), [_ext(file="movie.en.srt")])}
+    assert sub._changed_entries([{"path": str(movie)}], files) == [str(movie)]
+
+
+def test_changed_entries_ignores_order(tmp_path):
+    import app.subtitles as sub
+
+    movie = tmp_path / "movie.mkv"
+    movie.write_bytes(b"")
+    (tmp_path / "movie.en.srt").write_bytes(b"x" * 2000)
+    (tmp_path / "movie.sv.srt").write_bytes(b"x" * 2000)
+    files = {
+        str(movie): _scanned_entry(
+            str(movie),
+            [_ext("Swedish", file="movie.sv.srt"), _ext("English", file="movie.en.srt")],
+        )
+    }
+    assert sub._changed_entries([{"path": str(movie)}], files) == []
+
+
+def test_changed_entries_skips_unscanned_and_folders(tmp_path):
+    import app.subtitles as sub
+
+    movie = tmp_path / "movie.mkv"
+    movie.write_bytes(b"")
+    (tmp_path / "movie.en.srt").write_bytes(b"x" * 2000)
+    show = tmp_path / "Show"
+    show.mkdir()
+
+    unscanned = _scanned_entry(str(movie))
+    unscanned["scanned"] = False
+    rows = [{"path": str(movie)}, {"path": str(show)}]
+    files = {str(movie): unscanned, str(show): _scanned_entry(str(show), folder=True)}
+    # Unscanned items are queued for probing anyway; a series "folder" row has
+    # no file to check. Neither should be reported as a change.
+    assert sub._changed_entries(rows, files) == []
+
+
+def test_changed_entries_keeps_data_when_folder_unreachable(tmp_path):
+    import app.subtitles as sub
+
+    missing = tmp_path / "gone" / "movie.mkv"
+    files = {str(missing): _scanned_entry(str(missing), [_ext(file="movie.en.srt")])}
+    # An unreachable folder says nothing about the files: never invalidate on it.
+    assert sub._changed_entries([{"path": str(missing)}], files) == []
+
+
+def test_changed_entries_lists_each_folder_once(tmp_path, monkeypatch):
+    """A season folder holds many episodes: one listing must serve them all."""
+    import app.subtitles as sub
+
+    rows = []
+    files = {}
+    for i in range(5):
+        movie = tmp_path / f"ep{i}.mkv"
+        movie.write_bytes(b"")
+        (tmp_path / f"ep{i}.en.srt").write_bytes(b"x" * 2000)
+        rows.append({"path": str(movie)})
+        files[str(movie)] = _scanned_entry(str(movie))
+
+    calls = []
+    real = sub._list_dir
+
+    def counting(folder):
+        calls.append(folder)
+        return real(folder)
+
+    monkeypatch.setattr(sub, "_list_dir", counting)
+    flagged = sub._changed_entries(rows, files)
+    assert len(calls) == 1
+    assert sorted(flagged) == sorted(r["path"] for r in rows)
+
+
+async def test_scan_reprobes_an_item_whose_subtitle_appeared(monkeypatch, tmp_path):
+    """The whole point: an already-scanned file with a new sidecar is probed
+    again by the normal media scan, without a full scan."""
+    import app.subtitles as sub
+    from app.jellyfin_id import _state as id_state
+
+    movie = tmp_path / "movie.mkv"
+    movie.write_bytes(b"")
+    (tmp_path / "movie.en.srt").write_bytes(b"x" * 2000)
+
+    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: "ffprobe")
+    monkeypatch.setattr(sub, "_probe_streams", lambda ff, local: ([], [], 60.0, None))
+    monkeypatch.setattr(sub, "_save_state", lambda: None)
+
+    files_before = dict(sub._state["files"])
+    ok_before = list(sub._state["ok"])
+    rows_before = id_state["rows"]
+    try:
+        # Scanned before the subtitle was added, and manually marked Ok.
+        sub._state["files"] = {str(movie): _scanned_entry(str(movie))}
+        sub._state["ok"] = [str(movie)]
+        id_state["rows"] = [{"path": str(movie), "file": movie.name}]
+
+        await sub.run_scan("scan")
+
+        assert sub._fetch["status"] == "done"
+        entry = sub.scans_map()[str(movie)]
+        assert entry["scanned"] is True
+        assert [e["file"] for e in entry["external"]] == ["movie.en.srt"]
+        assert entry["flags"]["acceptable"] is True
+        # The manual mark was for the old state, so it is dropped.
+        assert sub._state["ok"] == []
+    finally:
+        sub._state["files"] = files_before
+        sub._state["ok"] = ok_before
+        id_state["rows"] = rows_before
+
+
+async def test_full_scan_skips_the_check(monkeypatch, tmp_path):
+    """Every file is re-probed anyway, so the check would be wasted I/O."""
+    import app.subtitles as sub
+    from app.jellyfin_id import _state as id_state
+
+    movie = tmp_path / "movie.mkv"
+    movie.write_bytes(b"")
+    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: "ffprobe")
+    monkeypatch.setattr(sub, "_probe_streams", lambda ff, local: ([], [], 60.0, None))
+    monkeypatch.setattr(sub, "_save_state", lambda: None)
+
+    calls = []
+    monkeypatch.setattr(
+        sub, "_changed_entries", lambda rows, files: calls.append(True) or []
+    )
+    files_before = dict(sub._state["files"])
+    rows_before = id_state["rows"]
+    try:
+        sub._state["files"] = {str(movie): _scanned_entry(str(movie))}
+        id_state["rows"] = [{"path": str(movie), "file": movie.name}]
+        await sub.run_scan("full")
+        assert calls == []
+    finally:
+        sub._state["files"] = files_before
+        id_state["rows"] = rows_before
+
+
 # ---- worklist (flag-based) --------------------------------------------------
 
 

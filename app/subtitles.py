@@ -9,6 +9,12 @@ One probe fills both halves of an entry, so a single scan collects subtitles and
 audio together: an entry's ``scanned`` flag means both have been probed. New
 files are added unscanned by the reconcile step and picked up by the next scan.
 
+An external subtitle can also appear (or change, or go away) next to a video
+that has not changed at all, which an unscanned-only worklist would never
+notice. So before probing, the scan lists each folder once and re-checks the
+sidecar files of every already-scanned item — no ffprobe — and flags the ones
+that differ for a fresh probe in the same pass.
+
 The subtitle classification mirrors Subber's "Movie List" tab so the two tools
 agree on what "acceptable", "AI sub", "forced", "foreign" and "no subs" mean.
 """
@@ -177,7 +183,7 @@ def _save_state() -> None:
 
 
 _state = _load_state()
-_fetch = {"status": "idle", "scanned": 0, "total": 0, "error": None}
+_fetch = {"status": "idle", "phase": None, "scanned": 0, "total": 0, "error": None}
 
 
 def scans_map() -> dict:
@@ -248,22 +254,32 @@ def _classify_tracks(internal: list[dict], external: list[dict]) -> dict:
     }
 
 
-def _external_subtitles(movie_path: str) -> list[dict]:
-    """External subtitle files next to ``movie_path`` (same base name)."""
-    p = Path(movie_path)
-    folder = p.parent
-    stem = p.stem
-    if not stem or not folder.is_dir():
+def _list_dir(folder: Path) -> list[os.DirEntry] | None:
+    """Directory entries, or ``None`` when the folder cannot be listed.
+
+    ``None`` and ``[]`` mean different things to the change check: an empty
+    folder really has no subtitles, an unreachable one says nothing at all.
+    """
+    try:
+        with os.scandir(folder) as it:
+            return list(it)
+    except OSError:
+        return None
+
+
+def _external_subtitles_in(children: list[os.DirEntry], stem: str) -> list[dict]:
+    """External subtitle files for ``stem`` among already-listed ``children``.
+
+    Split out from :func:`_external_subtitles` so a caller checking many videos
+    that share a folder lists that folder once instead of once per video.
+    """
+    if not stem:
         return []
     stem_lower = stem.lower()
     entries: list[dict] = []
-    try:
-        children = list(folder.iterdir())
-    except OSError:
-        return entries
     for f in children:
         try:
-            if not f.is_file() or f.suffix.lower() not in SUBTITLE_EXTENSIONS:
+            if not f.is_file() or Path(f.name).suffix.lower() not in SUBTITLE_EXTENSIONS:
                 continue
         except OSError:
             continue
@@ -285,9 +301,43 @@ def _external_subtitles(movie_path: str) -> list[dict]:
                 continue
             lang = _subtitle_lang_name(base)
             break
-        tiny = f.stat().st_size < TINY_SUBTITLE_MAX_BYTES
+        try:
+            tiny = f.stat().st_size < TINY_SUBTITLE_MAX_BYTES
+        except OSError:
+            # Gone between the listing and the stat: treat it as absent rather
+            # than failing the whole scan.
+            continue
         entries.append({"file": f.name, "lang": lang, "forced": forced, "ai": is_ai, "tiny": tiny})
     return entries
+
+
+def _external_subtitles(movie_path: str) -> list[dict]:
+    """External subtitle files next to ``movie_path`` (same base name)."""
+    p = Path(movie_path)
+    if not p.stem:
+        return []
+    children = _list_dir(p.parent)
+    if children is None:
+        return []
+    return _external_subtitles_in(children, p.stem)
+
+
+def _external_signature(external: list[dict] | None) -> list[tuple]:
+    """Order-independent summary of an external subtitle list.
+
+    Only what the scan stores is compared, so a re-listing that returns the
+    same files in another order is not a change.
+    """
+    return sorted(
+        (
+            str(e.get("file") or ""),
+            str(e.get("lang") or ""),
+            bool(e.get("forced")),
+            bool(e.get("ai")),
+            bool(e.get("tiny")),
+        )
+        for e in (external or [])
+    )
 
 
 def _display_lines(internal: list[dict], external: list[dict]) -> list[str]:
@@ -512,6 +562,41 @@ def _reconcile(files: dict, ok: list[str], current_paths: set[str]) -> tuple[dic
     return files, ok
 
 
+def _changed_entries(rows: list[dict], files: dict) -> list[str]:
+    """Paths whose external subtitle files differ from what the store recorded.
+
+    One directory listing per folder, no ffprobe. Only already-scanned entries
+    are checked: unscanned ones are queued for probing anyway. Folders are
+    grouped and listed once because a season folder holds many episodes — 26k
+    items live in far fewer folders, and every listing is a round trip when the
+    library is on a share.
+    """
+    by_folder: dict[str, list[tuple[str, str, list]]] = {}
+    for r in rows:
+        key = r.get("path")
+        entry = files.get(key) or {}
+        if not entry.get("scanned") or entry.get("folder"):
+            continue
+        local = resolve_path(key, config.settings.path_maps)
+        folder = os.path.dirname(local)
+        if not folder or not os.path.basename(local):
+            continue
+        by_folder.setdefault(folder, []).append((local, key, entry.get("external") or []))
+
+    changed: list[str] = []
+    for folder, items in by_folder.items():
+        children = _list_dir(Path(folder))
+        if children is None:
+            # Unreachable right now. Keep what the last scan recorded: clearing
+            # it here would throw away good data because of one SMB hiccup.
+            continue
+        for local, key, stored in items:
+            fresh = _external_subtitles_in(children, Path(local).stem)
+            if _external_signature(fresh) != _external_signature(stored):
+                changed.append(key)
+    return changed
+
+
 def _build_worklist(
     rows: list[dict], files: dict
 ) -> list[tuple[str, str, object]]:
@@ -590,14 +675,15 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
 async def run_scan(mode: str) -> None:
     """Probe the Movie Match items for subtitle and audio tracks.
 
-    ``mode`` is ``"scan"`` (reconcile, then probe every unscanned file) or
-    ``"full"`` (mark every file unscanned first, then the same scan). One
-    ffprobe fills both the subtitle and the audio half of an entry.
+    ``mode`` is ``"scan"`` (reconcile, re-check external subtitles, then probe
+    every unscanned file) or ``"full"`` (mark every file unscanned first, then
+    the same scan). One ffprobe fills both the subtitle and the audio half of
+    an entry.
     """
     if _fetch["status"] == "running":
         return
     label = "Media scan" + (" (full)" if mode == "full" else "")
-    _fetch.update({"status": "running", "scanned": 0, "total": 0, "error": None})
+    _fetch.update({"status": "running", "phase": None, "scanned": 0, "total": 0, "error": None})
     log("Search", "INFO", f"{label} started")
     try:
         ffprobe = resolve_ffprobe()
@@ -626,6 +712,42 @@ async def run_scan(mode: str) -> None:
                 entry["scanned"] = False
         _state["files"] = files
         _state["ok"] = ok
+
+        # A sidecar subtitle can appear (or change, or go away) next to a video
+        # that has not changed, so the unscanned-only worklist would never see
+        # it. Re-check the sidecar files of the scanned entries first — one
+        # directory listing per folder, no ffprobe — and flag whatever differs
+        # so it is probed by this same pass.
+        changed = 0
+        if mode != "full":
+            _fetch["phase"] = "checking"
+            try:
+                flagged = await asyncio.to_thread(_changed_entries, rows, files)
+            except Exception as exc:  # noqa: BLE001
+                flagged = []
+                log("Search", "WARN", f"{label}: subtitle check failed: {exc}")
+            finally:
+                _fetch["phase"] = None
+            for key in flagged:
+                entry = files.get(key)
+                if not entry:
+                    continue
+                # Same invalidation as _mark_unscanned, without a store write
+                # per item: one save at the end of the run covers them all.
+                entry["scanned"] = False
+                entry["external"] = []
+                entry["subs"] = []
+                entry["flags"] = None
+                entry["error"] = None
+                changed += 1
+            if changed:
+                flagged_set = set(flagged)
+                _state["ok"] = [k for k in _state["ok"] if k not in flagged_set]
+                log(
+                    "Search",
+                    "INFO",
+                    f"{label}: {changed} item(s) have new or changed subtitles",
+                )
 
         # Resolve + stat each path off the event loop — os.stat over SMB/NFS can
         # be slow, and doing it inline would freeze the app during a big scan.
@@ -677,6 +799,7 @@ async def run_scan(mode: str) -> None:
             "Search",
             "INFO",
             f"{label} complete: {len(to_scan)} probed, {len(rows) - len(to_scan)} skipped"
+            + (f", {changed} subtitle change(s)" if changed else "")
             + (f", {folders} series folder(s)" if folders else "")
             + (f", {failed} could not be probed (see warnings)" if failed else ""),
         )

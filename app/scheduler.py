@@ -94,6 +94,10 @@ def _scan_progress() -> dict | None:
 
     if _fetch.get("status") != "running":
         return None
+    if _fetch.get("phase") == "checking":
+        # Checking sidecar subtitles comes first and the worklist does not
+        # exist yet, so there is nothing to count.
+        return None
     return {"done": _fetch.get("scanned", 0), "total": _fetch.get("total", 0)}
 
 
@@ -126,7 +130,7 @@ OPERATIONS = [
      "description": "Re-probe every media file for subtitle and audio tracks with ffprobe.",
      "progress": _scan_progress},
     {"id": "subtitle_scan", "label": "Media scan", "tab": "Search", "handler": _op_subtitle_scan,
-     "description": "Sync the store with the library, then probe every file not yet scanned (subtitles and audio).",
+     "description": "Sync the store with the library, check already-scanned files for new or changed external subtitles, then probe every file not yet scanned (subtitles and audio).",
      "progress": _scan_progress},
     {"id": "users_watching", "label": "User watching", "tab": "Jellyfin", "handler": _op_users_watching,
      "description": "Check Jellyfin sessions for an actively-watching user (powers the Users nav dot).",

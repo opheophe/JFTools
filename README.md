@@ -272,9 +272,16 @@ Two scheduler jobs do the work:
 
 - **Media scan (full)** — marks every file unscanned, then re-probes them all.
 - **Media scan** — syncs the store with the library (adds new files as
-  unscanned, drops removed ones), then probes every file not yet scanned.
+  unscanned, drops removed ones), re-checks the external subtitle files of the
+  files already scanned (one directory listing per folder, no ffprobe) and
+  re-probes any whose sidecars appeared, changed or went away, then probes every
+  file not yet scanned. That is how a `.srt` dropped in by another tool gets
+  picked up without a full scan.
 
-The **Media scan** button on the Search page starts the incremental job.
+The **Media scan** button on the Search page starts the incremental job. The
+check compares the sidecar subtitle files' names and classification, not their
+contents, so editing an existing `.srt` in place is not detected as a change —
+use a row's **Sync → Subtitles & audio** for that.
 
 You can also re-probe a single file from a row's **Sync** menu: **Subtitles &
 audio** re-runs ffprobe for both columns (ignoring the `scanned` flag — handy
