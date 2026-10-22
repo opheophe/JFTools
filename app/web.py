@@ -1,5 +1,4 @@
 """Shared web helpers: base directory, templates, and the auth dependency."""
-import os
 from pathlib import Path
 
 from fastapi import HTTPException, Request
@@ -7,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import config
+from .version import current_version
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -25,7 +25,7 @@ def asset_token() -> str:
         newest = max(p.stat().st_mtime for p in STATIC_DIR.rglob("*") if p.is_file())
     except (OSError, ValueError):
         newest = 0.0
-    return f"{os.environ.get('JFTOOLS_VERSION', 'dev')}-{int(newest)}"
+    return f"{current_version()}-{int(newest)}"
 
 
 class RevalidatedStaticFiles(StaticFiles):

@@ -1,13 +1,12 @@
 """About page: build info, project links, and update availability.
 
-The running version comes from the ``JFTOOLS_VERSION`` environment variable,
-which the Docker build sets from the git ref (see ``Dockerfile`` and
+The running version comes from ``app/version.py``, which reads the version baked
+into the image by the Docker build (see ``Dockerfile`` and
 ``.github/workflows/docker-publish.yml``). The latest release is looked up from
 the GitHub API and cached so page loads don't hammer it.
 """
 from __future__ import annotations
 
-import os
 import re
 import time
 
@@ -15,6 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from .version import current_version
 from .web import require_login, templates
 
 router = APIRouter()
@@ -26,11 +26,6 @@ _RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 # Cache the latest-release lookup (including failures) for this many seconds.
 _latest_cache: dict = {"ts": 0.0, "data": None}
 _CACHE_TTL = 3600.0
-
-
-def current_version() -> str:
-    """The running build's version (``dev`` when not running a tagged image)."""
-    return os.environ.get("JFTOOLS_VERSION", "dev").lstrip("vV")
 
 
 def _is_semver(value: str) -> bool:

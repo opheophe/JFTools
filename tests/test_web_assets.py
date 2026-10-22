@@ -20,7 +20,7 @@ def _client() -> httpx.AsyncClient:
 
 def test_asset_token_follows_the_newest_static_file(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "STATIC_DIR", tmp_path)
-    monkeypatch.setenv("JFTOOLS_VERSION", "1.2.3")
+    monkeypatch.setattr(web, "current_version", lambda: "1.2.3")
     js = tmp_path / "app.js"
     js.write_text("a", encoding="utf-8")
 
@@ -34,6 +34,16 @@ def test_asset_token_follows_the_newest_static_file(tmp_path, monkeypatch):
 def test_asset_token_survives_a_missing_static_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "STATIC_DIR", tmp_path / "gone")
     assert web.asset_token().endswith("-0")
+
+
+def test_asset_token_uses_the_baked_version(tmp_path, monkeypatch):
+    # Same source of truth as the About page: the file baked into the image.
+    stamp = tmp_path / "VERSION"
+    stamp.write_text("v1.23.0", encoding="utf-8")
+    monkeypatch.setattr("app.version.VERSION_FILE", stamp)
+    monkeypatch.setattr(web, "STATIC_DIR", tmp_path / "gone")
+
+    assert web.asset_token() == "1.23.0-0"
 
 
 def test_static_urls_carry_the_asset_token():

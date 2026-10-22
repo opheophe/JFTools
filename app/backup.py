@@ -26,9 +26,9 @@ import zipfile
 from pathlib import Path
 from typing import BinaryIO
 
-from .about import current_version
 from .config import config
 from .logs import log
+from .version import current_version
 
 SCHEMA = 1
 APP = "jftools"

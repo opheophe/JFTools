@@ -184,6 +184,10 @@ cython_debug/
 data/
 *.db
 
+# Build-time version stamp, written into the image by the Dockerfile; a local
+# copy would shadow the git ref with whatever happens to be lying around.
+app/VERSION
+
 # Local ffprobe/ffmpeg binaries (Windows). Users drop these into Tools/ locally;
 # the Docker image installs ffmpeg instead. Never commit the binaries.
 Tools/

@@ -22,6 +22,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY resources ./resources
+# The version is written into the image as well as exported as ENV: Docker
+# snapshots ENV into a container only at create time, so a container recreated
+# from an older config snapshot would otherwise report a stale version while
+# running the new code. See app/version.py.
+RUN printf '%s\n' "$VERSION" > /app/app/VERSION
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
     && useradd --create-home --uid 1000 jftools \
