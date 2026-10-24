@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 
@@ -6,6 +7,7 @@ import app.jellyfin_id as jid
 from app.jellyfin.client import JellyfinClient
 from app.jellyfin_id import (
     _fetch_favorites,
+    _fetch_items,
     _favorited_by,
     clean_release_tags,
     name_match_score,
@@ -118,6 +120,78 @@ def test_favorited_by_dedupes_same_user():
 
 def test_favorited_by_no_favorites():
     assert _favorited_by({"id": "x", "series_id": ""}, {}) == []
+
+
+# ---- fetching ---------------------------------------------------------------
+
+
+async def test_fetch_items_skips_series_rows():
+    """Series are show folders, not media: even if Jellyfin returns one, it
+    must not reach the stored rows or the scan worklist."""
+    seen = {}
+
+    def handler(request):
+        if request.url.path == "/Library/VirtualFolders":
+            return httpx.Response(200, json=[{"Name": "Shows", "Locations": ["/Serier"]}])
+        seen.update(dict(request.url.params))
+        return httpx.Response(200, json={
+            "Items": [
+                {"Id": "s1", "Type": "Series", "Name": "Severance",
+                 "Path": "/Serier/Severance", "ProductionYear": 2022},
+                {"Id": "m1", "Type": "Movie", "Name": "Dune",
+                 "Path": "/Filmer/Dune/Dune.mkv", "ProductionYear": 2021},
+                {"Id": "e1", "Type": "Episode", "Name": "Good News About Hell",
+                 "SeriesName": "Severance", "SeriesId": "s1",
+                 "Path": "/Serier/Severance/Season 1/Severance - S01E01.mkv",
+                 "ProductionYear": 2022},
+            ],
+            "TotalRecordCount": 3,
+        })
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    rows = await _fetch_items(client, lambda fetched, total: None)
+
+    assert [r["type"] for r in rows] == ["Movie", "Episode"]
+    assert "Series" not in seen["IncludeItemTypes"].split(",")
+
+
+def test_load_state_drops_cached_series_rows(tmp_path, monkeypatch):
+    cache = tmp_path / "jellyfin_id.json"
+    cache.write_text(json.dumps({"rows": [
+        {"type": "Series", "path": "/Serier/Severance", "file": "Severance"},
+        {"type": "Movie", "path": "/Filmer/Dune/Dune.mkv", "file": "Dune.mkv"},
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(jid, "_ID_FILE", cache)
+
+    state = jid._load_state()
+
+    assert [r["path"] for r in state["rows"]] == ["/Filmer/Dune/Dune.mkv"]
+
+
+def test_migrate_cached_series_rewrites_cache_and_prunes_scans(tmp_path, monkeypatch):
+    """A server with an old data volume migrates on startup: the Series rows
+    are dropped from the file and their scan entries are pruned."""
+    import app.subtitles as sub
+
+    cache = tmp_path / "jellyfin_id.json"
+    cache.write_text(json.dumps({"rows": [
+        {"type": "Series", "path": "/Serier/Severance", "file": "Severance"},
+        {"type": "Movie", "path": "/Filmer/Dune/Dune.mkv", "file": "Dune.mkv"},
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(jid, "_ID_FILE", cache)
+    monkeypatch.setattr(jid, "_state", jid._load_state())
+    pruned = {}
+    monkeypatch.setattr(
+        sub, "prune_to_paths",
+        lambda paths: pruned.update(paths=paths) or 0,
+    )
+
+    assert jid.migrate_cached_series() == 1
+
+    saved = json.loads(cache.read_text(encoding="utf-8"))
+    assert [r["type"] for r in saved["rows"]] == ["Movie"]
+    assert pruned["paths"] == {"/Filmer/Dune/Dune.mkv"}
+    assert jid.migrate_cached_series() == 0  # already migrated, no rewrite needed
 
 
 async def test_fetch_favorites_shapes_map_and_inverse():

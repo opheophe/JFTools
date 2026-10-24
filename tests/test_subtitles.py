@@ -399,6 +399,24 @@ def test_subtitles_ok_getter_is_callable():
     assert isinstance(scans_map(), dict)
 
 
+def test_prune_to_paths_drops_orphaned_entries_and_marks(monkeypatch):
+    import app.subtitles as sub
+
+    monkeypatch.setattr(sub, "_save_state", lambda: None)
+    files_before = dict(sub._state["files"])
+    ok_before = list(sub._state["ok"])
+    try:
+        sub._state["files"] = {"keep.mkv": {"path": "keep.mkv"}, "gone": {"path": "gone"}}
+        sub._state["ok"] = ["keep.mkv", "gone"]
+
+        assert sub.prune_to_paths({"keep.mkv"}) == 1
+        assert list(sub._state["files"]) == ["keep.mkv"]
+        assert sub._state["ok"] == ["keep.mkv"]
+    finally:
+        sub._state["files"] = files_before
+        sub._state["ok"] = ok_before
+
+
 async def test_rescan_one_without_ffprobe(monkeypatch):
     import app.subtitles as sub
 

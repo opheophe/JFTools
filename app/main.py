@@ -19,7 +19,7 @@ from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify
 from .config import config
 from .files import router as files_router
 from .jellyfin.client import JellyfinClient, JellyfinError, close_shared_client, get_client
-from .jellyfin_id import router as jellyfin_id_router
+from .jellyfin_id import migrate_cached_series, router as jellyfin_id_router
 from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .media import router as media_router
@@ -33,6 +33,9 @@ from .web import BASE_DIR, RevalidatedStaticFiles, require_login, templates
 
 @asynccontextmanager
 async def lifespan(app):
+    removed = migrate_cached_series()
+    if removed:
+        log("Movie Match", "INFO", f"Removed {removed} legacy series row(s)")
     start_scheduler()
     asyncio.create_task(check_for_updates())
     prune_play_cache()

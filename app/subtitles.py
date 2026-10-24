@@ -200,6 +200,24 @@ def subtitles_ok() -> list[str]:
     return list(_state["ok"])
 
 
+def prune_to_paths(paths: set[str]) -> int:
+    """Drop scan entries and "Subtitle Ok" marks for paths no longer listed.
+
+    Called after a Movie Match fetch so the store follows the library without
+    waiting for a media scan (which prunes the same way via ``_reconcile``).
+    Returns the number of scan entries removed.
+    """
+    files = _state["files"]
+    keep = {k: v for k, v in files.items() if k in paths}
+    removed = len(files) - len(keep)
+    ok = [k for k in _state["ok"] if k in paths]
+    if removed or len(ok) != len(_state["ok"]):
+        _state["files"] = keep
+        _state["ok"] = ok
+        _save_state()
+    return removed
+
+
 def set_ok(path: str, marked: bool) -> None:
     if marked:
         if path not in _state["ok"]:

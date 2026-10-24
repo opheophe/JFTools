@@ -37,8 +37,15 @@ def _load_state() -> dict:
     favorites = data.get("favorites")
     if not isinstance(favorites, dict):
         favorites = {}
+    # Series rows are show folders, not media: they have no file to match,
+    # probe or subtitle. Older caches still carry them; drop them on load so the
+    # tables and the scan worklist never see them again.
+    rows = [
+        r for r in (data.get("rows") or [])
+        if isinstance(r, dict) and (r.get("type") or "") != "Series"
+    ]
     return {
-        "rows": data.get("rows") or [],
+        "rows": rows,
         "marks": set(data.get("marks") or []),
         "favorites": favorites,
         "last_sync": data.get("last_sync"),
@@ -68,6 +75,34 @@ def clear_cache() -> None:
     _state["favorites"] = {}
     _state["last_sync"] = None
     _save_state()
+
+
+def migrate_cached_series() -> int:
+    """Persist the removal of Series rows left by older versions.
+
+    ``_load_state`` already filters them in memory. This rewrites the cache and
+    prunes their scan entries once, on startup, so a server with an existing
+    ``data/`` volume migrates without needing a manual Fetch or media scan.
+    Returns the number of cached Series rows removed.
+    """
+    try:
+        data = json.loads(_ID_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    rows = data.get("rows") or []
+    removed = sum(
+        1 for r in rows if isinstance(r, dict) and (r.get("type") or "") == "Series"
+    )
+    if not removed:
+        return 0
+    _save_state()
+    try:
+        from .subtitles import prune_to_paths
+
+        prune_to_paths({r["path"] for r in _state["rows"] if r.get("path")})
+    except Exception:  # noqa: BLE001 — never block startup on the scan store
+        pass
+    return removed
 
 
 def favorites_for_user(user_id: str) -> list[dict]:
@@ -311,7 +346,9 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
 
     params = {
         "Recursive": "true",
-        "IncludeItemTypes": "Movie,Episode,Series,MusicVideo,Video",
+        # Series rows are show folders, not media. Episodes come back as items
+        # of their own, so the show containers only add non-probeable rows.
+        "IncludeItemTypes": "Movie,Episode,MusicVideo,Video",
         "Fields": "Path,ProductionYear,ProviderIds,SeriesName,SeriesId,DateCreated",
         "Limit": "500",
         "StartIndex": "0",
@@ -326,6 +363,8 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
         batch = data.get("Items") or []
         fetched += len(batch)
         for it in batch:
+            if it.get("Type") == "Series":
+                continue
             path = it.get("Path")
             if not path:
                 continue
@@ -446,6 +485,20 @@ async def _run_fetch() -> None:
             _fetch["total"] = total
 
         rows = await _fetch_items(client, _progress)
+
+        # The scan store is keyed by Jellyfin paths. Drop entries (and Subtitle
+        # Ok marks) for paths this fetch no longer reports — notably the series
+        # folder rows older versions stored.
+        try:
+            from .subtitles import prune_to_paths
+
+            # Never prune from an empty fetch: a Jellyfin hiccup returning no
+            # items must not wipe the scan store.
+            removed = prune_to_paths({r["path"] for r in rows if r.get("path")}) if rows else 0
+            if removed:
+                log("Movie Match", "INFO", f"Pruned {removed} orphaned scan entry(ies)")
+        except Exception as exc:  # noqa: BLE001 — cleanup must not sink the fetch
+            log("Movie Match", "WARN", f"Scan store cleanup failed: {exc}")
 
         # Favorites: one request per user, fetched alongside the items. A failure
         # here must not sink the whole fetch — keep the previous annotations and

@@ -257,10 +257,10 @@ filter, a manual **Subtitle Ok** mark/filter, an **Audio** column and an
 it is set to `true` only when the result is definitive (tracks found or none),
 so errors leave it `false` and the next scan retries.
 
-Jellyfin lists a **series** as an item whose path is the show's folder. There is
-no file to probe — the episodes are rows of their own — so the scan records the
-folder as done and both columns show `—` for it. Without that, every series
-stayed "Not scanned" forever and was re-probed on every scan.
+Jellyfin's **series** items are show folders, not media: Movie Match does not
+fetch them, because the episodes are rows of their own. If a directory path
+still reaches the scan (from an older cache, say), it is recorded as a folder
+and both columns show `—` instead of retrying it forever.
 
 A file that genuinely cannot be probed keeps its flag off and is retried by the
 next scan; the columns name the reason (**Not reachable** when the path is
