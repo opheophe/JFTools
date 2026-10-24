@@ -77,8 +77,25 @@ def test_probe_streams_collects_audio_and_subtitles_in_one_pass(monkeypatch):
     assert tracks[1]["code"] == "swe"
     assert subs == [{
         "index": 3, "lang": "English", "name": "English",
-        "forced": True, "codec": "subrip",
+        "forced": True, "default": False, "codec": "subrip",
+        "disposition": {"forced": True},
     }]
+
+
+def test_probe_streams_reads_the_subtitle_default_flag(monkeypatch):
+    _fake_ffprobe(monkeypatch, {
+        "streams": [{
+            "index": 4, "codec_type": "subtitle", "codec_name": "subrip",
+            "tags": {"language": "eng"},
+            "disposition": {"default": True, "forced": True},
+        }],
+    })
+
+    subs, _tracks, _duration, err = sub._probe_streams("ffprobe", "movie.mkv")
+
+    assert err is None
+    assert subs[0]["default"] is True
+    assert subs[0]["forced"] is True
 
 
 def test_probe_streams_reports_ffprobe_failure(monkeypatch):
@@ -378,3 +395,295 @@ async def test_existing_route_forces_a_fresh_probe(audio_env, monkeypatch):
     assert data["file_mgmt"] is True
     assert [t["index"] for t in data["audio"]] == [1, 2]
     assert seen == {"path": path, "force": True}
+
+
+# ---- Internal tracks --------------------------------------------------------
+
+
+def _internal_streams():
+    subtitles = [
+        {
+            "index": 4, "lang": "English", "name": "English",
+            "forced": False, "default": True, "codec": "subrip",
+            "disposition": {"default": True},
+        },
+        {
+            "index": 5, "lang": "Swedish", "name": "Swedish",
+            "forced": True, "default": False, "codec": "subrip",
+            "disposition": {"forced": True},
+        },
+    ]
+    tracks = [
+        {
+            "index": 1, "lang": "English", "name": "English (AAC stereo)",
+            "default": True, "commentary": False,
+            "disposition": {"default": True},
+        },
+        {
+            "index": 2, "lang": "Swedish", "name": "Swedish (AAC stereo)",
+            "default": False, "commentary": True,
+            "disposition": {"comment": True},
+        },
+        {
+            "index": 3, "lang": "Norwegian", "name": "Norwegian (AAC stereo)",
+            "default": False, "commentary": False, "disposition": {},
+        },
+    ]
+    return subtitles, tracks
+
+
+async def test_internal_existing_returns_audio_and_embedded_subtitles(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    seen = {}
+
+    async def fake_tracks(p, force=False):
+        seen.update(path=p, force=force)
+        return subtitles, tracks, None
+
+    monkeypatch.setattr(audio, "internal_tracks_for", fake_tracks)
+    resp = await audio.internal_existing(user="u", path=path)
+    data = json.loads(resp.body)
+
+    assert data["ok"] is True
+    assert data["file_mgmt"] is True
+    assert data["subtitles"] == subtitles
+    assert data["audio"] == tracks
+    assert seen == {"path": path, "force": True}
+
+
+async def test_internal_execute_deletes_multiple_and_sets_both_defaults(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    calls = {}
+    entry = {
+        "path": path, "file": "Movie (2020).mkv", "scanned": True,
+        "audio": tracks[1:], "internal": subtitles[1:], "error": None,
+    }
+
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+
+    def fake_rewrite(ffmpeg, local, deleted, audio_edits, subtitle_edits):
+        calls.update(
+            ffmpeg=ffmpeg, local=local, deleted=deleted,
+            audio_edits=audio_edits, subtitle_edits=subtitle_edits,
+        )
+        return True, ""
+
+    monkeypatch.setattr(audio, "_rewrite_tracks", fake_rewrite)
+    monkeypatch.setattr(audio, "_probe_one", lambda ff, key, local, st: (key, entry))
+    monkeypatch.setattr(audio, "_stat_path", lambda local: None)
+    monkeypatch.setitem(audio._state, "files", {})
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path,
+        delete="1,4", default_audio="2", default_subtitle="5",
+    )
+    data = json.loads(resp.body)
+
+    assert data["ok"] is True
+    assert data["deleted"] == [1, 4]
+    assert data["default_audio"] == 2
+    assert data["default_subtitle"] == 5
+    assert data["jellyfin"] == "offline"
+    assert "Deleted 2 tracks." in data["message"]
+    assert calls["deleted"] == {1, 4}
+    # The new audio default keeps its commentary flag; the new subtitle
+    # default keeps forced. Only those two dispositions changed.
+    assert calls["audio_edits"] == [(0, "comment+default")]
+    assert calls["subtitle_edits"] == [(0, "forced+default")]
+    assert audio._state["files"][path] == entry
+
+
+async def test_internal_execute_promotes_the_first_remaining_default(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles = []
+    tracks = [
+        {"index": 1, "name": "English", "default": True, "disposition": {"default": True}},
+        {"index": 2, "name": "Swedish", "default": False, "disposition": {}},
+    ]
+    calls = {}
+    entry = {"path": path, "file": "Movie (2020).mkv", "scanned": True,
+             "audio": tracks[1:], "internal": [], "error": None}
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+
+    def fake_rewrite(ffmpeg, local, deleted, audio_edits, subtitle_edits):
+        calls.update(audio_edits=audio_edits, subtitle_edits=subtitle_edits)
+        return True, ""
+
+    monkeypatch.setattr(audio, "_rewrite_tracks", fake_rewrite)
+    monkeypatch.setattr(audio, "_probe_one", lambda ff, key, local, st: (key, entry))
+    monkeypatch.setattr(audio, "_stat_path", lambda local: None)
+    monkeypatch.setitem(audio._state, "files", {})
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path, delete="1",
+    )
+    data = json.loads(resp.body)
+
+    assert data["ok"] is True
+    assert data["default_audio"] == 2
+    assert calls["audio_edits"] == [(0, "default")]
+    assert "English" not in data["message"]
+    assert "Swedish" in data["message"]
+
+
+async def test_internal_execute_refuses_to_delete_every_audio_track(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+    monkeypatch.setattr(
+        audio, "_rewrite_tracks",
+        lambda *a: (_ for _ in ()).throw(AssertionError("must not rewrite")),
+    )
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path, delete="1,2,3",
+    )
+    data = json.loads(resp.body)
+
+    assert resp.status_code == 400
+    assert "every audio track" in data["error"]
+
+
+async def test_internal_execute_rejects_default_on_a_deleted_track(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path,
+        delete="1", default_audio="1",
+    )
+    data = json.loads(resp.body)
+
+    assert resp.status_code == 400
+    assert "marked for deletion" in data["error"]
+
+
+async def test_internal_execute_rejects_a_default_of_the_wrong_type(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path, default_audio="4",
+    )
+    data = json.loads(resp.body)
+
+    assert resp.status_code == 403
+    assert "not an audio track" in data["error"]
+
+
+async def test_internal_execute_requires_file_management(audio_env, monkeypatch):
+    monkeypatch.setattr(config._settings, "file_mgmt", False)
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=audio_env[2], delete="1"
+    )
+    assert resp.status_code == 403
+
+
+async def test_internal_execute_requires_the_security_header(audio_env):
+    resp = await audio.internal_execute(
+        user="u", x_jftools="", path=audio_env[2], delete="1"
+    )
+    assert resp.status_code == 403
+
+
+def test_probe_one_stores_subtitle_default_and_drops_dispositions(
+    tmp_path, monkeypatch
+):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"")
+    subtitles = [{
+        "index": 3, "lang": "English", "name": "English",
+        "forced": True, "default": True, "codec": "subrip",
+        "disposition": {"default": True, "forced": True},
+    }]
+    tracks = [{
+        "index": 1, "lang": "English", "name": "English (AAC stereo)",
+        "default": True, "commentary": False, "disposition": {"default": True},
+    }]
+    monkeypatch.setattr(
+        sub, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+    monkeypatch.setattr(sub, "_external_subtitles", lambda local: [])
+
+    _key, entry = sub._probe_one(
+        "ffprobe", str(video), str(video), video.stat()
+    )
+
+    assert entry["internal"] == [{
+        "index": 3, "lang": "English", "name": "English",
+        "forced": True, "default": True, "codec": "subrip",
+    }]
+    assert "disposition" not in entry["audio"][0]
+    assert entry["audio"][0]["default"] is True
+
+
+def test_internal_rewrite_maps_deletions_and_dispositions(tmp_path, monkeypatch):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"old")
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        Path(cmd[-1]).write_bytes(b"new")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    ok, err = audio._rewrite_tracks(
+        "ffmpeg", str(video), {1, 3},
+        [(0, "comment+default")], [(0, "forced+default")],
+    )
+
+    assert ok and err == ""
+    assert video.read_bytes() == b"new"
+    cmd = seen[0]
+    assert cmd[cmd.index("-map") + 1] == "0"
+    assert "-0:1" in cmd and "-0:3" in cmd
+    assert cmd[cmd.index("-c") + 1] == "copy"
+    assert cmd[cmd.index("-disposition:a:0") + 1] == "comment+default"
+    assert cmd[cmd.index("-disposition:s:0") + 1] == "forced+default"
+    assert not any(p.name.startswith(".jftools-internal-") for p in tmp_path.iterdir())
+
+
+def test_internal_rewrite_leaves_the_video_alone_on_failure(tmp_path, monkeypatch):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"old")
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"partial")
+        return SimpleNamespace(returncode=1, stderr="Invalid argument")
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    ok, err = audio._rewrite_tracks("ffmpeg", str(video), {1}, [], [])
+
+    assert ok is False
+    assert "Invalid argument" in err
+    assert video.read_bytes() == b"old"
+    assert not any(p.name.startswith(".jftools-internal-") for p in tmp_path.iterdir())

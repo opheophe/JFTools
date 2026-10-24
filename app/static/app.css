@@ -481,7 +481,7 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl-existing h4 { margin: 0; font-size: 0.8rem; }
 .subdl-subrow {
-  display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; font-size: 0.8rem;
   background: var(--inset); border-radius: 6px; padding: 0.25rem 0.5rem;
 }
 .subdl-subrow .subdl-name { flex: 1; }
@@ -494,7 +494,21 @@ td.fb-actions { white-space: nowrap; }
 .subdl-mini.subdl-play { color: var(--ok); border-color: var(--ok); }
 .subdl-mini.subdl-del { color: var(--danger); border-color: var(--danger); }
 .subdl-mini.subdl-sync { color: var(--accent); border-color: var(--accent); }
+.subdl-mini.subdl-default { color: var(--accent); border-color: var(--accent); }
+.subdl-mini.subdl-default-on { background: var(--panel); }
 .subdl-mini:disabled { opacity: 0.4; cursor: default; color: var(--muted); border-color: var(--border); }
+.subdl-check {
+  display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0;
+  font-size: 0.72rem; color: var(--muted); white-space: nowrap;
+}
+.subdl-check input { margin: 0; }
+.subdl-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
+  margin-top: 0.3rem; border-top: 1px solid var(--border); padding-top: 0.5rem;
+}
+.subdl-actions .subdl-help { margin: 0; font-size: 0.75rem; }
+.subdl-actions .subdl-btn { margin-left: auto; flex-shrink: 0; }
+.subdl-help { font-size: 0.78rem; }
 
 /* player window (/play) */
 .play-body { background: #000; overflow: hidden; }

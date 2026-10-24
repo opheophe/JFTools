@@ -477,7 +477,10 @@ def _probe_streams(
         "-show_entries",
         "stream=index,codec_type,codec_name,channels,channel_layout"
         ":stream_tags=language,title"
-        ":stream_disposition=forced,default:format=duration",
+        # Every disposition flag, not just forced/default: the Internal track
+        # editor re-applies the original flags when it changes the default, so
+        # setting a default must not clear commentary/dub/etc.
+        ":stream_disposition:format=duration",
         "-of", "json",
         video_path,
     ]
@@ -503,11 +506,12 @@ def _probe_streams(
     for s in data.get("streams") or []:
         kind = s.get("codec_type")
         tags = s.get("tags") or {}
+        disposition = s.get("disposition") or {}
         if kind == "subtitle":
             lang = _subtitle_lang_name(tags.get("language"))
             title = (tags.get("title") or "").strip()
             name = lang if (not title or title.lower() == lang.lower()) else f"{lang} ({title})"
-            forced = bool((s.get("disposition") or {}).get("forced")) or "forced" in title.lower()
+            forced = bool(disposition.get("forced")) or "forced" in title.lower()
             internal.append({
                 # The absolute stream index, so the player can map this track
                 # exactly (``-map 0:<index>``) when it extracts it to WebVTT.
@@ -515,7 +519,11 @@ def _probe_streams(
                 "lang": lang,
                 "name": name,
                 "forced": forced,
+                "default": bool(disposition.get("default")),
                 "codec": s.get("codec_name") or "",
+                # Kept for the Internal editor's rewrite; the scan store drops
+                # it because only the flags themselves are needed there.
+                "disposition": disposition,
             })
         elif kind == "audio":
             code = (tags.get("language") or "").strip().lower()
@@ -528,8 +536,9 @@ def _probe_streams(
                 "codec": s.get("codec_name") or "",
                 "channels": s.get("channels"),
                 "layout": s.get("channel_layout") or "",
-                "default": bool((s.get("disposition") or {}).get("default")),
+                "default": bool(disposition.get("default")),
                 "commentary": "commentary" in title.lower(),
+                "disposition": disposition,
             }
             track["name"] = _audio_line(track)
             audio.append(track)
@@ -678,6 +687,7 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
             "lang": t["lang"],
             "name": t["name"],
             "forced": t["forced"],
+            "default": bool(t.get("default")),
             "codec": t["codec"],
         }
         for t in internal
@@ -685,7 +695,11 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
     entry["external"] = external
     entry["subs"] = _display_lines(internal, external)
     entry["flags"] = _classify_tracks(internal, external)
-    entry["audio"] = audio
+    # The full disposition map is only needed while rewriting a file. Keeping
+    # it out of scans.json keeps the store small and stable.
+    entry["audio"] = [
+        {k: v for k, v in t.items() if k != "disposition"} for t in audio
+    ]
     entry["scanned"] = True
     return key, entry
 
@@ -979,6 +993,31 @@ async def audio_tracks_for(path: str, force: bool = False) -> tuple[list[dict], 
         return list(entry.get("audio") or []), None
     fresh = await rescan_one(path)
     return list(fresh.get("audio") or []), fresh.get("error")
+
+
+async def internal_tracks_for(
+    path: str, force: bool = False
+) -> tuple[list[dict], list[dict], str | None]:
+    """``(subtitles, audio, error)`` for a library video's embedded streams.
+
+    The Internal dialog edits by absolute stream index, so it asks for a fresh
+    probe by default. That also refreshes the scan store for both halves.
+    External subtitle files are deliberately not included; they are managed
+    from the Subtitles dialog.
+    """
+    entry = _state["files"].get(path) or {}
+    if not force and entry.get("scanned"):
+        return (
+            list(entry.get("internal") or []),
+            list(entry.get("audio") or []),
+            None,
+        )
+    fresh = await rescan_one(path)
+    return (
+        list(fresh.get("internal") or []),
+        list(fresh.get("audio") or []),
+        fresh.get("error"),
+    )
 
 
 def _season_episode(path: str) -> tuple[int | None, int | None]:

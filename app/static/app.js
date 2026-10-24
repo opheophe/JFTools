@@ -427,11 +427,11 @@ function hoverMenuAction(text, onClick) {
 
 // ---- row actions -----------------------------------------------------------
 //
-// The action pills a row carries: Open ▾ · Sync ▾ · Play · Subtitles · Audio
-// and, where asked for, Google ▾. One builder so the Search, Movie Match and
-// Libraries tables cannot drift apart; ``cfg.urls`` supplies the base URLs
-// (Jellyfin/Radarr/Sonarr, empty when unconfigured) and ``cfg.google`` adds
-// the trailing Google menu.
+// The action pills a row carries: Open ▾ · Sync ▾ · Play · Subtitles ·
+// Internal and, where asked for, Google ▾. One builder so the Search, Movie
+// Match and Libraries tables cannot drift apart; ``cfg.urls`` supplies the base
+// URLs (Jellyfin/Radarr/Sonarr, empty when unconfigured) and ``cfg.google``
+// adds the trailing Google menu.
 
 function rowActions(r, cfg) {
   cfg = cfg || {};
@@ -471,7 +471,7 @@ function rowActions(r, cfg) {
   const playable = r.path && r.type !== "Series";
   td.appendChild(pillButton("Play", "play", playable ? () => playVideo(r.path) : null));
   td.appendChild(pillButton("Subtitles", "subs", playable ? () => subdlOpen(r.path) : null));
-  td.appendChild(pillButton("Audio", "audio", playable ? () => audioOpen(r.path) : null));
+  td.appendChild(pillButton("Internal", "audio", playable ? () => audioOpen(r.path) : null));
 
   if (cfg.google) td.appendChild(rowGoogleMenu(r));
   return td;

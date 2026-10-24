@@ -1,10 +1,11 @@
-"""Audio tracks — list a video's audio streams and delete one of them.
+"""Internal tracks — list and edit a video's embedded audio/subtitle streams.
 
-Scanning lives in :mod:`app.subtitles` (one ffprobe fills both the subtitle and
-the audio halves of ``data/scans.json``); this module serves the Search tab's
-"Audio" dialog and the one destructive action it offers.
+Scanning lives in :mod:`app.subtitles` (one ffprobe fills both halves of
+``data/scans.json``); this module serves the Search, Movie Match and Libraries
+tabs' "Internal" dialog. It can delete several embedded streams and set one
+default audio and one default subtitle in a single rewrite.
 
-Deleting a track copies every other stream into a temporary file next to the
+The rewrite copies every other stream into a temporary file next to the
 original with ``-c copy`` and replaces the original only after ffmpeg succeeds.
 A failure (unsupported container, full disk, ffmpeg missing) therefore leaves
 the video untouched. The approach mirrors ComTool's ``VTDelete``.
@@ -31,6 +32,7 @@ from .subtitles import (
     _state,
     _write_gate,
     audio_tracks_for,
+    internal_tracks_for,
     resolve_ffmpeg,
     resolve_ffprobe,
 )
@@ -38,9 +40,19 @@ from .web import require_login
 
 router = APIRouter()
 
-# One rewrite at a time per file: two deletes racing would each copy the old
-# file and the second replace would undo the first.
+# One rewrite at a time per file: two edits racing would each copy the old file
+# and the second replace would undo the first.
 _delete_locks: dict[str, asyncio.Lock] = {}
+
+# Disposition flags ffmpeg can write back. The two newer ffprobe-only flags
+# (still_image, multilayer) are deliberately left out: older bundled ffmpeg
+# builds reject them. Everything else a normal video carries is preserved.
+_DISPOSITION_FLAGS = (
+    "default", "dub", "original", "comment", "lyrics", "karaoke", "forced",
+    "hearing_impaired", "visual_impaired", "clean_effects", "attached_pic",
+    "timed_thumbnails", "non_diegetic", "captions", "descriptions", "metadata",
+    "dependent",
+)
 
 
 # ---- routes -----------------------------------------------------------------
@@ -69,6 +81,222 @@ async def audio_existing(
             "error": error,
         }
     )
+
+
+@router.post("/api/internal/existing")
+async def internal_existing(
+    user: str = Depends(require_login),
+    path: str = Form(""),
+):
+    """Every embedded audio and subtitle track for one library video."""
+    path = (path or "").strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    if _library_row(path) is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+
+    subtitles, tracks, error = await internal_tracks_for(path, force=True)
+    return JSONResponse(
+        {
+            "ok": True,
+            "file_mgmt": config.settings.file_mgmt,
+            "subtitles": subtitles,
+            "audio": tracks,
+            "error": error,
+        }
+    )
+
+
+@router.post("/api/internal/execute")
+async def internal_execute(
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+    path: str = Form(""),
+    delete: str = Form(""),
+    default_audio: str = Form(""),
+    default_subtitle: str = Form(""),
+):
+    """Delete marked embedded streams and set the chosen defaults in one pass.
+
+    ``delete`` is a comma-separated list of absolute ffprobe stream indices;
+    ``default_audio``/``default_subtitle`` are optional absolute indices. The
+    file is re-probed here and every index is checked against the live stream
+    list, so the caller cannot map away arbitrary streams.
+    """
+    gate = _write_gate(x_jftools)
+    if gate:
+        return gate
+
+    path = (path or "").strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+
+    deleted, error = _parse_index_list(delete)
+    if error:
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+    audio_default, error = _parse_optional_index(default_audio, "audio default")
+    if error:
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+    subtitle_default, error = _parse_optional_index(
+        default_subtitle, "subtitle default"
+    )
+    if error:
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+
+    if _library_row(path) is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    local = resolve_path(path, config.settings.path_maps)
+    if not local or not os.path.isfile(local):
+        return JSONResponse(
+            {"ok": False, "error": "The video file is not reachable."}, status_code=400
+        )
+    ffprobe = resolve_ffprobe()
+    if not ffprobe:
+        return JSONResponse(
+            {"ok": False, "error": "ffprobe is not available."}, status_code=400
+        )
+    ffmpeg = resolve_ffmpeg()
+    if not ffmpeg:
+        return JSONResponse(
+            {"ok": False, "error": "ffmpeg is not available."}, status_code=400
+        )
+
+    lock = _delete_locks.setdefault(path, asyncio.Lock())
+    if lock.locked():
+        return JSONResponse(
+            {"ok": False, "error": "A track edit is already running for this file."},
+            status_code=409,
+        )
+    async with lock:
+        subtitles, tracks, _duration, probe_error = await asyncio.to_thread(
+            _probe_streams, ffprobe, local
+        )
+        if probe_error:
+            return JSONResponse(
+                {"ok": False, "error": f"Could not probe the file: {probe_error}"},
+                status_code=502,
+            )
+
+        subs_by_index = {t["index"]: t for t in subtitles}
+        audio_by_index = {t["index"]: t for t in tracks}
+        deleted_set = set(deleted)
+        unknown = [
+            i for i in deleted if i not in subs_by_index and i not in audio_by_index
+        ]
+        if unknown:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "Not an audio or subtitle track of this video.",
+                },
+                status_code=403,
+            )
+        if audio_default is not None and audio_default not in audio_by_index:
+            return JSONResponse(
+                {"ok": False, "error": "That is not an audio track of this video."},
+                status_code=403,
+            )
+        if subtitle_default is not None and subtitle_default not in subs_by_index:
+            return JSONResponse(
+                {"ok": False, "error": "That is not a subtitle track of this video."},
+                status_code=403,
+            )
+        if audio_default is not None and audio_default in deleted_set:
+            return JSONResponse(
+                {"ok": False, "error": "A track marked for deletion cannot become the default."},
+                status_code=400,
+            )
+        if subtitle_default is not None and subtitle_default in deleted_set:
+            return JSONResponse(
+                {"ok": False, "error": "A track marked for deletion cannot become the default."},
+                status_code=400,
+            )
+        if not [t for t in tracks if t["index"] not in deleted_set]:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "That would delete every audio track — refusing to leave the file silent.",
+                },
+                status_code=400,
+            )
+
+        audio_edits, audio_target = _default_overrides(
+            tracks, audio_default, deleted_set
+        )
+        subtitle_edits, subtitle_target = _default_overrides(
+            subtitles, subtitle_default, deleted_set
+        )
+        if not deleted_set and not audio_edits and not subtitle_edits:
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "message": "Nothing to change.",
+                    "entry": _state["files"].get(path),
+                    "jellyfin": None,
+                }
+            )
+
+        ok, err = await asyncio.to_thread(
+            _rewrite_tracks,
+            ffmpeg,
+            local,
+            deleted_set,
+            audio_edits,
+            subtitle_edits,
+        )
+        if not ok:
+            log(
+                "Search",
+                "WARN",
+                f"Internal track edit failed ({err}): {os.path.basename(local)}",
+            )
+            return JSONResponse(
+                {"ok": False, "error": err or "ffmpeg failed."}, status_code=502
+            )
+
+        # Stream indices shift when tracks are removed, so both halves of the
+        # stored entry are replaced from a fresh probe.
+        st = await asyncio.to_thread(_stat_path, local)
+        _key, entry = await asyncio.to_thread(_probe_one, ffprobe, path, local, st)
+        _state["files"][path] = entry
+        _save_state()
+
+        jellyfin = None
+        try:
+            from .jellyfin.client import JellyfinError, get_client
+
+            await get_client().scan_paths([path])
+        except JellyfinError as exc:
+            jellyfin = str(exc)
+            log("Search", "WARN", f"Jellyfin rescan after track edit failed: {exc}")
+
+        bits = []
+        if deleted_set:
+            count = len(deleted_set)
+            bits.append(f"Deleted {count} track{'s' if count != 1 else ''}.")
+        if audio_target is not None:
+            name = audio_by_index[audio_target].get("name") or "audio track"
+            bits.append(f"Default audio: {name}.")
+        if subtitle_target is not None:
+            name = subs_by_index[subtitle_target].get("name") or "subtitle track"
+            bits.append(f"Default subtitle: {name}.")
+        message = " ".join(bits) or "Updated the internal tracks."
+        log("Search", "INFO", f"{message} ({os.path.basename(local)})")
+        return JSONResponse(
+            {
+                "ok": True,
+                "message": message,
+                "entry": entry,
+                "deleted": sorted(deleted_set),
+                "default_audio": audio_target,
+                "default_subtitle": subtitle_target,
+                "jellyfin": jellyfin,
+            }
+        )
 
 
 @router.post("/api/audio/delete")
@@ -193,6 +421,123 @@ async def audio_delete(
         )
 
 
+# ---- parsing and dispositions -----------------------------------------------
+
+
+def _parse_index_list(raw: str) -> tuple[list[int] | None, str | None]:
+    """Parse ``"1,3,4"`` into unique non-negative stream indices."""
+    values: list[int] = []
+    raw = raw if isinstance(raw, str) else ""
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError:
+            return None, f"“{part}” is not a stream index."
+        if value < 0:
+            return None, "Stream indices cannot be negative."
+        if value not in values:
+            values.append(value)
+    return values, None
+
+
+def _parse_optional_index(raw: str, label: str) -> tuple[int | None, str | None]:
+    raw = raw.strip() if isinstance(raw, str) else ""
+    if not raw:
+        return None, None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None, f"The {label} index must be a number."
+    if value < 0:
+        return None, f"The {label} index cannot be negative."
+    return value, None
+
+
+def _output_ordinals(tracks: list[dict], deleted: set[int]) -> dict[int, int]:
+    """Map each surviving input stream index to its output type ordinal.
+
+    ``-map 0`` preserves stream order, so the nth surviving audio stream is
+    ``-disposition:a:n``.
+    """
+    ordinal = 0
+    out: dict[int, int] = {}
+    for track in tracks:
+        index = track.get("index")
+        if index in deleted:
+            continue
+        out[index] = ordinal
+        ordinal += 1
+    return out
+
+
+def _default_target(
+    tracks: list[dict], selected: int | None, deleted: set[int]
+) -> int | None:
+    """The index that should carry the default flag after the rewrite.
+
+    An explicit selection wins. Otherwise an existing default survives; if it
+    was deleted, the first remaining track of that type is promoted.
+    """
+    if selected is not None:
+        return selected
+    current = [t for t in tracks if t.get("default")]
+    surviving = [t for t in current if t.get("index") not in deleted]
+    if surviving:
+        return surviving[0].get("index")
+    if current:
+        remaining = [t for t in tracks if t.get("index") not in deleted]
+        return remaining[0].get("index") if remaining else None
+    return None
+
+
+def _disposition_value(disposition: dict, add_default: bool) -> str:
+    """A ``-disposition`` value with every known flag preserved.
+
+    Setting a default with ``-disposition`` replaces the whole flag set, so the
+    original flags (forced, comment, dub, ...) have to be put back too.
+    """
+    flags = [
+        name for name in _DISPOSITION_FLAGS if (disposition or {}).get(name)
+    ]
+    if add_default:
+        if "default" not in flags:
+            flags.append("default")
+    else:
+        flags = [name for name in flags if name != "default"]
+    return "+".join(flags) if flags else "0"
+
+
+def _default_overrides(
+    tracks: list[dict], selected: int | None, deleted: set[int]
+) -> tuple[list[tuple[int, str]], int | None]:
+    """``((output ordinal, disposition value), ...), target index``.
+
+    Only tracks whose default bit actually changes are emitted, so ffmpeg's
+    normal copy leaves every other stream's dispositions untouched.
+    """
+    ordinals = _output_ordinals(tracks, deleted)
+    target = _default_target(tracks, selected, deleted)
+    edits: list[tuple[int, str]] = []
+    for track in tracks:
+        index = track.get("index")
+        if index in deleted:
+            continue
+        want_default = index == target
+        if bool(track.get("default")) == want_default:
+            continue
+        disposition = track.get("disposition")
+        if disposition is None:
+            disposition = {
+                "default": bool(track.get("default")),
+                "forced": bool(track.get("forced")),
+            }
+        edits.append((ordinals[index], _disposition_value(disposition, want_default)))
+    return edits, target
+
+
 # ---- ffmpeg -----------------------------------------------------------------
 
 
@@ -226,6 +571,63 @@ def _remove_track(ffmpeg: str, local: str, index: int, set_default: bool) -> tup
     ]
     if set_default:
         cmd += ["-disposition:a:0", "default"]
+    cmd.append(tmp)
+
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=7200, creationflags=creationflags,
+        )
+        if result.returncode != 0:
+            lines = (result.stderr or "").strip().splitlines()
+            return False, (lines[-1] if lines else f"ffmpeg exit {result.returncode}")
+        os.replace(tmp, local)
+        return True, ""
+    except Exception as exc:  # noqa: BLE001
+        return False, f"ffmpeg error: {exc}"
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _rewrite_tracks(
+    ffmpeg: str,
+    local: str,
+    deleted: set[int],
+    audio_edits: list[tuple[int, str]],
+    subtitle_edits: list[tuple[int, str]],
+) -> tuple[bool, str]:
+    """Rewrite ``local`` deleting streams and applying default dispositions.
+
+    Every stream is mapped, then the deleted ones are subtracted. The copy goes
+    to a temporary file in the same folder so the final ``os.replace`` is
+    atomic, and the original is replaced only after ffmpeg succeeds.
+    """
+    folder = os.path.dirname(local)
+    suffix = os.path.splitext(local)[1]
+    fd, tmp = tempfile.mkstemp(prefix=".jftools-internal-", suffix=suffix, dir=folder)
+    os.close(fd)
+
+    cmd = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", local,
+        # Everything, then subtract the deleted streams. Positive mapping would
+        # drop attachments, chapters and unknown streams the file may carry.
+        "-map", "0",
+    ]
+    for index in sorted(deleted):
+        cmd += ["-map", f"-0:{index}"]
+    cmd += ["-c", "copy"]
+    for ordinal, value in audio_edits:
+        cmd += [f"-disposition:a:{ordinal}", value]
+    for ordinal, value in subtitle_edits:
+        cmd += [f"-disposition:s:{ordinal}", value]
     cmd.append(tmp)
 
     creationflags = 0

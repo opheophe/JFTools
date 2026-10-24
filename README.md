@@ -29,10 +29,12 @@ existing server over the API.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans. **Latest additions** names each item's
   library and carries the same action pills as the other tabs (Open, Sync, Play,
-  Subtitles, Audio, Google).
-- Audio tracks: the **Audio** column lists every embedded track, a filter can
-  match scan state or track count plus a case-insensitive track-name regex, and
-  the **Audio** pill opens a per-track dialog that can delete a track in place.
+  Subtitles, Internal, Google).
+- Internal tracks: the **Audio** column lists every embedded audio track, a
+  filter can match scan state or track count plus a case-insensitive track-name
+  regex, and the **Internal** pill opens a dialog for embedded audio and
+  subtitles — mark several tracks for deletion and choose one default of each
+  type, then execute it in a single in-place rewrite.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT), and an
@@ -299,9 +301,9 @@ Jellyfin to rescan the path. Clicking the **Sync** pill itself runs both.
 Classification matches Subber's Movie List: `acceptable` (English/Swedish/
 Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
 
-## Audio tracks
+## Internal tracks (audio and subtitles)
 
-The **Audio** column lists each file's embedded tracks as
+The **Audio** column lists each file's embedded audio tracks as
 `English (E-AC-3 5.1), Swedish (AAC stereo)`; a trailing `*` marks the default
 track. The **Audio** filter offers **No track**, **Single track**,
 **Multi track**, **Not scanned** (not probed yet) and **Probe failed** (the path
@@ -309,18 +311,20 @@ was unreachable, not a file, or ffprobe failed — the column names the exact
 reason). The **Audio regex** box next to it filters on the track names,
 case-insensitively (`swe|nor`, `5\.1`, …).
 
-The **Audio** pill on a row opens a per-track dialog with a **Delete** button on
-each track. Deleting rewrites the video in place with ffmpeg — every other
-stream is copied as-is — into a temporary file in the same folder, which
-replaces the original only if ffmpeg succeeds. The dialog refuses to delete the
-only audio track, promotes the first remaining track to default if the deleted
-one was default, and asks Jellyfin to rescan the folder. It needs **File
-management** enabled in the settings, and free space equal to the file size.
-There is no batch delete.
+The **Internal** pill on a row opens the embedded-track dialog. It lists the
+audio tracks and the embedded subtitle tracks. Mark any number of rows with
+**Mark as delete**, use **Set default** to choose at most one audio and one
+subtitle default, then press **Execute**. The whole change is one ffmpeg
+rewrite — every other stream is copied as-is — into a temporary file in the
+same folder, which replaces the original only if ffmpeg succeeds. A new default
+replaces the old one; if the default track is deleted without a replacement,
+the first remaining track of that type is promoted. The dialog refuses to
+delete every audio track, and asks Jellyfin to rescan the file afterwards.
 
-An audio track is shown as default if the file marks it so; the dialog also
-flags commentary tracks. Deleting is per file and per track — pick the row,
-pick the track.
+The dialog needs **File management** enabled in the settings, and free space
+equal to the file size. Embedded subtitles are edited here; external subtitle
+files are managed from the **Subtitles** dialog, which can delete and sync
+them. The dialog also flags commentary audio tracks.
 
 ## Subtitles
 
@@ -337,11 +341,12 @@ name on disk (`Onslaught 2026 1080p WEB H264-YTS`), or the Jellyfin item's name
 with its year. The line above the results says which search is on screen.
 
 The dialog lists **every subtitle track** on the video — the embedded tracks
-first (buttons greyed out, since they cannot be changed) and then the external
-files. Each external row has a **Delete** button (Jellyfin is told the file
-changed right away) and a **Sync** button that re-aligns that subtitle to the
-video with [ffsubsync](https://github.com/smacke/ffsubsync) — the original is
-only replaced once the sync succeeds.
+first (read-only here; use the **Internal** dialog to delete or make one
+default) and then the external files. Each external row has a **Delete** button
+(Jellyfin is told the file changed right away) and a **Sync** button that
+re-aligns that subtitle to the video with
+[ffsubsync](https://github.com/smacke/ffsubsync) — the original is only replaced
+once the sync succeeds.
 
 Closing the dialog (clicking outside it, or Escape) re-scans the file with
 ffprobe and asks Jellyfin to refresh that path, so the Subtitles column and
