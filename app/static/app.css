@@ -435,32 +435,32 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-  padding: 1rem 1.25rem; width: 860px; max-width: 96vw; max-height: 82vh;
-  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.75rem 1rem; width: 860px; max-width: 96vw; max-height: 82vh;
+  display: flex; flex-direction: column; gap: 0.4rem;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
 }
 .subdl h3 { margin: 0; }
 .subdl p { margin: 0; }
-.subdl-methods { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.subdl-methods button { font-size: 0.75rem; padding: 0.3rem 0.6rem; }
+.subdl-methods { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.subdl-methods button { font-size: 0.75rem; padding: 0.25rem 0.55rem; }
 .subdl-method.subdl-method-on { color: var(--accent); border-color: var(--accent); }
-.subdl .row { justify-content: flex-end; margin-top: 0.5rem; }
-.subdl-status { min-height: 1.2rem; font-size: 0.85rem; }
+.subdl .row { justify-content: flex-end; margin-top: 0.35rem; }
+.subdl-status { min-height: 1rem; font-size: 0.85rem; }
 .subdl-status .spinner { display: inline-block; }
 .subdl-meta { font-size: 0.8rem; }
-.subdl-meta p { margin-bottom: 0.25rem; }
+.subdl-meta p { margin-bottom: 0.2rem; }
 .subdl-lang { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
 .subdl-lang-sel {
   padding: 0.25rem 0.4rem; color: var(--text);
   background: var(--inset); border: 1px solid var(--border); border-radius: 6px;
 }
 .subdl-list {
-  overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem;
-  border-top: 1px solid var(--border); padding-top: 0.5rem;
+  overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem;
+  border-top: 1px solid var(--border); padding-top: 0.4rem;
 }
 .subdl-item {
-  display: flex; align-items: center; gap: 0.6rem;
-  background: var(--inset); border-radius: 6px; padding: 0.35rem 0.6rem;
+  display: flex; align-items: center; gap: 0.5rem;
+  background: var(--inset); border-radius: 6px; padding: 0.25rem 0.5rem;
 }
 .subdl-line { display: flex; align-items: center; gap: 0.45rem; min-width: 0; flex: 1; }
 .subdl-c-lang { font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
@@ -476,13 +476,13 @@ td.fb-actions { white-space: nowrap; }
 .subdl-btn.subdl-ok { color: var(--ok); border-color: var(--ok); }
 .subdl-fm { font-size: 0.8rem; }
 .subdl-existing {
-  display: flex; flex-direction: column; gap: 0.3rem;
-  border-top: 1px solid var(--border); padding-top: 0.5rem;
+  display: flex; flex-direction: column; gap: 0.25rem; min-height: 0;
+  overflow-y: auto; border-top: 1px solid var(--border); padding-top: 0.4rem;
 }
 .subdl-existing h4 { margin: 0; font-size: 0.8rem; }
 .subdl-subrow {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; font-size: 0.8rem;
-  background: var(--inset); border-radius: 6px; padding: 0.25rem 0.5rem;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; font-size: 0.8rem;
+  background: var(--inset); border-radius: 6px; padding: 0.2rem 0.45rem;
 }
 .subdl-subrow .subdl-name { flex: 1; }
 .subdl-tag {
@@ -503,8 +503,8 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl-check input { margin: 0; }
 .subdl-actions {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
-  margin-top: 0.3rem; border-top: 1px solid var(--border); padding-top: 0.5rem;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+  margin-top: 0.2rem; border-top: 1px solid var(--border); padding-top: 0.4rem;
 }
 .subdl-actions .subdl-help { margin: 0; font-size: 0.75rem; }
 .subdl-actions .subdl-btn { margin-left: auto; flex-shrink: 0; }

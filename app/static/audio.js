@@ -183,8 +183,10 @@ function audioHasChanges() {
 
 function audioRender() {
   const box = document.getElementById("audio-tracks");
+  const footer = document.getElementById("audio-actions");
   if (!box) return;
   box.innerHTML = "";
+  if (footer) footer.innerHTML = "";
 
   audioRenderSection(box, "Audio tracks", audioTracks, "audio",
     "No audio tracks on this file.");
@@ -206,7 +208,8 @@ function audioRender() {
     exec.addEventListener("click", audioExecute);
   }
   actions.appendChild(exec);
-  box.appendChild(actions);
+  // Keep Execute visible while the track list scrolls.
+  (footer || box).appendChild(actions);
 }
 
 async function audioLoad() {
@@ -349,6 +352,7 @@ function audioOpen(path) {
   }));
   box.appendChild(el("div", { id: "audio-status", class: "subdl-status" }));
   box.appendChild(el("div", { id: "audio-tracks", class: "subdl-existing" }));
+  box.appendChild(el("div", { id: "audio-actions" }));
 
   back.appendChild(box);
   document.body.appendChild(back);
