@@ -827,12 +827,11 @@ function bindSettingsBackup() {
         const actions = el("td", { class: "nowrap" });
         const dl = el("a", {
           href: "/api/backup/file?name=" + encodeURIComponent(b.name),
-          class: "btn-edit",
-          style: "text-decoration:none",
+          class: "btn",
           text: "Download",
         });
         dl.setAttribute("download", b.name);
-        const del = el("button", { type: "button", class: "btn-edit", text: "Delete" });
+        const del = el("button", { type: "button", class: "btn-danger", text: "Delete" });
         del.addEventListener("click", async () => {
           if (!window.confirm("Delete " + b.name + "?")) return;
           try {
@@ -921,9 +920,9 @@ function bindPathMaps() {
     const div = el("div", { class: "paths-row" });
     const fromInput = el("input", { type: "text", placeholder: "/Filmer", value: (m && m.from) || "" });
     const toInput = el("input", { type: "text", placeholder: "\\\\NAS\\Filmer", value: (m && m.to) || "" });
-    const testBtn = el("button", { type: "button", class: "btn-edit", text: "Test" });
+    const testBtn = el("button", { type: "button", text: "Test" });
     const testOut = el("span", { class: "path-test" });
-    const rmBtn = el("button", { type: "button", class: "btn-edit", text: "Remove" });
+    const rmBtn = el("button", { type: "button", class: "btn-danger", text: "Remove" });
 
     testBtn.addEventListener("click", async () => {
       const path = fromInput.value.trim();

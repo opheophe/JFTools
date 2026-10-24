@@ -63,7 +63,7 @@ function renderLibraries(libs) {
     tr.appendChild(el("td", { class: "muted", text: lib.type }));
     tr.appendChild(el("td", { text: typeof lib.items === "number" ? String(lib.items) : "—" }));
     const td = el("td");
-    const btn = el("button", { class: "scan-btn", text: "Scan" });
+    const btn = el("button", { class: "scan-btn btn-run", text: "Scan" });
     btn.dataset.libraryId = lib.id;
     btn.dataset.name = lib.name;
     td.appendChild(btn);
@@ -76,7 +76,7 @@ function renderLibraries(libs) {
   tr.appendChild(el("td", { text: "" }));
   tr.appendChild(el("td", { text: String(total) }));
   const td = el("td");
-  const btn = el("button", { class: "scan-btn primary", text: "Scan all" });
+  const btn = el("button", { class: "scan-btn btn-run", text: "Scan all" });
   btn.dataset.scanAll = "1";
   btn.dataset.name = "all libraries";
   td.appendChild(btn);

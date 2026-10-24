@@ -61,7 +61,7 @@ function fbModal(opts) {
       box.appendChild(input);
     }
     const row = el("div", { class: "row" });
-    const ok = el("button", { class: (opts.danger ? "danger" : "primary"), text: opts.okText || "OK" });
+    const ok = el("button", { class: (opts.danger ? "btn-danger" : "primary"), text: opts.okText || "OK" });
     const cancel = el("button", { text: "Cancel" });
     row.appendChild(cancel);
     row.appendChild(ok);
@@ -93,7 +93,7 @@ function fbShowRescan(dir) {
   fbRescan.innerHTML = "";
   fbRescan.hidden = false;
   const text = "Media changed in " + dir;
-  const btn = el("button", { class: "primary", text: "Rescan library folder" });
+  const btn = el("button", { class: "btn-run", text: "Rescan library folder" });
   const dismiss = el("button", { class: "mini", text: "Dismiss" });
   btn.addEventListener("click", () => rescanFile(btn, dir));
   dismiss.addEventListener("click", () => { fbRescan.hidden = true; });
