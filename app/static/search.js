@@ -105,10 +105,10 @@ function seSafeRe(text) {
 }
 
 function seBuildActions(r) {
-  // The Search tab carries no Google menu (its Google links live in the row
-  // popup); everything else is the shared pill set from app.js.
+  // Same pill set as Movie Match, including the Google menu.
   return rowActions(r, {
     urls: { jellyfin: SE.jellyfin, radarr: SE.radarr, sonarr: SE.sonarr },
+    google: true,
   });
 }
 
@@ -547,8 +547,8 @@ document.addEventListener("DOMContentLoaded", () => {
   bindSeControls();
   bindSortHeaders();
   window.subdlRefresh = () => seLoad();
-  // An audio delete returns the freshly probed entry; fold it straight into the
-  // table instead of refetching the whole (large) items payload.
+  // An internal track edit returns the freshly probed entry; fold it straight
+  // into the table instead of refetching the whole (large) items payload.
   window.audioRefresh = (path, entry) => {
     if (path && entry) SE.scans[path] = entry;
     populateOptions();
