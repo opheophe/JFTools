@@ -454,6 +454,27 @@ async def test_internal_existing_returns_audio_and_embedded_subtitles(
     assert seen == {"path": path, "force": True}
 
 
+async def test_internal_existing_returns_smart_marks(audio_env, monkeypatch):
+    _media, _video, path = audio_env
+    subtitles = [
+        {"index": 4, "lang": "English", "name": "English SDH"},
+        {"index": 5, "lang": "Unknown", "name": "Unknown"},
+        {"index": 6, "lang": "French", "name": "French"},
+        {"index": 7, "lang": "Unknown", "name": "Unknown (Czech czh)"},
+    ]
+    monkeypatch.setattr(config._settings, "opensubtitles_languages", "en,sv")
+
+    async def fake_tracks(p, force=False):
+        return subtitles, [], None
+
+    monkeypatch.setattr(audio, "internal_tracks_for", fake_tracks)
+    resp = await audio.internal_existing(user="u", path=path)
+    data = json.loads(resp.body)
+
+    assert data["preferred_languages"] == ["English", "Swedish"]
+    assert data["smart_mark"] == [6, 7]
+
+
 async def test_internal_execute_deletes_multiple_and_sets_both_defaults(
     audio_env, monkeypatch
 ):

@@ -21,8 +21,9 @@ existing server over the API.
   password) — no default credentials. The local password works on your local
   network, and any Jellyfin admin account works from anywhere. Failed-login
   lockout included.
-- Settings page to change the Jellyfin connection **and** the dashboard login at
-  runtime (persisted to a volume; the password is stored as a scrypt hash).
+- Settings page to change the Jellyfin connection, the dashboard login and your
+  preferred subtitle languages at runtime (persisted to a volume; the password
+  is stored as a scrypt hash).
 - Backup: export/import settings as JSON, or download and restore a full ZIP of
   settings and runtime data (scan results, Movie Match marks, schedules), with
   scheduled backups and retention.
@@ -33,8 +34,9 @@ existing server over the API.
 - Internal tracks: the **Audio** column lists every embedded audio track, a
   filter can match scan state or track count plus a case-insensitive track-name
   regex, and the **Internal** pill opens a dialog for embedded audio and
-  subtitles — mark several tracks for deletion and choose one default of each
-  type, then execute it in a single in-place rewrite.
+  subtitles — mark several tracks for deletion with row buttons, choose one
+  default of each type, or let **Smart mark** pick every subtitle outside your
+  preferred languages, then execute it in a single in-place rewrite.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT), and an
@@ -136,7 +138,7 @@ values.
 | `JFTOOLS_PATH_MAP` | Optional. Semicolon-separated `from=to` path mappings, e.g. `/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`. Maps Jellyfin's container paths to paths this machine can open. Also editable in-app (Settings → Media paths). |
 | `JFTOOLS_OPENSUBTITLES_API_KEY` | Optional. OpenSubtitles API key (opensubtitles.com → Consumers) used by subtitle search/download. Also editable in-app. |
 | `JFTOOLS_OPENSUBTITLES_USERNAME` / `JFTOOLS_OPENSUBTITLES_PASSWORD` | Optional. OpenSubtitles account login — raises the daily download quota. |
-| `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Languages searched by default, e.g. `en,sv` (default `en,sv`). |
+| `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Preferred subtitle languages, e.g. `en,sv` (default `en`). Used by OpenSubtitles searches and the Internal dialog's Smart mark. |
 | `PUID` / `PGID` | Container user/group that owns the data files. Set in `docker-compose.yml`. |
 | `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
 
@@ -312,11 +314,17 @@ reason). The **Audio regex** box next to it filters on the track names,
 case-insensitively (`swe|nor`, `5\.1`, …).
 
 The **Internal** pill on a row opens the embedded-track dialog. It lists the
-audio tracks and the embedded subtitle tracks. Mark any number of rows with
-**Mark as delete**, use **Set default** to choose at most one audio and one
-subtitle default, then press **Execute**. The whole change is one ffmpeg
-rewrite — every other stream is copied as-is — into a temporary file in the
-same folder, which replaces the original only if ffmpeg succeeds. A new default
+audio tracks and the embedded subtitle tracks. Toggle any number of rows with
+**Mark delete** / **Unmark**, use **Set default** to choose at most one audio and
+one subtitle default, then press **Execute**. **Smart mark** replaces the
+subtitle marks with every track outside your preferred languages (Settings →
+**Subtitle preferences**). Matching is by language, not exact label, so with
+English preferred, `English SDH`, `En SDH` and `En` all stay unmarked; French,
+`fr`, Czech and similar tracks are marked. Tracks whose language is **Unknown**
+are left unmarked, and Smart mark never changes audio marks. Leaving the
+preferred list empty defaults to English. The whole change is one ffmpeg rewrite
+— every other stream is copied as-is — into a temporary file in the same
+folder, which replaces the original only if ffmpeg succeeds. A new default
 replaces the old one; if the default track is deleted without a replacement,
 the first remaining track of that type is promoted. The dialog refuses to
 delete every audio track, and asks Jellyfin to rescan the file afterwards.

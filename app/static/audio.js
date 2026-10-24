@@ -24,6 +24,8 @@ let audioBusy = false;
 let audioDeleteSet = new Set();
 let audioDefault = null;
 let audioDefaultSub = null;
+let audioPreferred = [];
+let audioSmartMark = [];
 
 const AUDIO_CODECS = {
   aac: "AAC", ac3: "AC3", eac3: "E-AC-3", dts: "DTS", truehd: "TrueHD",
@@ -132,30 +134,30 @@ function audioTrackRow(track, kind) {
   }
   row.appendChild(def);
 
-  const check = el("label", { class: "subdl-check" });
-  const box = el("input", { type: "checkbox" });
-  box.checked = marked;
+  const mark = el("button", {
+    type: "button",
+    class: "subdl-mini subdl-mark" + (marked ? " subdl-mark-on" : ""),
+    text: marked ? "Unmark" : "Mark delete",
+  });
   if (!audioFileMgmt || audioBusy || (kind === "audio" && audioWouldLeaveNoAudio(track))) {
-    box.disabled = true;
-    check.title = !audioFileMgmt
+    mark.disabled = true;
+    mark.title = !audioFileMgmt
       ? "File management is off"
       : (audioBusy ? "A rewrite is running"
         : "At least one audio track must remain");
   } else {
-    box.addEventListener("change", () => {
-      if (box.checked) {
+    mark.addEventListener("click", () => {
+      if (marked) {
+        audioDeleteSet.delete(index);
+      } else {
         audioDeleteSet.add(index);
         if (kind === "audio" && audioDefault === index) audioDefault = null;
         if (kind === "subtitle" && audioDefaultSub === index) audioDefaultSub = null;
-      } else {
-        audioDeleteSet.delete(index);
       }
       audioRender();
     });
   }
-  check.appendChild(box);
-  check.appendChild(document.createTextNode("Mark as delete"));
-  row.appendChild(check);
+  row.appendChild(mark);
   return row;
 }
 
@@ -181,6 +183,32 @@ function audioHasChanges() {
     || audioDefaultChange("subtitle") !== null;
 }
 
+function audioSmartMarkTracks() {
+  if (!audioFileMgmt || audioBusy) return;
+  if (!audioPreferred.length) {
+    audioNotice("Set your preferred subtitle languages on the Settings page first.", "error");
+    return;
+  }
+  // Smart mark replaces subtitle marks only; audio marks are the user's own.
+  audioSubtitles.forEach((t) => audioDeleteSet.delete(t.index));
+  audioSmartMark.forEach((index) => audioDeleteSet.add(index));
+  if (audioDefaultSub !== null && audioSmartMark.includes(audioDefaultSub)) {
+    audioDefaultSub = null;
+  }
+  const count = audioSmartMark.length;
+  const languages = audioPreferred.join(", ");
+  if (count) {
+    audioNotice(
+      "Marked " + count + " non-preferred subtitle track" + (count === 1 ? "" : "s") +
+      " (preferred: " + languages + ").",
+      "ok",
+    );
+  } else {
+    audioNotice("No non-preferred subtitles found (preferred: " + languages + ").", "muted");
+  }
+  audioRender();
+}
+
 function audioRender() {
   const box = document.getElementById("audio-tracks");
   const footer = document.getElementById("audio-actions");
@@ -198,7 +226,25 @@ function audioRender() {
     class: "muted subdl-help",
     text: "One default per type; choosing a new one replaces the current default.",
   }));
-  const exec = el("button", { type: "button", class: "subdl-btn", text: "Execute" });
+  const smart = el("button", {
+    type: "button",
+    class: "subdl-btn subdl-smart",
+    text: "Smart mark",
+  });
+  smart.disabled = !audioFileMgmt || audioBusy || !audioPreferred.length
+    || !audioSubtitles.length;
+  if (smart.disabled) {
+    smart.title = !audioFileMgmt
+      ? "File management is off"
+      : (audioBusy ? "A rewrite is running"
+        : (!audioPreferred.length
+          ? "Set preferred subtitle languages on the Settings page first"
+          : "No embedded subtitles to mark"));
+  } else {
+    smart.addEventListener("click", audioSmartMarkTracks);
+  }
+  actions.appendChild(smart);
+  const exec = el("button", { type: "button", class: "subdl-btn primary", text: "Execute" });
   exec.disabled = !audioFileMgmt || audioBusy || !audioHasChanges();
   if (exec.disabled) {
     exec.title = !audioFileMgmt
@@ -218,6 +264,8 @@ async function audioLoad() {
   audioDeleteSet = new Set();
   audioDefault = null;
   audioDefaultSub = null;
+  audioPreferred = [];
+  audioSmartMark = [];
   try {
     const data = await audioPost("/api/internal/existing", "path=" + encodeURIComponent(audioPath));
     if (!data || !data.ok) {
@@ -228,6 +276,8 @@ async function audioLoad() {
     audioFileMgmt = !!data.file_mgmt;
     audioTracks = (data.audio || []).slice();
     audioSubtitles = (data.subtitles || []).slice();
+    audioPreferred = (data.preferred_languages || []).slice();
+    audioSmartMark = (data.smart_mark || []).slice();
     if (data.error) audioNotice("Probe warning: " + data.error, "error");
     const warn = document.getElementById("audio-fm");
     if (warn) warn.hidden = audioFileMgmt;
@@ -296,6 +346,10 @@ async function audioExecute() {
     audioDefaultSub = null;
     audioTracks = ((data.entry && data.entry.audio) || []).slice();
     audioSubtitles = ((data.entry && data.entry.internal) || []).slice();
+    if (Array.isArray(data.preferred_languages)) {
+      audioPreferred = data.preferred_languages.slice();
+    }
+    audioSmartMark = (data.smart_mark || []).slice();
     let msg = data.message || "Updated.";
     if (data.jellyfin) msg += " (Jellyfin warning: " + data.jellyfin + ")";
     audioNotice(msg, "ok");
@@ -321,6 +375,8 @@ function audioClose() {
   audioDeleteSet = new Set();
   audioDefault = null;
   audioDefaultSub = null;
+  audioPreferred = [];
+  audioSmartMark = [];
   audioBusy = false;
 }
 

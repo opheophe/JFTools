@@ -114,6 +114,11 @@ _FULL_LANG_NAMES = {
     "indonesian": "Indonesian", "hebrew": "Hebrew", "persian": "Persian",
     "icelandic": "Icelandic",
 }
+# Canonical display name -> the shortest code we know. Used when the Settings
+# field accepts names ("Swedish") but OpenSubtitles expects codes ("sv").
+_LANG_CODES: dict[str, str] = {}
+for _code, _name in _LANG_NAMES.items():
+    _LANG_CODES.setdefault(_name, _code)
 
 # ---- persistence ------------------------------------------------------------
 
@@ -235,6 +240,96 @@ def _subtitle_lang_name(code: str) -> str:
     if not c or c == "und":
         return "Unknown"
     return _LANG_NAMES.get(c) or _FULL_LANG_NAMES.get(c) or "Unknown"
+
+
+def _language_token(value: str) -> str:
+    """One language token, lowercased and stripped of a region suffix."""
+    token = re.split(r"[-_]", (value or "").strip(), maxsplit=1)[0].lower()
+    return re.sub(r"[^a-z0-9]", "", token)
+
+
+def normalize_language_codes(raw: str) -> str:
+    """Settings input -> comma-separated codes, accepting full names too.
+
+    OpenSubtitles expects codes, while the Settings field is friendlier if
+    ``English, Swedish`` works as well as ``en,sv``. Unknown tokens are kept
+    as-is so a code we do not know still reaches the search API.
+    """
+    codes: list[str] = []
+    for part in re.split(r"[\s,;]+", (raw or "").strip()):
+        token = _language_token(part)
+        if not token:
+            continue
+        name = _LANG_NAMES.get(token) or _FULL_LANG_NAMES.get(token)
+        code = _LANG_CODES.get(name) if name else None
+        code = code or token
+        if code not in codes:
+            codes.append(code)
+    return ",".join(codes)
+
+
+def preferred_language_names(raw: str | None = None) -> list[str]:
+    """Canonical display names from the preferred-languages setting."""
+    if raw is None:
+        raw = config.settings.opensubtitles_languages
+    if not (raw or "").strip():
+        raw = "en"
+    names: list[str] = []
+    for part in re.split(r"[\s,;]+", (raw or "").strip()):
+        token = _language_token(part)
+        name = _LANG_NAMES.get(token) or _FULL_LANG_NAMES.get(token)
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _language_from_text(text: str) -> str:
+    """Best-effort language from a subtitle title, used only when the tag is
+    missing/unknown. Full names and 3-letter codes are safe anywhere; a
+    2-letter code is only trusted when it is the sole meaningful token, so
+    titles like "No" do not turn into Norwegian by accident."""
+    tokens = [
+        t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if t not in _SUBTITLE_NOISE_TOKENS and t != "unknown"
+    ]
+    for token in tokens:
+        if len(token) < 3:
+            continue
+        name = _LANG_NAMES.get(token) or _FULL_LANG_NAMES.get(token)
+        if name:
+            return name
+        for full, full_name in _FULL_LANG_NAMES.items():
+            if token.startswith(full):
+                rest = token[len(full):]
+                if not rest or rest in _SUBTITLE_NOISE_TOKENS:
+                    return full_name
+    if len(tokens) == 1 and len(tokens[0]) == 2:
+        return _LANG_NAMES.get(tokens[0], "")
+    return ""
+
+
+def smart_subtitle_marks(
+    subtitles: list[dict], raw: str | None = None
+) -> tuple[list[int], list[str]]:
+    """Indices of subtitle tracks outside the preferred languages.
+
+    ``Unknown`` tracks are deliberately left unmarked: deleting a track whose
+    language could not be read is the one mistake Smart mark must not make.
+    Audio marks are handled by the dialog and are never touched here.
+    """
+    preferred = preferred_language_names(raw)
+    if not preferred:
+        return [], []
+    wanted = set(preferred)
+    marks: list[int] = []
+    for track in subtitles:
+        lang = track.get("lang") or "Unknown"
+        if lang == "Unknown":
+            lang = _language_from_text(str(track.get("name") or ""))
+        index = track.get("index")
+        if index is not None and lang and lang != "Unknown" and lang not in wanted:
+            marks.append(index)
+    return marks, preferred
 
 
 def _classify_tracks(internal: list[dict], external: list[dict]) -> dict:

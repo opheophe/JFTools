@@ -9,7 +9,10 @@ from app.subtitles import (
     _external_subtitles,
     _reconcile,
     _subtitle_lang_name,
+    normalize_language_codes,
+    preferred_language_names,
     resolve_ffprobe,
+    smart_subtitle_marks,
 )
 
 
@@ -39,6 +42,53 @@ def _ext(lang="English", forced=False, ai=False, tiny=False, file="x.srt"):
 )
 def test_subtitle_lang_name(code, expected):
     assert _subtitle_lang_name(code) == expected
+
+
+# ---- preferred languages / Smart mark --------------------------------------
+
+
+def test_normalize_language_codes_accepts_codes_names_and_regions():
+    assert normalize_language_codes("en,sv") == "en,sv"
+    assert normalize_language_codes("English, Swedish") == "en,sv"
+    assert normalize_language_codes("eng swe") == "en,sv"
+    assert normalize_language_codes("en-US, sv_SE") == "en,sv"
+    assert normalize_language_codes("English, English") == "en"
+
+
+def test_preferred_language_names_maps_codes_and_names():
+    assert preferred_language_names("en,sv") == ["English", "Swedish"]
+    assert preferred_language_names("English, Swedish") == ["English", "Swedish"]
+    assert preferred_language_names("") == ["English"]
+    assert preferred_language_names("nonsense") == []
+
+
+def test_smart_mark_marks_non_preferred_but_leaves_unknown_alone():
+    subtitles = [
+        {"index": 4, "lang": "English", "name": "English"},
+        {"index": 5, "lang": "English", "name": "English SDH"},
+        {"index": 6, "lang": "English", "name": "En SDH"},
+        {"index": 7, "lang": "Unknown", "name": "Unknown (En SDH)"},
+        {"index": 8, "lang": "Unknown", "name": "Unknown"},
+        {"index": 9, "lang": "Swedish", "name": "Swedish"},
+        {"index": 10, "lang": "French", "name": "French"},
+        {"index": 11, "lang": "Unknown", "name": "Unknown (Czech czh)"},
+        {"index": 12, "lang": "German", "name": "German"},
+        {"index": 13, "lang": "Unknown", "name": "Unknown (fr)"},
+    ]
+
+    marks, preferred = smart_subtitle_marks(subtitles, "en,sv")
+
+    assert preferred == ["English", "Swedish"]
+    assert marks == [10, 11, 12, 13]
+
+
+def test_smart_mark_defaults_to_english_without_a_setting():
+    subtitles = [
+        {"index": 4, "lang": "English", "name": "English SDH"},
+        {"index": 5, "lang": "French", "name": "French"},
+        {"index": 6, "lang": "Unknown", "name": "Unknown"},
+    ]
+    assert smart_subtitle_marks(subtitles, "") == ([5], ["English"])
 
 
 # ---- classification ---------------------------------------------------------

@@ -272,7 +272,7 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "file_mgmt": config.settings.file_mgmt,
             "os_api_key_is_set": bool(config.settings.opensubtitles_api_key),
             "os_username": config.settings.opensubtitles_username,
-            "os_languages": config.settings.opensubtitles_languages,
+            "preferred_languages": config.settings.opensubtitles_languages,
             "backup_dir": config.settings.backup_dir,
             "backup_keep": config.settings.backup_keep,
             "backup_include_logs": config.settings.backup_include_logs,
@@ -378,6 +378,20 @@ async def settings_files_save(
     return _saved(request, f"File management {state}.")
 
 
+@app.post("/settings/subtitles")
+async def settings_subtitles_save(
+    request: Request,
+    user: str = Depends(require_login),
+    preferred_languages: str = Form(""),
+):
+    from .subtitles import normalize_language_codes
+
+    languages = normalize_language_codes(preferred_languages) or "en"
+    config.save_subtitle_languages(languages)
+    log("Jellyfin", "INFO", f"Preferred subtitle languages set to {languages}")
+    return _saved(request, "Subtitle preferences saved.")
+
+
 @app.post("/settings/opensubtitles")
 async def settings_opensubtitles_save(
     request: Request,
@@ -385,20 +399,18 @@ async def settings_opensubtitles_save(
     opensubtitles_api_key: str = Form(""),
     opensubtitles_username: str = Form(""),
     opensubtitles_password: str = Form(""),
-    opensubtitles_languages: str = Form(""),
 ):
     # Blank API key/password fields keep the stored value (they are never
     # echoed back to the page), so a user can save a login without retyping it.
-    from .opensubtitles import normalize_languages
-
+    # Languages now live under Settings -> Subtitle preferences.
     api_key = opensubtitles_api_key.strip() or config.settings.opensubtitles_api_key
     password = opensubtitles_password or config.settings.opensubtitles_password
-    languages = opensubtitles_languages.strip() or config.settings.opensubtitles_languages
-    if not normalize_languages(languages):
-        return JSONResponse(
-            {"ok": False, "error": "Language list is empty."}, status_code=400
-        )
-    config.save_opensubtitles(api_key, opensubtitles_username, password, languages)
+    config.save_opensubtitles(
+        api_key,
+        opensubtitles_username,
+        password,
+        config.settings.opensubtitles_languages,
+    )
     from .opensubtitles import invalidate
 
     invalidate()

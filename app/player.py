@@ -537,7 +537,7 @@ async def play_page(
 
 def _preferred_languages() -> list[str]:
     """Language codes *and* display names the player should show first."""
-    raw = (config.settings.opensubtitles_languages or "en,sv")
+    raw = (config.settings.opensubtitles_languages or "en")
     out: list[str] = []
     for code in (c.strip().lower() for c in raw.split(",")):
         if not code:

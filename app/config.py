@@ -122,7 +122,9 @@ class Settings:
     opensubtitles_api_key: str = ""
     opensubtitles_username: str = ""
     opensubtitles_password: str = ""
-    opensubtitles_languages: str = "en,sv"
+    # Preferred subtitle languages: the default for OpenSubtitles searches and
+    # the language list used by the Internal dialog's Smart mark.
+    opensubtitles_languages: str = "en"
     # Saved filter profiles per page ("search", "moviematch"), managed from that
     # page's profile bar. Kept here so they survive browser clears/backups.
     filter_profiles: dict = field(default_factory=dict)
@@ -184,7 +186,7 @@ class Config:
             opensubtitles_api_key=_env("JFTOOLS_OPENSUBTITLES_API_KEY", ""),
             opensubtitles_username=_env("JFTOOLS_OPENSUBTITLES_USERNAME", ""),
             opensubtitles_password=_env("JFTOOLS_OPENSUBTITLES_PASSWORD", ""),
-            opensubtitles_languages=_env("JFTOOLS_OPENSUBTITLES_LANGUAGES", "en,sv"),
+            opensubtitles_languages=_env("JFTOOLS_OPENSUBTITLES_LANGUAGES", "en"),
         )
         try:
             if self.settings_file.exists():
@@ -326,7 +328,12 @@ class Config:
         if password is not None:
             s.opensubtitles_password = password
         if languages is not None:
-            s.opensubtitles_languages = languages.strip() or "en,sv"
+            s.opensubtitles_languages = languages.strip() or "en"
+        self._persist()
+
+    def save_subtitle_languages(self, languages: str) -> None:
+        """Persist the shared preferred-subtitle-language list."""
+        self._settings.opensubtitles_languages = languages.strip() or "en"
         self._persist()
 
     def save_filter_profiles(self, page: str, profiles: dict) -> None:

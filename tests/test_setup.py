@@ -1,6 +1,20 @@
 from app.config import Config
 
 
+def test_subtitle_language_preferences_default_to_english(tmp_path, monkeypatch):
+    monkeypatch.delenv("JFTOOLS_OPENSUBTITLES_LANGUAGES", raising=False)
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    assert cfg.settings.opensubtitles_languages == "en"
+
+    cfg.save_subtitle_languages("")
+    assert cfg.settings.opensubtitles_languages == "en"
+
+    cfg.save_subtitle_languages("English, Swedish")
+    assert cfg.settings.opensubtitles_languages == "English, Swedish"
+
+
 def test_needs_setup_until_local_login_created(tmp_path, monkeypatch):
     monkeypatch.delenv("JFTOOLS_USERNAME", raising=False)
     monkeypatch.delenv("JFTOOLS_PASSWORD", raising=False)

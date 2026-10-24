@@ -35,6 +35,7 @@ from .subtitles import (
     internal_tracks_for,
     resolve_ffmpeg,
     resolve_ffprobe,
+    smart_subtitle_marks,
 )
 from .web import require_login
 
@@ -98,12 +99,15 @@ async def internal_existing(
         )
 
     subtitles, tracks, error = await internal_tracks_for(path, force=True)
+    smart_mark, preferred = smart_subtitle_marks(subtitles)
     return JSONResponse(
         {
             "ok": True,
             "file_mgmt": config.settings.file_mgmt,
             "subtitles": subtitles,
             "audio": tracks,
+            "smart_mark": smart_mark,
+            "preferred_languages": preferred,
             "error": error,
         }
     )
@@ -231,11 +235,17 @@ async def internal_execute(
             subtitles, subtitle_default, deleted_set
         )
         if not deleted_set and not audio_edits and not subtitle_edits:
+            entry = _state["files"].get(path)
+            smart_mark, preferred = smart_subtitle_marks(
+                (entry or {}).get("internal") or []
+            )
             return JSONResponse(
                 {
                     "ok": True,
                     "message": "Nothing to change.",
-                    "entry": _state["files"].get(path),
+                    "entry": entry,
+                    "smart_mark": smart_mark,
+                    "preferred_languages": preferred,
                     "jellyfin": None,
                 }
             )
@@ -286,6 +296,7 @@ async def internal_execute(
             bits.append(f"Default subtitle: {name}.")
         message = " ".join(bits) or "Updated the internal tracks."
         log("Search", "INFO", f"{message} ({os.path.basename(local)})")
+        smart_mark, preferred = smart_subtitle_marks(entry.get("internal") or [])
         return JSONResponse(
             {
                 "ok": True,
@@ -294,6 +305,8 @@ async def internal_execute(
                 "deleted": sorted(deleted_set),
                 "default_audio": audio_target,
                 "default_subtitle": subtitle_target,
+                "smart_mark": smart_mark,
+                "preferred_languages": preferred,
                 "jellyfin": jellyfin,
             }
         )
