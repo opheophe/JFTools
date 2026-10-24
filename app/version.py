@@ -14,6 +14,7 @@ layers, so it can never drift that way.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 VERSION_FILE = Path(__file__).with_name("VERSION")
@@ -33,3 +34,21 @@ def current_version() -> str:
         if value:
             return value
     return "dev"
+
+
+def current_build_time() -> str:
+    """UTC build time of the installed image, when it can be determined.
+
+    The Dockerfile writes ``app/VERSION`` during the image build, so its
+    modification time is the release build time. Local source checkouts have no
+    VERSION file and simply show no timestamp.
+    """
+    try:
+        stamp = VERSION_FILE.stat().st_mtime
+    except OSError:
+        return ""
+    return (
+        datetime.fromtimestamp(stamp, tz=timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )

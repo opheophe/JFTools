@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from .version import current_version
+from .version import current_build_time, current_version
 from .web import require_login, templates
 
 router = APIRouter()
@@ -95,6 +95,7 @@ async def _about_payload() -> dict:
         published = str(release.get("published_at") or "")[:10]
     return {
         "version": current,
+        "built": current_build_time(),
         "latest": latest,
         "update_available": bool(latest) and _newer(latest, current),
         "github_url": GITHUB_URL,

@@ -1,9 +1,18 @@
 "use strict";
 
+function aboutFormatTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
 async function aboutLoad() {
   try {
     const d = await getJSON("/api/about/refresh");
-    document.getElementById("about-version").textContent = d.version ? "v" + d.version : "—";
+    let installed = d.version ? "v" + d.version : "—";
+    if (d.built) installed += " · built " + aboutFormatTime(d.built);
+    document.getElementById("about-version").textContent = installed;
 
     const latest = document.getElementById("about-latest");
     latest.innerHTML = "";
