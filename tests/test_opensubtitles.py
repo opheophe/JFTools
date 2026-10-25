@@ -724,6 +724,81 @@ async def test_delete_route_deletes_and_notifies(os_env, monkeypatch):
     assert fake.paths == [["/Media/Movie (2020).mkv"]]
 
 
+# ---- rename ------------------------------------------------------------------
+
+
+async def test_rename_route_requires_gate(os_env, monkeypatch):
+    monkeypatch.setattr(config._settings, "file_mgmt", False)
+    resp = await sub.subtitles_rename(
+        path="/Media/Movie (2020).mkv", file="x.srt", language="sv", x_jftools="1"
+    )
+    assert resp.status_code == 403
+    assert "File management" in _json(resp)["error"]
+
+    monkeypatch.setattr(config._settings, "file_mgmt", True)
+    resp = await sub.subtitles_rename(
+        path="/Media/Movie (2020).mkv", file="x.srt", language="sv"
+    )
+    assert resp.status_code == 403
+    assert "security header" in _json(resp)["error"]
+
+
+async def test_rename_route_refuses_foreign_file(os_env):
+    (os_env / "Movie (2020).en.srt").write_bytes(b"x" * 2000)
+    (os_env / "other.srt").write_bytes(b"x" * 2000)
+    resp = await sub.subtitles_rename(
+        path="/Media/Movie (2020).mkv", file="other.srt", language="sv", x_jftools="1"
+    )
+    assert resp.status_code == 403
+
+
+async def test_rename_route_renames_and_notifies(os_env, monkeypatch):
+    import app.jellyfin.client as jf
+
+    (os_env / "Movie (2020).en.srt").write_bytes(b"x" * 2000)
+    monkeypatch.setitem(sub._state, "ok", ["/Media/Movie (2020).mkv"])
+    fake = FakeJFClient()
+    monkeypatch.setattr(jf, "get_client", lambda: fake)
+
+    resp = await sub.subtitles_rename(
+        path="/Media/Movie (2020).mkv", file="Movie (2020).en.srt",
+        language="Swedish", x_jftools="1",
+    )
+    data = _json(resp)
+    assert data["ok"] is True
+    assert data["file"] == "Movie (2020).sv.srt"
+    assert "Renamed" in data["message"]
+    assert (os_env / "Movie (2020).sv.srt").exists()
+    assert not (os_env / "Movie (2020).en.srt").exists()
+    # Marked for a fresh scan and no longer "ok".
+    assert sub._state["files"]["/Media/Movie (2020).mkv"]["scanned"] is False
+    assert "/Media/Movie (2020).mkv" not in sub._state["ok"]
+    # Jellyfin was told the file changed.
+    assert fake.paths == [["/Media/Movie (2020).mkv"]]
+
+
+async def test_rename_route_refuses_an_existing_target(os_env):
+    (os_env / "Movie (2020).en.srt").write_bytes(b"x" * 2000)
+    (os_env / "Movie (2020).sv.srt").write_bytes(b"y" * 2000)
+    resp = await sub.subtitles_rename(
+        path="/Media/Movie (2020).mkv", file="Movie (2020).en.srt",
+        language="sv", x_jftools="1",
+    )
+    assert resp.status_code == 409
+    assert (os_env / "Movie (2020).en.srt").exists()
+
+
+async def test_rename_route_reports_an_unchanged_name(os_env):
+    (os_env / "Movie (2020).en.srt").write_bytes(b"x" * 2000)
+    resp = await sub.subtitles_rename(
+        path="/Media/Movie (2020).mkv", file="Movie (2020).en.srt",
+        language="en", x_jftools="1",
+    )
+    data = _json(resp)
+    assert data["ok"] is True
+    assert "Already named" in data["message"]
+
+
 # ---- sync -------------------------------------------------------------------
 
 

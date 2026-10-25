@@ -54,8 +54,10 @@ let subfindChanged = false;   // a download, sync or delete happened this sessio
 let subfindBack = null;
 let subfindFrame = null;      // the /play iframe on the right
 let subfindCurrent = null;    // {spec, label, kind, file} of the playing track
-let subfindBusy = false;      // a sync/delete request is running
+let subfindBusy = false;      // a sync/delete/rename request is running
 let subfindPendingSpec = null; // spec to select once the player answers hello
+let subfindLanguages = [];    // preferred language codes, for the Rename menu
+let subfindRenameBtn = null;  // the Rename dropdown's button
 
 function subfindLangName(code) {
   const c = (code || "").toLowerCase();
@@ -80,6 +82,8 @@ function subfindClose(apply) {
   subfindCurrent = null;
   subfindBusy = false;
   subfindPendingSpec = null;
+  subfindLanguages = [];
+  subfindRenameBtn = null;
   if (apply && changed && path) subfindResync(path);
 }
 
@@ -228,7 +232,7 @@ function subfindRenderList(langFilter) {
     body.appendChild(line);
     body.appendChild(el("div", { class: "muted subdl-sub", text: subfindMetaText(c) }));
     item.appendChild(body);
-    const dl = el("button", { type: "button", class: "subdl-btn", text: "Download" });
+    const dl = el("button", { type: "button", class: "subdl-btn subdl-dl", text: "Download" });
     dl.addEventListener("click", () => subfindDownload(c, dl));
     item.appendChild(dl);
     listEl.appendChild(item);
@@ -273,9 +277,9 @@ function subfindOnMessage(ev) {
   }
 }
 
-// Enable/disable Sync and Delete for whatever is playing. Only downloaded
-// (external) subtitle files can be synced or deleted — embedded streams are
-// part of the video and are edited in the Internal dialog instead.
+// Enable/disable Sync, Delete and Rename for whatever is playing. Only
+// downloaded (external) subtitle files can be changed — embedded streams are
+// part of the video and are edited in the Tracks dialog instead.
 function subfindUpdateNow() {
   const nameEl = document.getElementById("subfind-now-name");
   const syncBtn = document.getElementById("subfind-sync");
@@ -295,8 +299,73 @@ function subfindUpdateNow() {
             ? "Embedded tracks can't be synced or deleted — download an external subtitle"
             : "Acts on the subtitle playing in the player")));
   });
+  if (subfindRenameBtn) {
+    subfindRenameBtn.disabled = !usable || !subfindLanguages.length;
+    subfindRenameBtn.title = !subfindFileMgmt
+      ? "File management is off"
+      : (subfindBusy ? "Another action is running"
+        : (!cur ? "No subtitle is playing"
+          : (cur.kind !== "external"
+            ? "Embedded tracks can't be renamed — download an external subtitle"
+            : "Rename the playing subtitle to a preferred language")));
+  }
   if (syncBtn && !subfindBusy) syncBtn.textContent = "Sync";
   if (delBtn && !subfindBusy) delBtn.textContent = "Delete";
+}
+
+// The Rename dropdown lists the preferred languages from the Settings page.
+// Picking one renames the playing subtitle to ``<video>.<code><ext>`` — the
+// same shape the downloader writes — and flags the file for a fresh scan.
+function subfindBuildRename() {
+  const slot = document.getElementById("subfind-rename-slot");
+  if (!slot) return;
+  slot.innerHTML = "";
+  subfindRenameBtn = null;
+  const items = (subfindLanguages || []).map((code) =>
+    hoverMenuAction(subfindLangName(code), () => subfindRenameTrack(code))
+  );
+  const wrap = hoverMenuButton("Rename", items, "sfind", null);
+  slot.appendChild(wrap);
+  subfindRenameBtn = wrap.querySelector("button");
+  subfindUpdateNow();
+}
+
+async function subfindRenameTrack(code) {
+  const cur = subfindCurrent;
+  if (!subfindFileMgmt || subfindBusy || !cur || cur.kind !== "external" || !cur.file) return;
+  if (!code) return;
+  const file = cur.file;
+  if (!window.confirm(
+    "Rename " + file + " to the video's name with language " + subfindLangName(code) + "?"
+  )) return;
+  subfindBusy = true;
+  subfindUnlockSound();
+  subfindUpdateNow();
+  try {
+    const data = await subfindPost("/api/subtitles/rename",
+      "path=" + encodeURIComponent(subfindPath) +
+      "&file=" + encodeURIComponent(file) +
+      "&language=" + encodeURIComponent(code));
+    if (!data.ok) {
+      subfindNotice(data.error || "Rename failed.", "error");
+      return;
+    }
+    subfindChanged = true;
+    let msg = data.message || "Renamed.";
+    if (data.jellyfin) msg += " (Jellyfin warning: " + data.jellyfin + ")";
+    subfindNotice(msg, "ok");
+    subfindPlayDone();
+    // The file's name changed: let the player re-list its tracks. It keeps
+    // playing, and re-picks the best (usually the renamed file) track.
+    subfindSend({ action: "reload" });
+    if (window.subfindRefresh) window.subfindRefresh();
+    else if (window.subdlRefresh) window.subdlRefresh();
+  } catch (err) {
+    subfindNotice(String(err), "error");
+  } finally {
+    subfindBusy = false;
+    subfindUpdateNow();
+  }
 }
 
 async function subfindSyncTrack() {
@@ -459,8 +528,10 @@ async function subfindSearch(method) {
     }
     subfindCandidates = data.candidates || [];
     subfindFileMgmt = !!data.file_mgmt;
+    subfindLanguages = (data.languages || []).slice();
     subfindRenderMeta(data);
     subfindRenderList("");
+    subfindBuildRename();
     subfindUpdateNow();
     if (!subfindFileMgmt) {
       const warn = document.getElementById("subfind-fm");
@@ -482,6 +553,8 @@ function subfindOpen(path) {
   subfindCurrent = null;
   subfindBusy = false;
   subfindPendingSpec = null;
+  subfindLanguages = [];
+  subfindRenameBtn = null;
 
   const back = el("div", { class: "subdl-back" });
   const box = el("div", { class: "subdl subfind" });
@@ -506,9 +579,9 @@ function subfindOpen(path) {
 
   const cols = el("div", { class: "subdl-cols" });
   const results = el("div", { class: "subdl-col subdl-results" });
-  // The search buttons belong to the OpenSubtitles column, not the split view.
-  results.appendChild(methods);
   results.appendChild(el("h4", { class: "subdl-col-title", text: "OpenSubtitles results" }));
+  // The search buttons sit under the column header.
+  results.appendChild(methods);
   results.appendChild(el("div", { id: "subfind-meta", class: "subdl-meta" }));
   const langBox = el("div", { id: "subfind-lang", class: "subdl-lang", hidden: true });
   results.appendChild(langBox);
@@ -523,18 +596,19 @@ function subfindOpen(path) {
     class: "subfind-now-name muted",
     text: "No subtitle selected",
   }));
-  const actions = el("div", { class: "subdl-row-actions" });
+  side.appendChild(now);
+  const actions = el("div", { class: "subdl-row-actions subfind-now-actions" });
   const sync = el("button", { type: "button", id: "subfind-sync", class: "subdl-mini subdl-sync", text: "Sync" });
   sync.addEventListener("click", subfindSyncTrack);
   const del = el("button", { type: "button", id: "subfind-del", class: "subdl-mini subdl-del", text: "Delete" });
   del.addEventListener("click", subfindDeleteTrack);
   actions.appendChild(sync);
   actions.appendChild(del);
-  now.appendChild(actions);
-  side.appendChild(now);
+  actions.appendChild(el("span", { id: "subfind-rename-slot" }));
+  side.appendChild(actions);
   side.appendChild(el("p", {
     class: "muted subfind-hint",
-    text: "Download a subtitle and the player picks it up; Sync and Delete act on whichever subtitle is playing.",
+    text: "Download a subtitle and the player picks it up; Sync, Delete and Rename act on whichever subtitle is playing.",
   }));
   const frame = el("iframe", {
     id: "subfind-frame",

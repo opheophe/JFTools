@@ -457,7 +457,13 @@ td.fb-actions { white-space: nowrap; }
 .subdl p { margin: 0; }
 .subdl-methods { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.35rem; }
 .subdl-methods button { font-size: 0.75rem; padding: 0.25rem 0.55rem; }
-.subdl-method.subdl-method-on { color: var(--accent); border-color: var(--accent); }
+.subdl-method {
+  color: var(--teal); border-color: var(--teal); background: rgba(79, 195, 217, 0.06);
+}
+.subdl-method:hover { border-color: var(--teal); background: rgba(79, 195, 217, 0.16); }
+.subdl-method.subdl-method-on {
+  color: #0a151a; background: var(--teal); border-color: var(--teal);
+}
 .subdl .row { justify-content: flex-end; margin-top: 0.35rem; }
 .subdl-status { min-height: 1rem; font-size: 0.85rem; }
 .subdl-status .spinner { display: inline-block; }
@@ -497,7 +503,9 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl-sub { font-size: 0.72rem; overflow-wrap: anywhere; }
 .subdl-btn { flex-shrink: 0; font-size: 0.75rem; }
-.subdl-btn.subdl-ok { color: var(--ok); border-color: var(--ok); }
+.subdl-btn.subdl-dl { color: var(--ok); border-color: var(--ok); }
+.subdl-btn.subdl-dl:hover { background: rgba(62, 207, 142, 0.12); }
+.subdl-btn.subdl-ok { color: var(--ok); border-color: var(--ok); background: rgba(62, 207, 142, 0.14); }
 .subdl-btn.subdl-smart { color: var(--warn); border-color: var(--warn-border); }
 .subdl-btn.subdl-smart:hover { background: rgba(224, 184, 76, 0.12); }
 .subdl-btn.subdl-exec {
@@ -574,6 +582,7 @@ td.fb-actions { white-space: nowrap; }
 .subfind-now { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
 .subfind-now h4 { margin: 0; font-size: 0.8rem; }
 .subfind-now-name { flex: 1 1 auto; min-width: 0; font-size: 0.8rem; overflow-wrap: anywhere; }
+.subfind-now-actions { margin-left: 0; }
 .subfind-hint { font-size: 0.72rem; margin: 0; }
 .subfind-frame {
   flex: 1 1 auto; min-height: 10rem; width: 100%; display: block;

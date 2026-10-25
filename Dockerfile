@@ -24,6 +24,9 @@ RUN apt-get update \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# ffsubsync aligns subtitles with the video's audio (the dialog Sync buttons).
+# Windows bundles ship Tools/ffsubsync.exe; the image installs the pip CLI.
+RUN pip install --no-cache-dir "ffsubsync==0.5.1"
 
 COPY app ./app
 COPY resources ./resources

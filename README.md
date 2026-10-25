@@ -387,9 +387,11 @@ JFTools saves `<video-name>.<language>.srt` next to the video.
 
 The **Subfind** pill is the same dialog with the right column replaced by a
 live player: a downloaded subtitle starts playing immediately, later downloads
-switch the subtitle without restarting the video, and **Sync** / **Delete**
-above the player act on whichever subtitle is playing at that moment (a
-success chime plays when they finish).
+switch the subtitle without restarting the video, and the **Sync**,
+**Delete** and **Rename** buttons under the **Now playing** header act on
+whichever subtitle is playing at that moment (a success chime plays when they
+finish). **Rename** lists the preferred languages and renames the playing
+subtitle to `<video>.<language>.srt`, the same shape the downloader writes.
 
 The dialog's **Search Hash**, **Search Filename** and **Search Jellyfin name**
 buttons re-run the search one way instead of the default, for when the automatic
@@ -423,7 +425,8 @@ rescan (or the **Media scan** button / scheduled scan) re-probes it. A manual
   key at opensubtitles.com). The key alone works anonymously (~5 downloads/day);
   adding your account username/password raises it to the free-account quota
   (~20/day). The dialog shows how many downloads remain.
-- **ffsubsync** for the per-subtitle **Sync** button — drop `ffsubsync.exe` in a
+- **ffsubsync** for the per-subtitle **Sync** button — the Docker image ships
+  it (`pip` install). For a native Windows install, drop `ffsubsync.exe` in a
   `Tools` folder next to the app, put it on PATH, or set `JFTOOLS_FFSUBSYNC`.
   (ffmpeg/ffprobe are found the same way.) Without it the button reports that
   ffsubsync is missing.

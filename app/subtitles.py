@@ -1750,6 +1750,100 @@ async def subtitles_delete(
     )
 
 
+@router.post("/api/subtitles/rename")
+async def subtitles_rename(
+    user: str = Depends(require_login),
+    x_jftools: str = Header(default=""),
+    path: str = Form(""),
+    file: str = Form(""),
+    language: str = Form(""),
+):
+    """Rename one external subtitle file to ``<video-stem>.<code><ext>``.
+
+    Write-gated like the other file mutations. ``language`` is a code or a
+    display name; the new name matches what the downloader writes. The file
+    must be one of the video's own external subtitles, so this can never touch
+    an arbitrary file.
+    """
+    gate = _write_gate(x_jftools)
+    if gate:
+        return gate
+
+    path = (path or "").strip()
+    file = (file or "").strip()
+    language = (language or "").strip()
+    if not path or not file:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    if _library_row(path) is None:
+        return JSONResponse(
+            {"ok": False, "error": "Not in the library list."}, status_code=404
+        )
+    code = normalize_language_codes(language).split(",")[0] if language else ""
+    if not code:
+        return JSONResponse(
+            {"ok": False, "error": "No language to rename to."}, status_code=400
+        )
+    local = resolve_path(path, config.settings.path_maps)
+    if not local or not os.path.isfile(local):
+        return JSONResponse(
+            {"ok": False, "error": "The video file is not reachable."}, status_code=400
+        )
+    if file not in {e["file"] for e in _external_subtitles(local)}:
+        return JSONResponse(
+            {"ok": False, "error": "That subtitle does not belong to this video."},
+            status_code=403,
+        )
+
+    folder = os.path.dirname(local)
+    ext = Path(file).suffix.lower()
+    target_name = f"{Path(local).stem}.{code}{ext}"
+    if target_name == file:
+        return JSONResponse(
+            {"ok": True, "message": f"Already named {file}.", "file": file}
+        )
+    if os.path.lexists(os.path.join(folder, target_name)):
+        return JSONResponse(
+            {
+                "ok": False,
+                "exists": True,
+                "error": f"{target_name} already exists.",
+            },
+            status_code=409,
+        )
+
+    from .files import browser_roots, rename_entry
+
+    result = rename_entry(os.path.join(folder, file), target_name, browser_roots())
+    if not result.get("ok"):
+        log("Search", "WARN", f"Subtitle rename refused ({result.get('error')}): {file}")
+        return JSONResponse(
+            {"ok": False, "error": result.get("error") or "Rename failed."},
+            status_code=400,
+        )
+
+    _mark_unscanned(path)
+
+    # Tell Jellyfin the file changed so the new name shows up right away.
+    jellyfin = None
+    try:
+        from .jellyfin.client import JellyfinError, get_client
+
+        await get_client().scan_paths([path])
+    except JellyfinError as exc:
+        jellyfin = str(exc)
+        log("Search", "WARN", f"Jellyfin rescan after rename failed: {exc}")
+
+    log("Search", "INFO", f"Renamed subtitle: {file} -> {target_name}")
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": f"Renamed {file} to {target_name}.",
+            "file": target_name,
+            "jellyfin": jellyfin,
+        }
+    )
+
+
 @router.post("/api/subtitles/sync")
 async def subtitles_sync(
     user: str = Depends(require_login),

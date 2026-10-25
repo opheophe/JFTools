@@ -192,7 +192,7 @@ function subdlRenderList(langFilter) {
     body.appendChild(line);
     body.appendChild(el("div", { class: "muted subdl-sub", text: subdlMetaText(c) }));
     item.appendChild(body);
-    const dl = el("button", { type: "button", class: "subdl-btn", text: "Download" });
+    const dl = el("button", { type: "button", class: "subdl-btn subdl-dl", text: "Download" });
     dl.addEventListener("click", () => subdlDownload(c, dl));
     item.appendChild(dl);
     listEl.appendChild(item);
