@@ -39,6 +39,8 @@ let plStatusHold = false; // the status line is explaining something, not noting
 let plPlayTries = 0;    // rejected play() attempts, for the retry ladder
 let plCaptionText = null;
 let plSyncTimer = null; // drift correction while the companion audio plays
+let plTranscodeUrl = ""; // a Jellyfin H.264 stream for files this browser can't decode
+let plTranscoded = false; // already switched to that stream?
 
 function plEl(tag, props) {
   const node = document.createElement(tag);
@@ -329,6 +331,7 @@ async function plLoadTracks() {
       return;
     }
     plBuildTrackSelect(data.tracks || []);
+    plTranscodeUrl = data.transcode_url || "";
     plHandleAudio(data);
   } catch (err) {
     plBuildTrackSelect([]);
@@ -581,6 +584,33 @@ function plSuggestCopy(message) {
   plPrepare.hidden = false;
   plPrepare.disabled = false;
 }
+
+// The original file's video codec (e.g. HEVC/x265) is not decodable here.
+// Ask Jellyfin for an on-the-fly H.264/AAC stream of the same item instead.
+// The subtitle <track> elements are children of the video element, so they
+// keep working across the switch, and the position is preserved.
+function plSwitchToTranscode() {
+  if (!plTranscodeUrl || plTranscoded) return false;
+  plTranscoded = true;
+  plDead = false;
+  const at = plVideo.currentTime || 0;
+  plSetStatus(
+    "This browser can't play the file's video codec — streaming a converted copy from Jellyfin…",
+    "warn",
+  );
+  const restore = () => {
+    plVideo.removeEventListener("loadedmetadata", restore);
+    if (at > 0) {
+      try { plVideo.currentTime = at; } catch (err) { /* ignore */ }
+    }
+    plApplyModes(plCurrent);
+    plTryPlay();
+  };
+  plVideo.addEventListener("loadedmetadata", restore);
+  plVideo.src = plTranscodeUrl;
+  plVideo.load();
+  return true;
+}
 // Ask the server why the video element gave up. A file that is not reachable
 // (bad Media paths, or gone from disk) is not something a remux can fix, so
 // report the server's own message instead of suggesting a browser copy.
@@ -623,8 +653,18 @@ async function plOnVideoError() {
     );
     return;
   }
+  if (plTranscoded) {
+    // The Jellyfin stream failed as well: don't loop back to the direct file.
+    plSetStatus(
+      "The converted Jellyfin stream could not be played either — transcoding " +
+        "may be disabled on the Jellyfin server.",
+      "error"
+    );
+    return;
+  }
   plDead = true;
   plSetOverlay(false);
+  if (plSwitchToTranscode()) return;
   await plExplainFailure(
     "This browser can't play the file as it is (usually the container, video " +
       "or audio codec). Make a browser copy to remux it with ffmpeg."
@@ -684,7 +724,9 @@ function plInit() {
   });
 
   plVideo.addEventListener("stalled", () => {
-    if (!plVideo.duration) plSuggestCopy("The browser stopped loading this file. Make a browser copy if it won't play.");
+    if (!plVideo.duration && !plTranscoded) {
+      plSuggestCopy("The browser stopped loading this file. Make a browser copy if it won't play.");
+    }
   });
 
   // A file the browser silently refuses to decode never fires "error" on every

@@ -714,6 +714,35 @@ def _pick_default(tracks: list[dict]) -> int:
     return -1
 
 
+def _jellyfin_transcode_url(path: str) -> str:
+    """A Jellyfin on-the-fly H.264/AAC stream for this library item, or "".
+
+    Used when the browser cannot decode the original video codec (HEVC/x265
+    and friends): Jellyfin transcodes the item to H.264 while the video
+    element keeps its subtitle <track> elements. Needs Jellyfin configured
+    and the item's id known (a file browsed outside the library has none).
+    """
+    import urllib.parse
+
+    from .subtitles import _library_row
+
+    row = _library_row(path)
+    if not row or not row.get("id"):
+        return ""
+    base = (config.settings.jellyfin_url or "").strip().rstrip("/")
+    key = (config.settings.jellyfin_api_key or "").strip()
+    if not base or not key:
+        return ""
+    params = urllib.parse.urlencode({
+        "static": "true",
+        "api_key": key,
+        "VideoCodec": "h264",
+        "AudioCodec": "aac",
+        "AudioSampleRate": "48000",
+    })
+    return f"{base}/Videos/{row['id']}/stream.mp4?{params}"
+
+
 @router.get("/api/player/tracks")
 async def player_tracks(user: str = Depends(require_login), path: str = Query("")):
     """Every subtitle track for one library video, as the player should list it."""
@@ -796,6 +825,7 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
         "copy_reason": reason,
         "copy_ready": _prepared_file(path) is not None,
         "audio_ready": _prepared_audio(path) is not None,
+        "transcode_url": _jellyfin_transcode_url(path),
     })
 
 

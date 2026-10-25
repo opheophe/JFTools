@@ -513,6 +513,15 @@ the container or video codec is something the browser cannot open. Then the
 keeping the position. This is the slow path, and it is no longer used for audio
 problems.
 
+Before that, for a video codec the browser cannot decode (x265/HEVC rips,
+which no browser plays without OS codec support), the player asks
+**Jellyfin to stream a converted H.264/AAC copy** of the item instead — it
+needs Jellyfin configured with transcoding, and the item must be in the Movie
+Match list (it is whenever the row was opened from there). Subtitle tracks
+keep working because they are attached to the video element, not the stream,
+and the position is preserved. If Jellyfin is unavailable or refuses, the
+**Make browser copy** fallback remains.
+
 **Requirements:** ffmpeg (bundled in the Docker image, or in `Tools/` next to
 the app) for embedded subtitle extraction, audio conversion and browser
 copies. Without it the player still streams files the browser can decode, but

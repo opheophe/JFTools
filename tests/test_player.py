@@ -16,6 +16,7 @@ from app import player
 from app.config import config
 from app.main import app
 from app.web import require_login
+import app.subtitles as sub
 
 
 def _client() -> httpx.AsyncClient:
@@ -405,6 +406,53 @@ async def test_tracks_route_reports_converted_audio_that_already_exists(
     data = resp.json()
     assert data["audio_ready"] is True
     assert data["copy_ready"] is False
+
+
+async def test_tracks_route_includes_the_jellyfin_transcode_url(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+
+    async def no_tracks(path):
+        return ([], [])
+
+    monkeypatch.setattr(player, "subtitle_tracks_for", no_tracks)
+    monkeypatch.setattr(
+        player, "_audio_info", lambda local: {"codec": "aac", "channels": 2, "layout": "stereo"}
+    )
+    monkeypatch.setattr(sub, "_library_row", lambda p: {"id": "abc123"})
+    monkeypatch.setattr(config._settings, "jellyfin_url", "http://jf:8096/")
+    monkeypatch.setattr(config._settings, "jellyfin_api_key", "sekret")
+
+    async with _client() as client:
+        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+    data = resp.json()
+    assert data["transcode_url"].startswith("http://jf:8096/Videos/abc123/stream.mp4?")
+    assert "static=true" in data["transcode_url"]
+    assert "VideoCodec=h264" in data["transcode_url"]
+
+
+def test_jellyfin_transcode_url_needs_a_row_and_jellyfin(monkeypatch):
+    monkeypatch.setattr(sub, "_library_row", lambda p: {"id": "abc123"})
+    monkeypatch.setattr(config._settings, "jellyfin_url", "http://jf:8096/")
+    monkeypatch.setattr(config._settings, "jellyfin_api_key", "sekret")
+
+    url = player._jellyfin_transcode_url("/Media/Movie (2020).mkv")
+    assert url.startswith("http://jf:8096/Videos/abc123/stream.mp4?")
+    assert "static=true" in url
+    assert "api_key=sekret" in url
+    assert "VideoCodec=h264" in url
+    assert "AudioCodec=aac" in url
+
+    # No library row -> no stream.
+    monkeypatch.setattr(sub, "_library_row", lambda p: None)
+    assert player._jellyfin_transcode_url("/Media/Movie (2020).mkv") == ""
+
+    # Jellyfin unconfigured -> no stream.
+    monkeypatch.setattr(sub, "_library_row", lambda p: {"id": "abc123"})
+    monkeypatch.setattr(config._settings, "jellyfin_url", "")
+    monkeypatch.setattr(config._settings, "jellyfin_api_key", "")
+    assert player._jellyfin_transcode_url("/Media/Movie (2020).mkv") == ""
 
 
 def test_pick_default_prefers_the_configured_languages(monkeypatch):
