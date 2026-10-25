@@ -186,13 +186,21 @@ function MultiSelect(container, options, onChange) {
   container.appendChild(btn);
   container.appendChild(menu);
 
+  // A section marker is {section: "Label"}; it divides the menu but is not a
+  // selectable value. The same value may appear in more than one section (for
+  // example "No subtitles" under Language and Quality); those checkboxes share
+  // one selection.
+  const isSection = (o) => o && o.section !== undefined && o.value === undefined;
+  const values = () => [...new Set(opts.filter((o) => !isSection(o)).map((o) => o.value))];
+
   const labelFor = (v) => {
-    const o = opts.find((x) => x.value === v);
+    const o = opts.find((x) => !isSection(x) && x.value === v);
     return o ? o.label : v;
   };
 
   function renderButton() {
-    if (selected.size === 0 || selected.size === opts.length) {
+    const total = values().length;
+    if (selected.size === 0 || selected.size === total) {
       btn.textContent = "All";
     } else if (selected.size <= 2) {
       btn.textContent = [...selected].map(labelFor).join(", ");
@@ -204,11 +212,21 @@ function MultiSelect(container, options, onChange) {
   function renderMenu() {
     menu.innerHTML = "";
     opts.forEach((o) => {
+      if (isSection(o)) {
+        menu.appendChild(el("div", { class: "ms-section", text: o.section }));
+        return;
+      }
       const row = el("label", { class: "ms-item" });
       const cb = el("input", { type: "checkbox" });
       cb.checked = selected.has(o.value);
+      cb.dataset.value = String(o.value);
       cb.addEventListener("change", () => {
         if (cb.checked) selected.add(o.value); else selected.delete(o.value);
+        // Duplicate values live in separate sections; keep every checkbox for
+        // this value in step with the shared selection.
+        menu.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+          if (box.dataset.value === String(o.value)) box.checked = selected.has(o.value);
+        });
         renderButton();
         onChange([...selected]);
       });
@@ -229,7 +247,7 @@ function MultiSelect(container, options, onChange) {
 
   function setOptions(newOptions) {
     opts = newOptions || [];
-    const valid = new Set(opts.map((o) => o.value));
+    const valid = new Set(values());
     [...selected].forEach((v) => { if (!valid.has(v)) selected.delete(v); });
     renderButton();
     renderMenu();
@@ -237,7 +255,8 @@ function MultiSelect(container, options, onChange) {
 
   function setValues(vals) {
     selected.clear();
-    (vals || []).forEach((v) => { if (opts.some((o) => o.value === v)) selected.add(v); });
+    const valid = new Set(values());
+    (vals || []).forEach((v) => { if (valid.has(v)) selected.add(v); });
     renderButton();
     renderMenu();
   }

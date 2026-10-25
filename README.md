@@ -300,8 +300,26 @@ Jellyfin to rescan the path. Clicking the **Sync** pill itself runs both.
   - **Windows:** drop `ffprobe.exe` into a `Tools/` folder next to the app, or
     set `JFTOOLS_FFPROBE` to its path.
 
-Classification matches Subber's Movie List: `acceptable` (English/Swedish/
-Unknown), `AI Sub`, `Forced`, `Foreign`, `No subs`.
+The Search tab's **Subtitles** filter is grouped into four sections, and each
+one can cover the whole library when all of its options are selected:
+
+- **Language** — **Preferred languages** (the Settings → Subtitle preferences),
+  **Foreign languages**, **Unknown** (including items not scanned yet or whose
+  probe failed), and **No subtitles** (a scanned file with no tracks).
+- **Acceptable** — **Acceptable** means a normal subtitle in a preferred
+  language, AI or not; **Acceptable AI** is the AI-generated subset; **Not
+  acceptable** is everything else.
+- **Quality** — **Good subtitle** is any normal subtitle in any language, AI or
+  not, excluding forced and tiny files. **Forced subtitles** and **Tiny
+  subtitles** call out those special kinds; **No subtitles**, **Not scanned**
+  and **Failed probe** cover the remaining states.
+- **Scan** — **Not scanned**, **Failed probe** and **Scanned**. Series folders
+  count as **Not scanned** because there is no media file to probe; their
+  episodes are separate rows.
+
+The same value can appear in more than one section (for example **No
+subtitles** under Language and Quality); the checkboxes stay in sync. Matching
+uses the preferred languages from Settings, not a fixed English/Swedish list.
 
 ## Internal tracks (audio and subtitles)
 

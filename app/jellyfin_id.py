@@ -559,8 +559,9 @@ async def search_page(request: Request, user: str = Depends(require_login)):
 
 @router.get("/api/jellyfin-id/items")
 async def jellyfin_id_items(request: Request, user: str = Depends(require_login)):
-    from .subtitles import scans_map, subtitles_ok
+    from .subtitles import preferred_language_names, scans_map, subtitles_ok
 
+    preferred = preferred_language_names()
     return JSONResponse(
         {
             "ok": True,
@@ -571,9 +572,10 @@ async def jellyfin_id_items(request: Request, user: str = Depends(require_login)
             "jellyfin_url": config.settings.jellyfin_url,
             "radarr_url": config.settings.radarr_url,
             "sonarr_url": config.settings.sonarr_url,
-            # One entry per path: subtitle half (internal/external/subs/flags)
-            # and audio half (audio), each with its own scanned flag.
-            "scans": scans_map(),
+            # Fresh flags from the stored tracks, matching the current
+            # Settings preferred languages without waiting for a rescan.
+            "scans": scans_map(preferred),
+            "preferred_languages": preferred,
             "subtitles_ok": subtitles_ok(),
         }
     )

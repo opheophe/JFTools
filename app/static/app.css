@@ -579,12 +579,18 @@ td.fb-actions { white-space: nowrap; }
 .ms-menu {
   position: absolute; top: 100%; left: 0; z-index: 20; margin-top: 4px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  padding: 0.3rem; max-height: 240px; overflow-y: auto; min-width: 140px;
+  padding: 0.3rem; max-height: 320px; overflow-y: auto; min-width: 170px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
 }
 .ms-item { display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.15rem 0.35rem; cursor: pointer; font-size: 0.85rem; color: var(--text); }
 .ms-item:hover { background: var(--inset); }
 .ms-item input[type="checkbox"] { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.ms-section {
+  margin: 0.3rem -0.3rem 0.15rem; padding: 0.3rem 0.55rem 0.15rem;
+  border-top: 1px solid var(--border); color: var(--muted);
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.ms-menu > .ms-section:first-child { margin-top: 0; padding-top: 0.15rem; border-top: 0; }
 
 /* Logs tab */
 .logs-layout { display: flex; gap: 1rem; height: 70vh; }

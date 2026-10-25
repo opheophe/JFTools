@@ -5,6 +5,8 @@ import httpx
 
 import app.jellyfin_id as jid
 from app.jellyfin.client import JellyfinClient
+from app.main import app
+from app.web import require_login
 from app.jellyfin_id import (
     _fetch_favorites,
     _fetch_items,
@@ -228,6 +230,39 @@ async def test_fetch_favorites_shapes_map_and_inverse():
     assert by_id["m1"] == {"Alice"}
     assert by_id["s1"] == {"Alice"}
     assert by_id["e1"] == {"Bob"}
+
+async def test_items_payload_reports_preferred_languages_and_fresh_flags(monkeypatch):
+    import app.subtitles as sub
+
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        monkeypatch.setattr(jid, "_state", {
+            "rows": [{"path": "/x.mkv"}],
+            "marks": set(),
+            "last_sync": None,
+        })
+        monkeypatch.setitem(sub._state, "files", {
+            "/x.mkv": {
+                "scanned": True,
+                "internal": [{"lang": "Swedish", "forced": False}],
+                "external": [],
+                # Stale flags from a scan made with English preferred.
+                "flags": {"acceptable": False},
+            },
+        })
+        monkeypatch.setattr(sub, "preferred_language_names", lambda: ["Swedish"])
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/jellyfin-id/items")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["preferred_languages"] == ["Swedish"]
+        assert data["scans"]["/x.mkv"]["flags"]["acceptable"] is True
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
 
 async def test_run_fetch_cancelled_leaves_non_running_status(monkeypatch):
     started = asyncio.Event()

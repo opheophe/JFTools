@@ -94,49 +94,113 @@ def test_smart_mark_defaults_to_english_without_a_setting():
 # ---- classification ---------------------------------------------------------
 
 
+PREFERRED = ["English", "Swedish"]
+
+
 def test_classify_nothing_is_nosubs():
-    flags = _classify_tracks([], [])
+    flags = _classify_tracks([], [], PREFERRED)
     assert flags == {
+        "preferred": False,
+        "foreign": False,
+        "unknown": False,
+        "good": False,
         "acceptable": False,
+        "acceptable_ai": False,
         "ai": False,
         "forced": False,
-        "foreign": False,
+        "tiny": False,
         "nosubs": True,
     }
 
 
 def test_classify_internal_english_acceptable():
-    flags = _classify_tracks([_int("English")], [])
+    flags = _classify_tracks([_int("English")], [], PREFERRED)
     assert flags["acceptable"] is True
+    assert flags["preferred"] is True
+    assert flags["good"] is True
     assert flags["nosubs"] is False
 
 
-def test_classify_external_english_acceptable():
-    flags = _classify_tracks([], [_ext("English")])
+def test_classify_external_swedish_acceptable():
+    flags = _classify_tracks([], [_ext("Swedish")], PREFERRED)
     assert flags["acceptable"] is True
+    assert flags["preferred"] is True
 
 
 def test_classify_forced_not_acceptable():
-    flags = _classify_tracks([_int("English", forced=True)], [])
+    flags = _classify_tracks([_int("English", forced=True)], [], PREFERRED)
     assert flags["forced"] is True
+    assert flags["good"] is False
     assert flags["acceptable"] is False
+    # Language still counts a forced track.
+    assert flags["preferred"] is True
 
 
 def test_classify_foreign():
-    flags = _classify_tracks([], [_ext("French")])
+    flags = _classify_tracks([], [_ext("French")], PREFERRED)
     assert flags["foreign"] is True
+    assert flags["good"] is True
     assert flags["acceptable"] is False
 
 
-def test_classify_ai_is_not_acceptable():
-    flags = _classify_tracks([], [_ext("English", ai=True, file="x.english_ai.srt")])
+def test_classify_ai_in_a_preferred_language_is_acceptable():
+    flags = _classify_tracks(
+        [], [_ext("English", ai=True, file="x.english_ai.srt")], PREFERRED
+    )
     assert flags["ai"] is True
+    assert flags["acceptable"] is True
+    assert flags["acceptable_ai"] is True
+
+
+def test_classify_unrelated_ai_does_not_downgrade_acceptable():
+    flags = _classify_tracks(
+        [],
+        [
+            _ext("English", file="x.en.srt"),
+            _ext("French", ai=True, file="x.fr_ai.srt"),
+        ],
+        PREFERRED,
+    )
+    assert flags["acceptable"] is True
+    assert flags["acceptable_ai"] is False
+    assert flags["foreign"] is True
+
+
+def test_classify_tiny_is_not_good_or_acceptable():
+    flags = _classify_tracks([], [_ext("English", tiny=True)], PREFERRED)
+    assert flags["tiny"] is True
+    assert flags["good"] is False
     assert flags["acceptable"] is False
+    assert flags["nosubs"] is False
 
 
-def test_classify_tiny_ignored():
-    flags = _classify_tracks([], [_ext("English", tiny=True)])
-    assert flags["nosubs"] is True
+def test_classify_unknown_language():
+    flags = _classify_tracks([], [_ext("Unknown")], PREFERRED)
+    assert flags["unknown"] is True
+    assert flags["foreign"] is False
+    assert flags["acceptable"] is False
+    # Unknown is still a normal subtitle, so Quality's Good catches it.
+    assert flags["good"] is True
+
+
+def test_scans_map_rebuilds_flags_with_current_preferences(monkeypatch):
+    import app.subtitles as sub
+
+    entry = {
+        "scanned": True,
+        "internal": [{"lang": "Swedish", "forced": False}],
+        "external": [],
+        "flags": {"acceptable": False},
+    }
+    monkeypatch.setitem(sub._state, "files", {"/x.mkv": entry})
+
+    english = sub.scans_map(["English"])
+    swedish = sub.scans_map(["Swedish"])
+
+    assert english["/x.mkv"]["flags"]["acceptable"] is False
+    assert swedish["/x.mkv"]["flags"]["acceptable"] is True
+    # The stored entry keeps its old flags until the next scan saves them.
+    assert sub._state["files"]["/x.mkv"]["flags"]["acceptable"] is False
 
 
 # ---- external subtitle detection -------------------------------------------

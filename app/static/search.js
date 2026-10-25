@@ -16,18 +16,80 @@ const PAGE_SIZE = 50;
 const FAV_ANY = "__any__";
 const FAV_NONE = "__none__";
 
-// Subtitle "Show" filter options (same as Subber's Movie List).
-const SUBS_OPTIONS = ["Not scanned", "Acceptable", "AI Sub", "No acceptable", "No acceptable (inc. AI)", "Forced", "Foreign", "No subs"]
-  .map((v) => ({ value: v, label: v }));
+// Subtitle filters, grouped for the dropdown. The same value may appear in
+// more than one section; the shared MultiSelect keeps those checkboxes in
+// sync, and SUBS_PREDS gives that value one meaning everywhere.
+const SUBS_OPTIONS = [
+  { section: "Language" },
+  { value: "preferred", label: "Preferred languages" },
+  { value: "foreign", label: "Foreign languages" },
+  { value: "unknown", label: "Unknown" },
+  { value: "nosubs", label: "No subtitles" },
+  { section: "Acceptable" },
+  { value: "acceptable", label: "Acceptable" },
+  { value: "acceptable_ai", label: "Acceptable AI" },
+  { value: "not_acceptable", label: "Not acceptable" },
+  { section: "Quality" },
+  { value: "good", label: "Good subtitle" },
+  { value: "forced", label: "Forced subtitles" },
+  { value: "tiny", label: "Tiny subtitles" },
+  { value: "nosubs", label: "No subtitles" },
+  { value: "not_scanned", label: "Not scanned" },
+  { value: "failed", label: "Failed probe" },
+  { section: "Scan" },
+  { value: "not_scanned", label: "Not scanned" },
+  { value: "failed", label: "Failed probe" },
+  { value: "scanned", label: "Scanned" },
+];
+const SUBS_VALUES = new Set(SUBS_OPTIONS.filter((o) => o.value !== undefined).map((o) => o.value));
+const SUBS_ALIASES = {
+  "Acceptable": "acceptable",
+  "AI Sub": "acceptable_ai",
+  "No acceptable": "not_acceptable",
+  "No acceptable (inc. AI)": "not_acceptable",
+  "Forced": "forced",
+  "Foreign": "foreign",
+  "No subs": "nosubs",
+  "Not scanned": "not_scanned",
+};
 const SUBSOK_OPTIONS = [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }];
+
+// Migrate saved filters and profiles written before the grouped options.
+function migrateSubs(values) {
+  const out = [];
+  (values || []).forEach((v) => {
+    const mapped = SUBS_ALIASES[v] || v;
+    if (SUBS_VALUES.has(mapped) && !out.includes(mapped)) out.push(mapped);
+  });
+  return out;
+}
+
+function seScanState(r) {
+  const e = seSubsEntry(r);
+  if (e && e.error) return "failed";
+  // A series folder has no media file of its own; its episodes hold the tracks.
+  if (!e || !e.scanned || e.folder) return "not-scanned";
+  return "scanned";
+}
+
+// Each group is exhaustive when all its values are selected:
+// Language: preferred / foreign / unknown, plus nosubs for a scanned file with
+// no tracks. A not-scanned, failed or folder row is "unknown" language.
+// Quality: good / forced / tiny, plus nosubs, not_scanned and failed.
 const SUBS_PREDS = {
-  "Acceptable": (f) => !!f.acceptable,
-  "AI Sub": (f) => !!f.ai,
-  "No acceptable": (f) => !f.acceptable,
-  "No acceptable (inc. AI)": (f) => !f.acceptable && !f.ai,
-  "Forced": (f) => !!f.forced,
-  "Foreign": (f) => !!f.foreign,
-  "No subs": (f) => !!f.nosubs,
+  preferred: (st, f) => st === "scanned" && !!(f && f.preferred),
+  foreign: (st, f) => st === "scanned" && !!(f && f.foreign),
+  unknown: (st, f) => st !== "scanned" || !!(f && f.unknown),
+  nosubs: (st, f) => st === "scanned" && (!f || !!f.nosubs),
+  acceptable: (st, f) => st === "scanned" && !!(f && f.acceptable),
+  acceptable_ai: (st, f) => st === "scanned" && !!(f && f.acceptable_ai),
+  not_acceptable: (st, f) => st !== "scanned" || !(f && f.acceptable),
+  good: (st, f) => st === "scanned" && !!(f && f.good),
+  forced: (st, f) => st === "scanned" && !!(f && f.forced),
+  tiny: (st, f) => st === "scanned" && !!(f && f.tiny),
+  not_scanned: (st) => st === "not-scanned",
+  failed: (st) => st === "failed",
+  scanned: (st) => st === "scanned",
 };
 
 // Audio filter: what the scan found for a file. "Probe failed" covers the three
@@ -40,7 +102,6 @@ function seScanEntry(r) { return SE.scans[r.path] || null; }
 function seSubsEntry(r) { return seScanEntry(r); }
 function seFlags(r) { const e = seSubsEntry(r); return e && e.flags ? e.flags : null; }
 function seSubsOk(r) { return SE.subtitlesOk.has(r.path); }
-function seScanned(r) { const e = seSubsEntry(r); return !!(e && e.scanned); }
 
 // A failed probe keeps the item unscanned so a later scan retries it, but the
 // column should say what went wrong rather than "Not scanned" again. The full
@@ -140,12 +201,9 @@ function seVisible() {
       if (!ok) return false;
     }
     if (f.subs.length) {
+      const state = seScanState(r);
       const flags = seFlags(r);
-      const scanned = seScanned(r);
-      const ok = f.subs.some((v) => {
-        if (v === "Not scanned") return !scanned;
-        return !!(flags && SUBS_PREDS[v](flags));
-      });
+      const ok = f.subs.some((v) => SUBS_PREDS[v] && SUBS_PREDS[v](state, flags));
       if (!ok) return false;
     }
     if (f.audio.length && !f.audio.some((v) => seAudioMatch(r, v))) return false;
@@ -181,7 +239,7 @@ function loadFilters() {
       SE.filters.file = typeof f.file === "string" ? f.file : "";
       SE.filters.jf = typeof f.jf === "string" ? f.jf : "";
       SE.filters.fav = Array.isArray(f.fav) ? f.fav : [];
-      SE.filters.subs = Array.isArray(f.subs) ? f.subs : [];
+      SE.filters.subs = migrateSubs(f.subs);
       SE.filters.audio = Array.isArray(f.audio) ? f.audio : [];
       SE.filters.audioRe = typeof f.audioRe === "string" ? f.audioRe : "";
       SE.filters.subsok = Array.isArray(f.subsok) ? f.subsok : [];
@@ -566,7 +624,7 @@ document.addEventListener("DOMContentLoaded", () => {
         file: typeof f.file === "string" ? f.file : "",
         jf: typeof f.jf === "string" ? f.jf : "",
         fav: Array.isArray(f.fav) ? f.fav : [],
-        subs: Array.isArray(f.subs) ? f.subs : [],
+        subs: migrateSubs(f.subs),
         audio: Array.isArray(f.audio) ? f.audio : [],
         audioRe: typeof f.audioRe === "string" ? f.audioRe : "",
         subsok: Array.isArray(f.subsok) ? f.subsok : [],
