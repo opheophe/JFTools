@@ -1652,32 +1652,6 @@ async def subtitles_download(
     )
 
 
-@router.post("/api/subtitles/existing")
-async def subtitles_existing(
-    user: str = Depends(require_login),
-    path: str = Form(""),
-):
-    """Every subtitle track for a library video: embedded tracks + files."""
-    path = path.strip()
-    if not path:
-        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
-    if _library_row(path) is None:
-        return JSONResponse(
-            {"ok": False, "error": "Not in the library list."}, status_code=404
-        )
-
-    internal, external = await subtitle_tracks_for(path)
-
-    return JSONResponse(
-        {
-            "ok": True,
-            "file_mgmt": config.settings.file_mgmt,
-            "internal": internal,
-            "external": external,
-        }
-    )
-
-
 @router.post("/api/subtitles/delete")
 async def subtitles_delete(
     user: str = Depends(require_login),

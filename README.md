@@ -30,7 +30,7 @@ existing server over the API.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans. **Latest additions** names each item's
   library and carries the same action pills as the other tabs (Open, Sync, Play,
-  Subfind, Subtitles, Tracks, Google).
+  Subfind, Tracks, Google).
 - Subfind: the **Subfind** pill opens the subtitle search with a live player on
   the right half. Downloading a candidate makes the player start it at once
   (later downloads switch the subtitle without restarting the video), and the
@@ -379,15 +379,15 @@ commentary audio tracks.
 
 ## Subtitles
 
-Missing subtitles can be fetched straight from the table: the **Subtitles**
-action on a row (Movie Match and Search tabs). It identifies the video the same
-way VLSub does — by its OpenSubtitles "moviehash" (first + last 64 KiB) — and
-falls back to a name search when the hash finds nothing. Pick a candidate and
-JFTools saves `<video-name>.<language>.srt` next to the video.
+Missing subtitles can be fetched straight from the table: the **Subfind**
+action on a row (Movie Match, Search and Libraries tabs). It identifies the
+video the same way VLSub does — by its OpenSubtitles "moviehash" (first + last
+64 KiB) — and falls back to a name search when the hash finds nothing. Pick a
+candidate and JFTools saves `<video-name>.<language>.srt` next to the video.
 
-The **Subfind** pill is the same dialog with the right column replaced by a
-live player: a downloaded subtitle starts playing immediately, later downloads
-switch the subtitle without restarting the video, and the **Sync**,
+The dialog is split in two: the OpenSubtitles search on the left, a live
+player on the right. A downloaded subtitle starts playing immediately, later
+downloads switch the subtitle without restarting the video, and the **Sync**,
 **Delete** and **Rename** buttons under the **Now playing** header act on
 whichever subtitle is playing at that moment (a success chime plays when they
 finish). **Rename** lists the preferred languages and renames the playing
@@ -397,27 +397,24 @@ The dialog's **Search Hash**, **Search Filename** and **Search Jellyfin name**
 buttons re-run the search one way instead of the default, for when the automatic
 one comes up short: the hash alone (an exact match for that release), the release
 name on disk (`Onslaught 2026 1080p WEB H264-YTS`), or the Jellyfin item's name
-with its year. The line above the results says which search is on screen. The
-dialog is split into two independently scrolling columns: **OpenSubtitles
-results** on the left and the tracks already on the video on the right, so a
-long result list cannot push the track actions out of view.
+with its year. The line above the results says which search is on screen.
 
-The dialog lists **every subtitle track** on the video — the embedded tracks
-first (read-only here; use the **Tracks** dialog to delete or make one
-default) and then the external files. Each external row has a **Delete** button
-(Jellyfin is told the file changed right away) and a **Sync** button that
-re-aligns that subtitle to the video with
+**Sync** re-aligns the playing subtitle to the video with
 [ffsubsync](https://github.com/smacke/ffsubsync) — the original is only replaced
-once the sync succeeds.
+once the sync succeeds. **Delete** removes the file (Jellyfin is told the file
+changed right away). Embedded subtitle tracks are edited in the **Tracks**
+dialog instead; the player still lets you pick them from its subtitle
+selector, where they are read-only.
 
 Closing the dialog (clicking outside it, or Escape) re-scans the file with
 ffprobe and asks Jellyfin to refresh that path, so the Subtitles column and
-Jellyfin's own view update. It only does that when something was downloaded or
-deleted; a sync needs no rescan since the filename and language are unchanged.
+Jellyfin's own view update. It only does that when something was downloaded,
+renamed or deleted; a sync needs no rescan since the filename and language are
+unchanged.
 
-A download or delete marks the item as **Not scanned** until that close-time
-rescan (or the **Media scan** button / scheduled scan) re-probes it. A manual
-"Subtitle Ok" mark is cleared when the subtitle files change.
+A download, rename or delete marks the item as **Not scanned** until that
+close-time rescan (or the **Media scan** button / scheduled scan) re-probes it.
+A manual "Subtitle Ok" mark is cleared when the subtitle files change.
 
 **Requirements:**
 
@@ -455,10 +452,8 @@ render them. **The best track is
 already selected when the window opens** — the external file in one of the
 default subtitle languages if there is one, otherwise the first usable track —
 so subtitles are visible without touching the selector; choose **Off** to hide
-them. The same player opens from the subtitle dialog: every track row has a
-**Play** button that
-starts the file with that track already selected. One player window is reused,
-so clicking Play again just re-loads it.
+them. The **Subfind** dialog embeds this same player on its right side, so a
+downloaded subtitle starts playing in place.
 
 **The player draws the cues itself** rather than leaving them to the browser's
 caption renderer, which sizes and places them on its own (and is not always on

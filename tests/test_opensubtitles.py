@@ -573,68 +573,6 @@ class FakeJFClient:
         self.paths.append(list(locations))
 
 
-async def test_existing_route_lists_external_subs(os_env, monkeypatch):
-    (os_env / "Movie (2020).en.srt").write_bytes(b"x" * 2000)
-    (os_env / "Movie (2020).sv.forced.srt").write_bytes(b"y" * 1024)
-    # No stored tracks and no ffprobe -> embedded list stays empty.
-    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: None)
-    resp = await sub.subtitles_existing(path="/Media/Movie (2020).mkv")
-    data = _json(resp)
-    assert data["ok"] is True
-    assert data["file_mgmt"] is True
-    assert data["internal"] == []
-    files = {e["file"]: e for e in data["external"]}
-    assert files["Movie (2020).en.srt"]["lang"] == "English"
-    assert files["Movie (2020).en.srt"]["size"] == 2000
-    assert files["Movie (2020).sv.forced.srt"]["forced"] is True
-
-
-async def test_existing_route_uses_stored_internal(os_env, monkeypatch):
-    (os_env / "Movie (2020).en.srt").write_bytes(b"x" * 2000)
-    monkeypatch.setitem(
-        sub._state,
-        "files",
-        {
-            "/Media/Movie (2020).mkv": {
-                "path": "/Media/Movie (2020).mkv",
-                "scanned": True,
-                "internal": [
-                    {"lang": "English", "name": "English", "forced": False, "codec": "subrip"}
-                ],
-            }
-        },
-    )
-    # Stored tracks mean no probe is needed.
-    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: None)
-    resp = await sub.subtitles_existing(path="/Media/Movie (2020).mkv")
-    data = _json(resp)
-    assert data["internal"][0]["name"] == "English"
-    assert data["internal"][0]["codec"] == "subrip"
-    assert [e["file"] for e in data["external"]] == ["Movie (2020).en.srt"]
-
-
-async def test_existing_route_probes_when_unscanned(os_env, monkeypatch):
-    (os_env / "Movie (2020).mkv").write_bytes(b"v")
-    monkeypatch.setattr(sub, "resolve_ffprobe", lambda: "ffprobe")
-    monkeypatch.setattr(
-        sub,
-        "_probe_subtitles",
-        lambda fp, p: (
-            [{"lang": "English", "name": "English", "forced": False, "codec": "subrip"}],
-            0.0,
-            None,
-        ),
-    )
-    monkeypatch.setitem(
-        sub._state,
-        "files",
-        {"/Media/Movie (2020).mkv": sub._stub("/Media/Movie (2020).mkv")},
-    )
-    resp = await sub.subtitles_existing(path="/Media/Movie (2020).mkv")
-    data = _json(resp)
-    assert data["internal"][0]["name"] == "English"
-
-
 def test_mark_unscanned_keeps_internal(os_env, monkeypatch):
     monkeypatch.setitem(
         sub._state,
@@ -664,11 +602,6 @@ def test_mark_unscanned_keeps_internal(os_env, monkeypatch):
     assert entry["subs"] == []
     assert entry["flags"] is None
     assert "/Media/Movie (2020).mkv" not in sub._state["ok"]
-
-
-async def test_existing_route_unknown_path(os_env):
-    resp = await sub.subtitles_existing(path="/Media/nope.mkv")
-    assert resp.status_code == 404
 
 
 async def test_delete_route_requires_gate(os_env, monkeypatch):

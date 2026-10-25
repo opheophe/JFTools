@@ -93,8 +93,8 @@ def test_latest_additions_table_lists_library_then_actions():
     assert "<tr><th>Added</th><th>Library</th><th>Title</th><th>Type</th><th>Year</th><th>Actions</th></tr>" in html
     # The empty/loading row spans the six columns now.
     assert 'id="recent-body"><tr><td colspan="6"' in html
-    # The Subtitles pill opens the subtitle dialog, which lives in subdl.js.
-    assert "/static/subdl.js" in html
+    # The Subfind pill opens the subtitle search dialog, which lives in subfind.js.
+    assert "/static/subfind.js" in html
 
 
 @pytest.mark.parametrize("path,expected", [

@@ -2,11 +2,11 @@
 
 // Subfind dialog (Search, Movie Match and Libraries).
 //
-// Opened from the row's "Subfind" action. A copy of the Subtitles dialog, but
-// the right side is a live player instead of the track list: the left column
-// searches OpenSubtitles, downloading a candidate makes the player play it
-// (switching subtitles without restarting the video), and the Sync/Delete
-// buttons act on whichever subtitle is playing in the player right now.
+// Opened from the row's "Subfind" action: the OpenSubtitles search on the
+// left, a live player on the right. Downloading a candidate makes the player
+// play it (switching subtitles without restarting the video), and the
+// Sync/Delete/Rename buttons act on whichever subtitle is playing in the
+// player right now.
 //
 // The player runs in an iframe (/play) and the two sides talk over
 // postMessage: the dialog sends "select" (play a freshly downloaded file) and

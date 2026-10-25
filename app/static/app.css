@@ -518,15 +518,6 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl-btn.subdl-exec:disabled { box-shadow: none; }
 .subdl-fm { font-size: 0.8rem; }
-.subdl-existing {
-  display: flex; flex-direction: column; gap: 0.25rem;
-  flex: 0 0 50%; overflow-y: auto; border-left: 1px solid var(--border);
-  padding-left: 0.9rem;
-}
-.subdl-existing h4 {
-  position: sticky; top: 0; z-index: 1; margin: 0; padding: 0.1rem 0 0.25rem;
-  background: var(--panel); font-size: 0.8rem;
-}
 .subdl-subrow {
   display: flex; align-items: flex-start; flex-wrap: wrap; gap: 0.4rem; font-size: 0.8rem;
   min-width: 0; background: var(--inset); border-radius: 6px; padding: 0.3rem 0.45rem;
@@ -541,8 +532,6 @@ td.fb-actions { white-space: nowrap; }
   background: var(--panel); color: var(--muted); border: 1px solid var(--border);
 }
 .subdl-mini { flex-shrink: 0; font-size: 0.72rem; padding: 0.1rem 0.5rem; }
-.subdl-mini.subdl-play { color: var(--ok); border-color: var(--ok); }
-.subdl-mini.subdl-play:hover { background: rgba(62, 207, 142, 0.12); }
 .subdl-mini.subdl-del { color: var(--danger); border-color: var(--danger); }
 .subdl-mini.subdl-del:hover { background: rgba(255, 107, 107, 0.12); }
 .subdl-mini.subdl-mark { color: var(--warn); border-color: var(--warn-border); }
