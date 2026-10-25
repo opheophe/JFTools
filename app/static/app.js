@@ -688,6 +688,7 @@ function bindSettings() {
   bindFormSubmit("files-form", "/settings/files", "files-result");
   bindFormSubmit("subtitle-prefs-form", "/settings/subtitles", "subtitle-prefs-result");
   bindFormSubmit("opensubtitles-form", "/settings/opensubtitles", "opensubtitles-result");
+  bindFormSubmit("play-cache-form", "/settings/play-cache", "play-cache-result");
   bindSettingsBackup();
   bindPathMaps();
 

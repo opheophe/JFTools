@@ -70,7 +70,8 @@ VIDEO_TYPES = {
 # External subtitle formats ffmpeg can turn into text for the browser.
 CONVERTIBLE_SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".sub", ".vtt", ".sbv", ".ttml"}
 
-# Remuxed "browser copies" the player can fall back to.
+# Player cache (browser copies + converted audio) retention. These are the
+# defaults; the Settings page overrides them per install.
 PLAY_CACHE_MAX_BYTES = 5 * 1024**3
 PLAY_CACHE_MAX_AGE = 7 * 24 * 3600
 PREPARE_TIMEOUT = 2 * 3600
@@ -396,13 +397,32 @@ def _prepared_audio(path: str) -> str | None:
     return str(dest) if dest.is_file() else None
 
 
-def prune_play_cache() -> None:
-    """Drop stale browser copies: older than a week, then oldest-first over 5 GB.
+def _cache_limits() -> tuple[int, int]:
+    """The play-cache retention as ``(max age in seconds, max total bytes)``.
 
-    The newest copy always stays, even when it alone is over the cap: the video
+    The Settings page can override the module defaults; a bogus stored value
+    falls back to them.
+    """
+    try:
+        days = max(0, int(config.settings.play_cache_keep_days))
+    except (TypeError, ValueError):
+        days = PLAY_CACHE_MAX_AGE // (24 * 3600)
+    try:
+        gb = max(0, int(config.settings.play_cache_max_gb))
+    except (TypeError, ValueError):
+        gb = PLAY_CACHE_MAX_BYTES // 1024**3
+    return days * 24 * 3600, gb * 1024**3
+
+
+def prune_play_cache() -> None:
+    """Drop stale player-cache files: older than the configured age, then
+    oldest-first over the configured size cap.
+
+    The newest file always stays, even when it alone is over the cap: the video
     stream is copied, so a feature film's copy is nearly as large as the film,
     and deleting the copy just made would remux it again on every play.
     """
+    max_age, max_bytes = _cache_limits()
     folder = _play_cache_dir()
     if not folder.is_dir():
         return
@@ -413,7 +433,7 @@ def prune_play_cache() -> None:
             st = f.stat()
         except OSError:
             continue
-        if now - st.st_mtime > PLAY_CACHE_MAX_AGE:
+        if now - st.st_mtime > max_age:
             try:
                 f.unlink()
             except OSError:
@@ -422,7 +442,7 @@ def prune_play_cache() -> None:
         files.append((st.st_mtime, st.st_size, f))
     total = sum(size for _m, size, _f in files)
     for _m, size, f in sorted(files)[:-1]:
-        if total <= PLAY_CACHE_MAX_BYTES:
+        if total <= max_bytes:
             break
         try:
             f.unlink()

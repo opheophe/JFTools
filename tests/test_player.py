@@ -374,7 +374,7 @@ def test_prune_play_cache_drops_old_and_oversized_files(media_root, monkeypatch)
     cache = media_root / "cache"
     cache.mkdir()
     monkeypatch.setattr(player, "_play_cache_dir", lambda: cache)
-    monkeypatch.setattr(player, "PLAY_CACHE_MAX_BYTES", 10)
+    monkeypatch.setattr(player, "_cache_limits", lambda: (7 * 24 * 3600, 10))
 
     old = cache / "old.mp4"
     old.write_bytes(b"x" * 8)
@@ -402,7 +402,7 @@ def test_prune_play_cache_keeps_the_newest_copy_even_over_the_cap(media_root, mo
     cache = media_root / "cache"
     cache.mkdir()
     monkeypatch.setattr(player, "_play_cache_dir", lambda: cache)
-    monkeypatch.setattr(player, "PLAY_CACHE_MAX_BYTES", 10)
+    monkeypatch.setattr(player, "_cache_limits", lambda: (7 * 24 * 3600, 10))
 
     now = time.time()
     older = cache / "older.mp4"
@@ -418,6 +418,34 @@ def test_prune_play_cache_keeps_the_newest_copy_even_over_the_cap(media_root, mo
 
     assert not older.is_file()
     assert newest.is_file()
+
+
+def test_prune_play_cache_uses_the_configured_retention(media_root, monkeypatch):
+    cache = media_root / "cache"
+    cache.mkdir()
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: cache)
+    monkeypatch.setattr(config._settings, "play_cache_keep_days", 7)
+    monkeypatch.setattr(config._settings, "play_cache_max_gb", 5)
+
+    now = time.time()
+    old = cache / "old.m4a"
+    old.write_bytes(b"a" * 4)
+    os.utime(old, (now - 8 * 24 * 3600, now - 8 * 24 * 3600))
+    fresh = cache / "fresh.m4a"
+    fresh.write_bytes(b"b" * 4)
+    os.utime(fresh, (now - 60, now - 60))
+
+    player.prune_play_cache()
+
+    assert not old.is_file()      # older than the configured 7 days
+    assert fresh.is_file()
+
+    # A longer retention keeps the old file.
+    old.write_bytes(b"a" * 4)
+    os.utime(old, (now - 8 * 24 * 3600, now - 8 * 24 * 3600))
+    monkeypatch.setattr(config._settings, "play_cache_keep_days", 30)
+    player.prune_play_cache()
+    assert old.is_file()
 
 
 # ---- the audio probe ---------------------------------------------------------

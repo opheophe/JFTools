@@ -133,6 +133,10 @@ class Settings:
     backup_dir: str = ""
     backup_keep: int = 7
     backup_include_logs: bool = False
+    # Player cache (browser copies + converted audio) retention: files older
+    # than keep_days, or a folder larger than max_gb, are pruned.
+    play_cache_keep_days: int = 7
+    play_cache_max_gb: int = 5
 
 
 class Config:
@@ -228,6 +232,20 @@ class Config:
                         pass
                 if isinstance(data.get("backup_include_logs"), bool):
                     settings.backup_include_logs = data["backup_include_logs"]
+                if "play_cache_keep_days" in data:
+                    try:
+                        settings.play_cache_keep_days = max(
+                            1, min(365, int(data["play_cache_keep_days"]))
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                if "play_cache_max_gb" in data:
+                    try:
+                        settings.play_cache_max_gb = max(
+                            1, min(1024, int(data["play_cache_max_gb"]))
+                        )
+                    except (TypeError, ValueError):
+                        pass
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -253,6 +271,8 @@ class Config:
             "backup_dir": s.backup_dir,
             "backup_keep": s.backup_keep,
             "backup_include_logs": s.backup_include_logs,
+            "play_cache_keep_days": s.play_cache_keep_days,
+            "play_cache_max_gb": s.play_cache_max_gb,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -352,6 +372,12 @@ class Config:
         self._settings.backup_include_logs = bool(include_logs)
         self._persist()
 
+    def save_play_cache(self, keep_days: int, max_gb: int) -> None:
+        """Persist the player-cache retention (age in days, size cap in GB)."""
+        self._settings.play_cache_keep_days = max(1, min(365, int(keep_days)))
+        self._settings.play_cache_max_gb = max(1, min(1024, int(max_gb)))
+        self._persist()
+
     # ---- backup / restore ---------------------------------------------------
 
     _EXPORT_FIELDS = (
@@ -372,6 +398,8 @@ class Config:
         "backup_dir",
         "backup_keep",
         "backup_include_logs",
+        "play_cache_keep_days",
+        "play_cache_max_gb",
     )
 
     def export_settings(self) -> dict:
@@ -396,6 +424,20 @@ class Config:
                 elif field == "backup_keep":
                     try:
                         self._settings.backup_keep = max(0, min(100, int(data[field])))
+                    except (TypeError, ValueError):
+                        pass
+                elif field == "play_cache_keep_days":
+                    try:
+                        self._settings.play_cache_keep_days = max(
+                            1, min(365, int(data[field]))
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                elif field == "play_cache_max_gb":
+                    try:
+                        self._settings.play_cache_max_gb = max(
+                            1, min(1024, int(data[field]))
+                        )
                     except (TypeError, ValueError):
                         pass
                 elif field == "backup_include_logs":

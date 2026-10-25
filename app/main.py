@@ -276,6 +276,8 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "backup_dir": config.settings.backup_dir,
             "backup_keep": config.settings.backup_keep,
             "backup_include_logs": config.settings.backup_include_logs,
+            "play_cache_keep_days": config.settings.play_cache_keep_days,
+            "play_cache_max_gb": config.settings.play_cache_max_gb,
         },
     )
 
@@ -491,6 +493,36 @@ async def settings_backup_save(
     config.save_backup_settings(raw, keep, include_logs)
     log("Backup", "INFO", f"Backup settings saved (keep={keep}, logs={include_logs})")
     return _saved(request, "Backup settings saved.")
+
+
+@app.post("/settings/play-cache")
+async def settings_play_cache_save(
+    request: Request,
+    user: str = Depends(require_login),
+    keep_days: str = Form("7"),
+    max_gb: str = Form("5"),
+):
+    try:
+        days = int(keep_days)
+        gb = int(max_gb)
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"ok": False, "error": "Retention must be whole numbers."}, status_code=400
+        )
+    if not 1 <= days <= 365 or not 1 <= gb <= 1024:
+        return JSONResponse(
+            {"ok": False, "error": "Days must be 1–365 and the size cap 1–1024 GB."},
+            status_code=400,
+        )
+    config.save_play_cache(days, gb)
+    log(
+        "Settings",
+        "INFO",
+        f"Player cache retention saved "
+        f"(keep {config.settings.play_cache_keep_days} days, "
+        f"max {config.settings.play_cache_max_gb} GB)",
+    )
+    return _saved(request, "Player cache settings saved.")
 
 
 @app.get("/settings/backup/download")

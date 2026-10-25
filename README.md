@@ -485,8 +485,11 @@ converted track next to it, keeping them aligned through seeks, speed changes
 and a drift check. If the conversion has already been made, the player starts
 with it directly. The status line shows which codec is at fault and how far the
 conversion is; the first one takes a minute or two for a feature film; later
-plays reuse it. The cache is pruned at startup (older than a week, then
-oldest-first above ~5 GB, always keeping the newest copy).
+plays reuse it. The cache is pruned at every startup and before each new
+conversion: files older than the configured age go first, then the oldest
+files until the folder is under the configured size cap — the newest file is
+always kept. The defaults are **7 days / 5 GB** and both are adjustable on the
+Settings page (**Player cache**).
 
 ffprobe cannot answer for every codec: AC-3 and E-AC-3 are decoded through the
 operating system in some browsers and are silent in others. The player asks the

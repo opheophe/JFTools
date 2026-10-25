@@ -111,6 +111,36 @@
 </section>
 
 <section class="card">
+  <h2>Player cache</h2>
+  <p class="muted">
+    The player caches converted audio and browser copies under <code>data/play_cache</code>.
+    Files older than the age below, or a folder larger than the size cap, are deleted
+    (oldest first, the newest file always kept). Pruning runs at every startup and before
+    each new conversion.
+  </p>
+  <form id="play-cache-form" method="post" action="/settings/play-cache">
+    <label for="play-cache-days">Keep files for</label>
+    <div class="row" style="align-items:center">
+      <input type="number" id="play-cache-days" name="keep_days" min="1" max="365"
+             value="{{ play_cache_keep_days }}" style="width:6rem">
+      <span class="muted">day(s)</span>
+    </div>
+
+    <label for="play-cache-gb">Size cap</label>
+    <div class="row" style="align-items:center">
+      <input type="number" id="play-cache-gb" name="max_gb" min="1" max="1024"
+             value="{{ play_cache_max_gb }}" style="width:6rem">
+      <span class="muted">GB in total</span>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="primary">Save player cache settings</button>
+    </div>
+  </form>
+  <div class="result" id="play-cache-result" hidden></div>
+</section>
+
+<section class="card">
   <h2>Subtitle preferences</h2>
   <p class="muted">Used by <strong>Smart mark</strong> in the <strong>Tracks</strong> dialog and as the default language list for OpenSubtitles searches.</p>
   <form id="subtitle-prefs-form" method="post" action="/settings/subtitles">

@@ -152,6 +152,36 @@ def test_backup_keep_is_clamped(tmp_path, monkeypatch):
     assert cfg.settings.backup_keep == 0
 
 
+def test_play_cache_settings_round_trip_and_clamp(tmp_path, monkeypatch):
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    assert cfg.settings.play_cache_keep_days == 7
+    assert cfg.settings.play_cache_max_gb == 5
+    cfg.save_play_cache(3, 20)
+
+    cfg2 = Config()
+    assert cfg2.settings.play_cache_keep_days == 3
+    assert cfg2.settings.play_cache_max_gb == 20
+
+    # Another settings save must not drop the fields.
+    cfg2.save_file_mgmt(True)
+    cfg3 = Config()
+    assert cfg3.settings.play_cache_keep_days == 3
+    assert cfg3.settings.play_cache_max_gb == 20
+
+    # Export -> import round trip.
+    cfg3.save_play_cache(1, 1)
+    cfg3.import_settings(cfg2.export_settings())
+    assert cfg3.settings.play_cache_keep_days == 3
+    assert cfg3.settings.play_cache_max_gb == 20
+
+    # Out-of-range values are clamped.
+    cfg.save_play_cache(0, 99999)
+    assert cfg.settings.play_cache_keep_days == 1
+    assert cfg.settings.play_cache_max_gb == 1024
+
+
 def test_path_map_env_parsing(tmp_path, monkeypatch):
     monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JFTOOLS_PATH_MAP", r"/Filmer=\\NAS\Filmer;/Ero=Z:\Ero")
