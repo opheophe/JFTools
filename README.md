@@ -349,7 +349,8 @@ names, case-insensitively (`swe|nor`, `5\.1`, …).
 The **Tracks** pill on a row opens the track dialog. It lists the audio
 tracks, the embedded subtitle tracks and the external subtitle files. Toggle
 any number of rows with **Mark delete** / **Unmark**, use **Set default** to
-choose at most one audio and one subtitle default, then press **Execute**.
+choose at most one audio and one subtitle default, then press **Execute** — a
+success chime plays when it finishes.
 The track list scrolls on its own, so **Smart mark** and **Execute** stay
 visible no matter how many tracks a file has. **Smart mark** replaces the
 subtitle marks with every track or file outside your preferred languages

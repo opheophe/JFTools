@@ -28,6 +28,7 @@ let audioDefaultSub = null;
 let audioPreferred = [];
 let audioSmartMark = [];
 let audioSmartMarkFiles = [];
+let audioDoneSound = null; // the Execute success chime, unlocked on click
 
 const AUDIO_CODECS = {
   aac: "AAC", ac3: "AC3", eac3: "E-AC-3", dts: "DTS", truehd: "TrueHD",
@@ -93,6 +94,34 @@ function audioFmtSize(n) {
   if (n < 1024) return n + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
   return (n / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+// The success.wav chime after Execute finishes. The element is unlocked with a
+// muted play() inside the click gesture, so the real play after the (possibly
+// long) rewrite is not blocked by the autoplay policy.
+function audioUnlockSound() {
+  try {
+    if (!audioDoneSound) audioDoneSound = new Audio("/resources/success.wav");
+    audioDoneSound.volume = 0.9;
+    audioDoneSound.muted = true;
+    audioDoneSound.play().catch(() => { /* ignore */ });
+    audioDoneSound.pause();
+    audioDoneSound.currentTime = 0;
+    audioDoneSound.muted = false;
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function audioPlayDone() {
+  try {
+    if (!audioDoneSound) audioDoneSound = new Audio("/resources/success.wav");
+    audioDoneSound.muted = false;
+    audioDoneSound.currentTime = 0;
+    audioDoneSound.play().catch(() => { /* a blocked autoplay is not worth an error */ });
+  } catch (err) {
+    /* ignore */
+  }
 }
 
 // An external subtitle file row: only Mark delete/Unmark. External files have
@@ -383,6 +412,7 @@ async function audioExecute() {
   )) return;
 
   audioBusy = true;
+  audioUnlockSound();
   audioNotice("Executing — this can take a while…", "muted");
   audioRender();
   let body = "path=" + encodeURIComponent(path);
@@ -417,6 +447,7 @@ async function audioExecute() {
     let msg = data.message || "Updated.";
     if (data.jellyfin) msg += " (Jellyfin warning: " + data.jellyfin + ")";
     audioNotice(msg, "ok");
+    audioPlayDone();
     audioRender();
   } catch (err) {
     if (audioPath === path) {
