@@ -475,6 +475,42 @@ async def test_internal_existing_returns_smart_marks(audio_env, monkeypatch):
     assert data["smart_mark"] == [6, 7]
 
 
+async def test_internal_existing_returns_external_files_and_smart_marks(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles = [
+        {"index": 4, "lang": "English", "name": "English SDH"},
+        {"index": 5, "lang": "French", "name": "French"},
+    ]
+    external = [
+        {"file": "Movie (2020).English.srt", "lang": "English", "forced": False, "ai": False},
+        {"file": "Movie (2020).German.srt", "lang": "German", "forced": False, "ai": False},
+        {"file": "Movie (2020).Catalan.srt", "lang": "Catalan", "forced": False, "ai": False},
+        {"file": "Movie (2020).forced.srt", "lang": "English", "forced": True, "ai": False},
+    ]
+    monkeypatch.setattr(config._settings, "opensubtitles_languages", "en,sv")
+
+    async def fake_tracks(p, force=False):
+        return subtitles, [], None
+
+    async def fake_all(p):
+        return subtitles, external
+
+    monkeypatch.setattr(audio, "internal_tracks_for", fake_tracks)
+    monkeypatch.setattr(audio, "subtitle_tracks_for", fake_all)
+    resp = await audio.internal_existing(user="u", path=path)
+    data = json.loads(resp.body)
+
+    assert data["external"] == external
+    assert data["smart_mark"] == [5]
+    assert data["smart_mark_files"] == [
+        "Movie (2020).German.srt",
+        "Movie (2020).Catalan.srt",
+        "Movie (2020).forced.srt",
+    ]
+
+
 async def test_internal_execute_deletes_multiple_and_sets_both_defaults(
     audio_env, monkeypatch
 ):
@@ -616,6 +652,76 @@ async def test_internal_execute_rejects_a_default_of_the_wrong_type(
 
     assert resp.status_code == 403
     assert "not an audio track" in data["error"]
+
+
+async def test_internal_execute_deletes_external_files_without_a_rewrite(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    external = [
+        {"file": "Movie (2020).German.srt", "lang": "German", "forced": False, "ai": False},
+    ]
+    entry = {
+        "path": path, "file": "Movie (2020).mkv", "scanned": True,
+        "audio": tracks, "internal": subtitles, "external": [], "error": None,
+    }
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+    monkeypatch.setattr(audio, "_external_subtitles", lambda local: external)
+    monkeypatch.setattr(
+        audio, "_rewrite_tracks",
+        lambda *a: (_ for _ in ()).throw(AssertionError("no rewrite expected")),
+    )
+    monkeypatch.setattr(audio, "_probe_one", lambda ff, key, local, st: (key, entry))
+    monkeypatch.setattr(audio, "_stat_path", lambda local: None)
+    monkeypatch.setitem(audio._state, "files", {})
+
+    import app.files as files
+
+    deleted_calls = {}
+
+    def fake_delete(src, roots):
+        deleted_calls["src"] = src
+        return {"ok": True, "src": src}
+
+    monkeypatch.setattr(files, "delete_entry", fake_delete)
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path,
+        delete_files="Movie (2020).German.srt",
+    )
+    data = json.loads(resp.body)
+
+    assert data["ok"] is True
+    assert data["deleted_files"] == ["Movie (2020).German.srt"]
+    assert "Deleted 1 subtitle file." in data["message"]
+    assert deleted_calls["src"].endswith("Movie (2020).German.srt")
+    assert data["jellyfin"] == "offline"
+
+
+async def test_internal_execute_rejects_an_unknown_external_file(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+    monkeypatch.setattr(audio, "_external_subtitles", lambda local: [])
+    monkeypatch.setattr(
+        audio, "_rewrite_tracks",
+        lambda *a: (_ for _ in ()).throw(AssertionError("no rewrite expected")),
+    )
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path, delete_files="Nope.srt",
+    )
+    data = json.loads(resp.body)
+
+    assert resp.status_code == 403
+    assert "external subtitle file" in data["error"]
 
 
 async def test_internal_execute_requires_file_management(audio_env, monkeypatch):

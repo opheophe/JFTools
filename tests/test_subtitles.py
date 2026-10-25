@@ -7,8 +7,10 @@ import pytest
 from app.subtitles import (
     _classify_tracks,
     _external_subtitles,
+    _language_from_text,
     _reconcile,
     _subtitle_lang_name,
+    external_smart_marks,
     normalize_language_codes,
     preferred_language_names,
     resolve_ffprobe,
@@ -103,6 +105,79 @@ def test_smart_mark_defaults_to_english_without_a_setting():
         {"index": 6, "lang": "Unknown", "name": "Unknown"},
     ]
     assert smart_subtitle_marks(subtitles, "") == ([5], ["English"])
+
+
+# ---- language from text ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("Unknown (Català)", "Catalan"),
+        ("Unknown (Euskara)", "Basque"),
+        ("Unknown (Galego)", "Galician"),
+        ("Unknown (ಕನ್ನಡ)", "Kannada"),
+        ("Unknown (മലയാളം)", "Malayalam"),
+        ("Unknown (Bahasa Melayu)", "Malay"),
+        ("Unknown (Norsk Bokmål)", "Norwegian"),
+        ("Unknown (தமிழ்)", "Tamil"),
+        ("Unknown (తెలుగు)", "Telugu"),
+        ("Catalan", "Catalan"),
+        ("Unknown (Catalan forced)", "Catalan"),
+        ("Unknown", ""),
+    ],
+)
+def test_language_from_text_reads_parenthesised_names(name, expected):
+    assert _language_from_text(name) == expected
+
+
+def test_smart_mark_marks_parenthesised_languages_it_does_not_prefer():
+    subtitles = [
+        {"index": 4, "lang": "Unknown", "name": "Unknown (Català)"},
+        {"index": 5, "lang": "Unknown", "name": "Unknown (Euskara)"},
+        {"index": 6, "lang": "Unknown", "name": "Unknown (Galego)"},
+        {"index": 7, "lang": "Unknown", "name": "Unknown (ಕನ್ನಡ)"},
+        {"index": 8, "lang": "Unknown", "name": "Unknown (മലയാളം)"},
+        {"index": 9, "lang": "Unknown", "name": "Unknown (Bahasa Melayu)"},
+        {"index": 10, "lang": "Unknown", "name": "Unknown (Norsk Bokmål)"},
+        {"index": 11, "lang": "Unknown", "name": "Unknown (தமிழ்)"},
+        {"index": 12, "lang": "Unknown", "name": "Unknown (తెలుగు)"},
+        {"index": 13, "lang": "English", "name": "English"},
+        {"index": 14, "lang": "Unknown", "name": "Unknown"},
+    ]
+
+    marks, preferred = smart_subtitle_marks(subtitles, "en,sv")
+
+    assert preferred == ["English", "Swedish"]
+    assert marks == [4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+
+# ---- external smart marks ----------------------------------------------------
+
+
+def test_external_smart_marks_non_preferred_and_forced_files():
+    external = [
+        {"file": "Movie.English.srt", "lang": "English", "forced": False},
+        {"file": "Movie.Swedish.srt", "lang": "Swedish", "forced": False},
+        {"file": "Movie.French.srt", "lang": "French", "forced": False},
+        {"file": "Movie.forced.srt", "lang": "English", "forced": True},
+        {"file": "Movie.Unknown.srt", "lang": "Unknown", "forced": False},
+    ]
+
+    marks = external_smart_marks(external, ["English", "Swedish"])
+
+    assert marks == ["Movie.French.srt", "Movie.forced.srt"]
+
+
+def test_external_smart_marks_reads_language_from_the_filename():
+    external = [
+        {"file": "Movie.Norsk.Bokmål.srt", "lang": "Unknown", "forced": False},
+        {"file": "Movie.TrulyUnknown.srt", "lang": "Unknown", "forced": False},
+    ]
+
+    assert external_smart_marks(external, ["English"]) == [
+        "Movie.Norsk.Bokmål.srt"
+    ]
 
 
 # ---- classification ---------------------------------------------------------

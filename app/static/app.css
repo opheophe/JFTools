@@ -553,6 +553,17 @@ td.fb-actions { white-space: nowrap; }
 .subdl-actions .subdl-btn { flex-shrink: 0; }
 .subdl-help { font-size: 0.78rem; }
 
+/* Tracks dialog: the track list scrolls on its own so the Smart mark and
+   Execute buttons stay visible no matter how many tracks a file has. */
+.audio-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 0.25rem;
+  border-top: 1px solid var(--border); padding-top: 0.4rem;
+}
+.audio-scroll h4 { margin: 0.4rem 0 0; font-size: 0.8rem; }
+.audio-scroll h4:first-child { margin-top: 0; }
+#audio-actions { flex-shrink: 0; }
+
 /* Subfind dialog: the subtitles dialog with a live player on the right.
    A fixed height so the player keeps the space even before results exist. */
 .subdl.subfind { height: 82vh; }

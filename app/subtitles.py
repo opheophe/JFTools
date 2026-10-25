@@ -28,6 +28,7 @@ import shutil
 import stat
 import subprocess
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -98,6 +99,14 @@ _LANG_NAMES = {
     "et": "Estonian", "est": "Estonian",
     "lv": "Latvian", "lav": "Latvian",
     "lt": "Lithuanian", "lit": "Lithuanian",
+    "ca": "Catalan", "cat": "Catalan",
+    "eu": "Basque", "eus": "Basque", "baq": "Basque",
+    "gl": "Galician", "glg": "Galician",
+    "kn": "Kannada", "kan": "Kannada",
+    "ml": "Malayalam", "mal": "Malayalam",
+    "ms": "Malay", "msa": "Malay", "may": "Malay",
+    "ta": "Tamil", "tam": "Tamil",
+    "te": "Telugu", "tel": "Telugu",
 }
 _FULL_LANG_NAMES = {
     "english": "English", "swedish": "Swedish", "norwegian": "Norwegian",
@@ -111,6 +120,16 @@ _FULL_LANG_NAMES = {
     "ukrainian": "Ukrainian", "thai": "Thai", "vietnamese": "Vietnamese",
     "indonesian": "Indonesian", "hebrew": "Hebrew", "persian": "Persian",
     "icelandic": "Icelandic",
+    "catalan": "Catalan", "catala": "Catalan", "català": "Catalan",
+    "basque": "Basque", "euskara": "Basque", "euskera": "Basque",
+    "galician": "Galician", "galego": "Galician", "gallego": "Galician",
+    "kannada": "Kannada", "ಕನ್ನಡ": "Kannada",
+    "malayalam": "Malayalam", "മലയാളം": "Malayalam",
+    "malay": "Malay", "melayu": "Malay",
+    "norsk": "Norwegian", "bokmal": "Norwegian", "bokmål": "Norwegian",
+    "nynorsk": "Norwegian",
+    "tamil": "Tamil", "தமிழ்": "Tamil",
+    "telugu": "Telugu", "తెలుగు": "Telugu",
 }
 # Canonical display name -> the shortest code we know. Used when the Settings
 # field accepts names ("Swedish") but OpenSubtitles expects codes ("sv").
@@ -300,13 +319,39 @@ def preferred_language_names(raw: str | None = None) -> list[str]:
     return names
 
 
+def _text_tokens(lowered: str) -> list[str]:
+    """The words of ``lowered``, keeping letters and combining marks.
+
+    A plain ``\\w+`` regex splits Indic words at their virama and vowel signs
+    (those are marks, not word characters): "ಕನ್ನಡ" would come out as "ಕನ" +
+    "ನಡ" and never match the language table. Keeping mark characters makes
+    every script read as one word.
+    """
+    cleaned = "".join(
+        c if unicodedata.category(c)[0] in ("L", "M") else " "
+        for c in lowered
+    )
+    return cleaned.split()
+
+
 def _language_from_text(text: str) -> str:
     """Best-effort language from a subtitle title, used only when the tag is
-    missing/unknown. Full names and 3-letter codes are safe anywhere; a
-    2-letter code is only trusted when it is the sole meaningful token, so
-    titles like "No" do not turn into Norwegian by accident."""
+    missing/unknown.
+
+    The language is often carried in parentheses — ``Unknown (Català)`` is
+    Catalan — so those words count just like the rest of the title. Full names
+    and 3-letter codes are safe anywhere; a 2-letter code is only trusted when
+    it is the sole meaningful token, so titles like "No" do not turn into
+    Norwegian by accident."""
+    lowered = (text or "").lower()
+    # Two-word names whose first word alone would point at the wrong language:
+    # "Bahasa Melayu" is Malay, "Bahasa Indonesia" is Indonesian.
+    if "melayu" in lowered:
+        return "Malay"
+    if "bahasa indonesia" in lowered or "indonesia" in lowered or "indonesian" in lowered:
+        return "Indonesian"
     tokens = [
-        t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
+        t for t in _text_tokens(lowered)
         if t not in _SUBTITLE_NOISE_TOKENS and t != "unknown"
     ]
     for token in tokens:
@@ -354,6 +399,27 @@ def smart_subtitle_marks(
         if lang and lang != "Unknown" and lang not in wanted:
             marks.append(index)
     return marks, preferred
+
+
+def external_smart_marks(external: list[dict], preferred: list[str]) -> list[str]:
+    """External subtitle files Smart mark would delete.
+
+    The same policy as :func:`smart_subtitle_marks`: every forced file, plus
+    every file whose language is not preferred. A file whose language could
+    not be read is left alone unless its name says otherwise.
+    """
+    wanted = set(preferred)
+    marks: list[str] = []
+    for entry in external:
+        if entry.get("forced"):
+            marks.append(entry["file"])
+            continue
+        lang = entry.get("lang") or "Unknown"
+        if lang == "Unknown":
+            lang = _language_from_text(entry["file"])
+        if lang and lang != "Unknown" and lang not in wanted:
+            marks.append(entry["file"])
+    return marks
 
 
 def _classify_tracks(
@@ -464,6 +530,10 @@ def _external_subtitles_in(children: list[os.DirEntry], stem: str) -> list[dict]
                 continue
             lang = _subtitle_lang_name(base)
             break
+        # A filename like "Movie.Norsk.Bokmål.srt" has its language in plain
+        # words the tag list does not know; let the title parser read it.
+        if lang == "Unknown" and tokens:
+            lang = _language_from_text(" ".join(tokens)) or "Unknown"
         try:
             tiny = f.stat().st_size < TINY_SUBTITLE_MAX_BYTES
         except OSError:

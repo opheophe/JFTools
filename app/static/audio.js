@@ -1,16 +1,16 @@
 "use strict";
 
-// Internal tracks dialog (Search, Movie Match and Libraries).
+// Tracks dialog (Search, Movie Match and Libraries).
 //
-// Opened from the row's "Internal" pill. It lists the file's embedded audio
-// and embedded subtitle streams, lets several be marked for deletion, and lets
-// one default of each type be chosen. Nothing changes until Execute; the server
-// rewrites the video once with ffmpeg (every other stream copied as-is), so the
+// Opened from the row's "Tracks" pill. It lists the file's embedded audio and
+// embedded subtitle streams plus the external subtitle files, lets several be
+// marked for deletion, and lets one default of each type be chosen. Nothing
+// changes until Execute: the server rewrites the video once with ffmpeg (every
+// other stream copied as-is) and deletes the marked external files, so the
 // dialog is gated on File management and asks for confirmation.
 //
-// External subtitle files are not listed here; they live in the Subtitles
-// dialog. The dialog reuses the subtitle dialog's shell classes (``subdl-*``)
-// so the two look and behave the same. Pages that show an Audio column assign
+// The dialog reuses the subtitle dialog's shell classes (``subdl-*``) so the
+// dialogs look and behave the same. Pages that show an Audio column assign
 // ``window.audioRefresh``; it receives the freshly probed scan entry.
 
 window.audioRefresh = null;
@@ -18,14 +18,16 @@ window.audioRefresh = null;
 let audioPath = null;
 let audioTracks = [];
 let audioSubtitles = [];
+let audioExtSubtitles = [];
 let audioFileMgmt = false;
 let audioBack = null;
 let audioBusy = false;
-let audioDeleteSet = new Set();
+let audioDeleteSet = new Set(); // stream indices (numbers) and "ext:<file>"
 let audioDefault = null;
 let audioDefaultSub = null;
 let audioPreferred = [];
 let audioSmartMark = [];
+let audioSmartMarkFiles = [];
 
 const AUDIO_CODECS = {
   aac: "AAC", ac3: "AC3", eac3: "E-AC-3", dts: "DTS", truehd: "TrueHD",
@@ -86,7 +88,47 @@ function audioWouldLeaveNoAudio(track) {
   return audioTracks.filter((t) => !audioDeleteSet.has(t.index)).length <= 1;
 }
 
+function audioFmtSize(n) {
+  if (n === null || n === undefined) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+// An external subtitle file row: only Mark delete/Unmark. External files have
+// no default bit, and Execute deletes them from disk without a rewrite.
+function audioExtRow(e) {
+  const key = "ext:" + e.file;
+  const marked = audioDeleteSet.has(key);
+  const row = el("div", { class: "subdl-subrow" });
+  row.appendChild(el("span", { class: "subdl-tag", text: "external" }));
+  let label = e.lang || "Unknown";
+  if (e.forced) label += " (Forced)";
+  if (e.ai) label += " (AI)";
+  row.appendChild(el("span", { class: "subdl-c-lang", text: label }));
+  row.appendChild(el("span", { class: "subdl-name", text: e.file, title: e.file }));
+  row.appendChild(el("span", { class: "muted", text: audioFmtSize(e.size) }));
+  const mark = el("button", {
+    type: "button",
+    class: "subdl-mini subdl-mark" + (marked ? " subdl-mark-on" : ""),
+    text: marked ? "Unmark" : "Mark delete",
+  });
+  if (!audioFileMgmt || audioBusy) {
+    mark.disabled = true;
+    mark.title = !audioFileMgmt ? "File management is off" : "A rewrite is running";
+  } else {
+    mark.addEventListener("click", () => {
+      if (marked) audioDeleteSet.delete(key);
+      else audioDeleteSet.add(key);
+      audioRender();
+    });
+  }
+  row.appendChild(mark);
+  return row;
+}
+
 function audioTrackRow(track, kind) {
+  if (kind === "ext") return audioExtRow(track);
   const index = track.index;
   const marked = audioDeleteSet.has(index);
   const pending = kind === "audio" ? audioDefault === index : audioDefaultSub === index;
@@ -191,11 +233,13 @@ function audioSmartMarkTracks() {
   }
   // Smart mark replaces subtitle marks only; audio marks are the user's own.
   audioSubtitles.forEach((t) => audioDeleteSet.delete(t.index));
+  audioExtSubtitles.forEach((e) => audioDeleteSet.delete("ext:" + e.file));
   audioSmartMark.forEach((index) => audioDeleteSet.add(index));
+  audioSmartMarkFiles.forEach((file) => audioDeleteSet.add("ext:" + file));
   if (audioDefaultSub !== null && audioSmartMark.includes(audioDefaultSub)) {
     audioDefaultSub = null;
   }
-  const count = audioSmartMark.length;
+  const count = audioSmartMark.length + audioSmartMarkFiles.length;
   const languages = audioPreferred.join(", ");
   if (count) {
     audioNotice(
@@ -220,6 +264,8 @@ function audioRender() {
     "No audio tracks on this file.");
   audioRenderSection(box, "Embedded subtitle tracks", audioSubtitles, "subtitle",
     "No embedded subtitle tracks on this file.");
+  audioRenderSection(box, "External subtitle files", audioExtSubtitles, "ext",
+    "No external subtitle files next to this video.");
 
   const actions = el("div", { class: "subdl-actions" });
   actions.appendChild(el("p", {
@@ -232,14 +278,14 @@ function audioRender() {
     text: "Smart mark",
   });
   smart.disabled = !audioFileMgmt || audioBusy || !audioPreferred.length
-    || !audioSubtitles.length;
+    || (!audioSubtitles.length && !audioExtSubtitles.length);
   if (smart.disabled) {
     smart.title = !audioFileMgmt
       ? "File management is off"
       : (audioBusy ? "A rewrite is running"
         : (!audioPreferred.length
           ? "Set preferred subtitle languages on the Settings page first"
-          : "No embedded subtitles to mark"));
+          : "No subtitles to mark"));
   } else {
     smart.addEventListener("click", audioSmartMarkTracks);
   }
@@ -261,23 +307,27 @@ function audioRender() {
 async function audioLoad() {
   audioTracks = [];
   audioSubtitles = [];
+  audioExtSubtitles = [];
   audioDeleteSet = new Set();
   audioDefault = null;
   audioDefaultSub = null;
   audioPreferred = [];
   audioSmartMark = [];
+  audioSmartMarkFiles = [];
   try {
     const data = await audioPost("/api/internal/existing", "path=" + encodeURIComponent(audioPath));
     if (!data || !data.ok) {
-      audioNotice((data && data.error) || "Could not read the internal tracks.", "error");
+      audioNotice((data && data.error) || "Could not read the tracks.", "error");
       audioRender();
       return;
     }
     audioFileMgmt = !!data.file_mgmt;
     audioTracks = (data.audio || []).slice();
     audioSubtitles = (data.subtitles || []).slice();
+    audioExtSubtitles = (data.external || []).slice();
     audioPreferred = (data.preferred_languages || []).slice();
     audioSmartMark = (data.smart_mark || []).slice();
+    audioSmartMarkFiles = (data.smart_mark_files || []).slice();
     if (data.error) audioNotice("Probe warning: " + data.error, "error");
     const warn = document.getElementById("audio-fm");
     if (warn) warn.hidden = audioFileMgmt;
@@ -290,8 +340,13 @@ async function audioLoad() {
 
 function audioExecuteSummary() {
   const bits = [];
-  if (audioDeleteSet.size) {
-    bits.push("delete " + audioDeleteSet.size + " track" + (audioDeleteSet.size === 1 ? "" : "s"));
+  const tracks = [...audioDeleteSet].filter((v) => typeof v === "number");
+  const files = [...audioDeleteSet].filter((v) => typeof v === "string" && v.indexOf("ext:") === 0);
+  if (tracks.length) {
+    bits.push("delete " + tracks.length + " track" + (tracks.length === 1 ? "" : "s"));
+  }
+  if (files.length) {
+    bits.push("delete " + files.length + " subtitle file" + (files.length === 1 ? "" : "s"));
   }
   const defA = audioDefaultChange("audio");
   if (defA !== null) {
@@ -309,23 +364,30 @@ function audioExecuteSummary() {
 async function audioExecute() {
   if (!audioFileMgmt || audioBusy) return;
   const path = audioPath;
-  const deleted = [...audioDeleteSet];
+  const deleted = [...audioDeleteSet].filter((v) => typeof v === "number");
+  const deletedFiles = [...audioDeleteSet]
+    .filter((v) => typeof v === "string" && v.indexOf("ext:") === 0)
+    .map((v) => v.slice(4));
   const defA = audioDefaultChange("audio");
   const defS = audioDefaultChange("subtitle");
   const summary = audioExecuteSummary();
   if (!summary.length) return;
 
+  const rewrites = deleted.length > 0 || defA !== null || defS !== null;
   if (!window.confirm(
     "Apply these changes to " + path.replace(/^.*[\\/]/, "") + "?\n\n" +
     summary.join("\n") + "\n\n" +
-    "The video is rewritten in place and needs free space equal to its size."
+    (rewrites
+      ? "The video is rewritten in place and needs free space equal to its size."
+      : "The marked subtitle files are deleted from disk.")
   )) return;
 
   audioBusy = true;
-  audioNotice("Rewriting the file — this can take a while…", "muted");
+  audioNotice("Executing — this can take a while…", "muted");
   audioRender();
   let body = "path=" + encodeURIComponent(path);
   if (deleted.length) body += "&delete=" + encodeURIComponent(deleted.join(","));
+  if (deletedFiles.length) body += "&delete_files=" + encodeURIComponent(deletedFiles.join(","));
   if (defA !== null) body += "&default_audio=" + encodeURIComponent(defA);
   if (defS !== null) body += "&default_subtitle=" + encodeURIComponent(defS);
   try {
@@ -346,10 +408,12 @@ async function audioExecute() {
     audioDefaultSub = null;
     audioTracks = ((data.entry && data.entry.audio) || []).slice();
     audioSubtitles = ((data.entry && data.entry.internal) || []).slice();
+    audioExtSubtitles = ((data.entry && data.entry.external) || []).slice();
     if (Array.isArray(data.preferred_languages)) {
       audioPreferred = data.preferred_languages.slice();
     }
     audioSmartMark = (data.smart_mark || []).slice();
+    audioSmartMarkFiles = (data.smart_mark_files || []).slice();
     let msg = data.message || "Updated.";
     if (data.jellyfin) msg += " (Jellyfin warning: " + data.jellyfin + ")";
     audioNotice(msg, "ok");
@@ -372,11 +436,13 @@ function audioClose() {
   audioPath = null;
   audioTracks = [];
   audioSubtitles = [];
+  audioExtSubtitles = [];
   audioDeleteSet = new Set();
   audioDefault = null;
   audioDefaultSub = null;
   audioPreferred = [];
   audioSmartMark = [];
+  audioSmartMarkFiles = [];
   audioBusy = false;
 }
 
@@ -390,24 +456,25 @@ function audioOpen(path) {
   audioPath = path;
   audioTracks = [];
   audioSubtitles = [];
+  audioExtSubtitles = [];
 
   const back = el("div", { class: "subdl-back" });
   const box = el("div", { class: "subdl" });
-  box.appendChild(el("h3", { text: "Internal" }));
+  box.appendChild(el("h3", { text: "Tracks" }));
   box.appendChild(el("p", { class: "muted", text: path.replace(/^.*[\\/]/, "") }));
   const warn = el("p", {
     class: "muted subdl-fm",
     hidden: true,
-    text: "File management is off — editing internal tracks is disabled. Enable it on the Settings page.",
+    text: "File management is off — editing tracks is disabled. Enable it on the Settings page.",
   });
   warn.id = "audio-fm";
   box.appendChild(warn);
   box.appendChild(el("p", {
     class: "muted subdl-help",
-    text: "Mark tracks to delete, choose at most one default per type, then press Execute.",
+    text: "Mark tracks or subtitle files to delete, choose at most one default per type, then press Execute.",
   }));
   box.appendChild(el("div", { id: "audio-status", class: "subdl-status" }));
-  box.appendChild(el("div", { id: "audio-tracks", class: "subdl-existing" }));
+  box.appendChild(el("div", { id: "audio-tracks", class: "audio-scroll" }));
   box.appendChild(el("div", { id: "audio-actions" }));
 
   back.appendChild(box);

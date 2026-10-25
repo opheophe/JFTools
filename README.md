@@ -30,17 +30,18 @@ existing server over the API.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans. **Latest additions** names each item's
   library and carries the same action pills as the other tabs (Open, Sync, Play,
-  Subfind, Subtitles, Internal, Google).
+  Subfind, Subtitles, Tracks, Google).
 - Subfind: the **Subfind** pill opens the subtitle search with a live player on
   the right half. Downloading a candidate makes the player start it at once
   (later downloads switch the subtitle without restarting the video), and the
   **Sync** and **Delete** buttons act on whichever subtitle is playing in the
   player right now — a success chime plays when they finish. Embedded streams
-  are left to the Internal dialog.
-- Internal tracks: the **Audio** column lists every embedded audio track, a
+  are left to the Tracks dialog.
+- Tracks: the **Audio** column lists every embedded audio track, a
   filter can match scan state or track count plus a case-insensitive track-name
-  regex, and the **Internal** pill opens a dialog for embedded audio and
-  subtitles — mark several tracks for deletion with row buttons, choose one
+  regex, and the **Tracks** pill opens a dialog for the audio tracks, the
+  embedded subtitles and the external subtitle files — mark several rows for
+  deletion with row buttons, choose one
   default of each type, or let **Smart mark** pick every subtitle outside your
   preferred languages plus every forced track, then execute it in a single
   in-place rewrite.
@@ -145,7 +146,7 @@ values.
 | `JFTOOLS_PATH_MAP` | Optional. Semicolon-separated `from=to` path mappings, e.g. `/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`. Maps Jellyfin's container paths to paths this machine can open. Also editable in-app (Settings → Media paths). |
 | `JFTOOLS_OPENSUBTITLES_API_KEY` | Optional. OpenSubtitles API key (opensubtitles.com → Consumers) used by subtitle search/download. Also editable in-app. |
 | `JFTOOLS_OPENSUBTITLES_USERNAME` / `JFTOOLS_OPENSUBTITLES_PASSWORD` | Optional. OpenSubtitles account login — raises the daily download quota. |
-| `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Preferred subtitle languages, e.g. `en,sv` (default `en`). Used by OpenSubtitles searches and the Internal dialog's Smart mark. |
+| `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Preferred subtitle languages, e.g. `en,sv` (default `en`). Used by OpenSubtitles searches and the Tracks dialog's Smart mark. |
 | `PUID` / `PGID` | Container user/group that owns the data files. Set in `docker-compose.yml`. |
 | `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
 
@@ -333,7 +334,7 @@ searches the labels in the Subtitles column plus the underlying track names and
 external file names. `forced|srt$` finds forced and `.srt` tracks; `ext` finds
 external subtitles. It is combined with the selected subtitle filters.
 
-## Internal tracks (audio and subtitles)
+## Tracks (audio and subtitles)
 
 The **Audio** column lists each file's embedded audio tracks as
 `English (E-AC-3 5.1), Swedish (AAC stereo)`; a trailing `*` marks the default
@@ -343,28 +344,35 @@ was unreachable, not a file, or ffprobe failed — the column names the exact
 reason). The **Audio regex** box next to the Audio filter matches the track
 names, case-insensitively (`swe|nor`, `5\.1`, …).
 
-The **Internal** pill on a row opens the embedded-track dialog. It lists the
-audio tracks and the embedded subtitle tracks. Toggle any number of rows with
-**Mark delete** / **Unmark**, use **Set default** to choose at most one audio and
-one subtitle default, then press **Execute**. **Smart mark** replaces the
-subtitle marks with every track outside your preferred languages (Settings →
-**Subtitle preferences**). Matching is by language, not exact label, so with
-English preferred, `English SDH`, `En SDH` and `En` all stay unmarked; French,
-`fr`, Czech and similar tracks are marked. **Forced** tracks are marked too,
-including English forced, because a full subtitle track normally makes the
-forced one redundant. Tracks whose language is **Unknown** are left unmarked
-unless they are forced, and Smart mark never changes audio marks. Leaving the
-preferred list empty defaults to English. The whole change is one ffmpeg rewrite
-— every other stream is copied as-is — into a temporary file in the same
-folder, which replaces the original only if ffmpeg succeeds. A new default
-replaces the old one; if the default track is deleted without a replacement,
-the first remaining track of that type is promoted. The dialog refuses to
-delete every audio track, and asks Jellyfin to rescan the file afterwards.
+The **Tracks** pill on a row opens the track dialog. It lists the audio
+tracks, the embedded subtitle tracks and the external subtitle files. Toggle
+any number of rows with **Mark delete** / **Unmark**, use **Set default** to
+choose at most one audio and one subtitle default, then press **Execute**.
+The track list scrolls on its own, so **Smart mark** and **Execute** stay
+visible no matter how many tracks a file has. **Smart mark** replaces the
+subtitle marks with every track or file outside your preferred languages
+(Settings → **Subtitle preferences**). Matching is by language, not exact
+label, so with English preferred, `English SDH`, `En SDH` and `En` all stay
+unmarked; French, `fr`, Czech and similar tracks are marked. A track whose
+language tag is missing is read from its title — `Unknown (Català)` is
+Catalan, `Unknown (Euskara)` Basque, `Unknown (Norsk Bokmål)` Norwegian, and
+the same for Galego, ಕನ್ನಡ, മലയാളം, Bahasa Melayu, தமிழ் and తెలుగు.
+**Forced** tracks are marked too, including English forced, because a full
+subtitle track normally makes the forced one redundant. Tracks whose language
+is **Unknown** are left unmarked unless they are forced, and Smart mark never
+changes audio marks. Leaving the preferred list empty defaults to English.
+
+Embedded changes are one ffmpeg rewrite — every other stream is copied as-is —
+into a temporary file in the same folder, which replaces the original only if
+ffmpeg succeeds; marked external files are then deleted from disk. A new
+default replaces the old one; if the default track is deleted without a
+replacement, the first remaining track of that type is promoted. The dialog
+refuses to delete every audio track, and asks Jellyfin to rescan the file
+afterwards.
 
 The dialog needs **File management** enabled in the settings, and free space
-equal to the file size. Embedded subtitles are edited here; external subtitle
-files are managed from the **Subtitles** dialog, which can delete and sync
-them. The dialog also flags commentary audio tracks.
+equal to the file size when a rewrite is needed. The dialog also flags
+commentary audio tracks.
 
 ## Subtitles
 
@@ -390,7 +398,7 @@ results** on the left and the tracks already on the video on the right, so a
 long result list cannot push the track actions out of view.
 
 The dialog lists **every subtitle track** on the video — the embedded tracks
-first (read-only here; use the **Internal** dialog to delete or make one
+first (read-only here; use the **Tracks** dialog to delete or make one
 default) and then the external files. Each external row has a **Delete** button
 (Jellyfin is told the file changed right away) and a **Sync** button that
 re-aligns that subtitle to the video with

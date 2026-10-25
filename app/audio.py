@@ -1,9 +1,11 @@
-"""Internal tracks — list and edit a video's embedded audio/subtitle streams.
+"""Track editing — list and edit a video's embedded audio/subtitle streams and
+its external subtitle files.
 
 Scanning lives in :mod:`app.subtitles` (one ffprobe fills both halves of
 ``data/scans.json``); this module serves the Search, Movie Match and Libraries
-tabs' "Internal" dialog. It can delete several embedded streams and set one
-default audio and one default subtitle in a single rewrite.
+tabs' "Tracks" dialog. It can delete several embedded streams, delete external
+subtitle files, and set one default audio and one default subtitle in a single
+execute step.
 
 The rewrite copies every other stream into a temporary file next to the
 original with ``-c copy`` and replaces the original only after ffmpeg succeeds.
@@ -24,6 +26,7 @@ from .config import config
 from .logs import log
 from .paths import resolve_path
 from .subtitles import (
+    _external_subtitles,
     _library_row,
     _probe_one,
     _probe_streams,
@@ -32,10 +35,12 @@ from .subtitles import (
     _state,
     _write_gate,
     audio_tracks_for,
+    external_smart_marks,
     internal_tracks_for,
     resolve_ffmpeg,
     resolve_ffprobe,
     smart_subtitle_marks,
+    subtitle_tracks_for,
 )
 from .web import require_login
 
@@ -89,7 +94,8 @@ async def internal_existing(
     user: str = Depends(require_login),
     path: str = Form(""),
 ):
-    """Every embedded audio and subtitle track for one library video."""
+    """Every embedded audio/subtitle track and external subtitle file for one
+    library video."""
     path = (path or "").strip()
     if not path:
         return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
@@ -99,6 +105,7 @@ async def internal_existing(
         )
 
     subtitles, tracks, error = await internal_tracks_for(path, force=True)
+    _internal, external = await subtitle_tracks_for(path)
     smart_mark, preferred = smart_subtitle_marks(subtitles)
     return JSONResponse(
         {
@@ -106,7 +113,9 @@ async def internal_existing(
             "file_mgmt": config.settings.file_mgmt,
             "subtitles": subtitles,
             "audio": tracks,
+            "external": external,
             "smart_mark": smart_mark,
+            "smart_mark_files": external_smart_marks(external, preferred),
             "preferred_languages": preferred,
             "error": error,
         }
@@ -119,15 +128,19 @@ async def internal_execute(
     x_jftools: str = Header(default=""),
     path: str = Form(""),
     delete: str = Form(""),
+    delete_files: str = Form(""),
     default_audio: str = Form(""),
     default_subtitle: str = Form(""),
 ):
-    """Delete marked embedded streams and set the chosen defaults in one pass.
+    """Delete marked embedded streams and external subtitle files and set the
+    chosen defaults in one pass.
 
     ``delete`` is a comma-separated list of absolute ffprobe stream indices;
+    ``delete_files`` a comma-separated list of external subtitle file names;
     ``default_audio``/``default_subtitle`` are optional absolute indices. The
     file is re-probed here and every index is checked against the live stream
-    list, so the caller cannot map away arbitrary streams.
+    list, and every file against the video's own external subtitles, so the
+    caller cannot map away arbitrary streams or files.
     """
     gate = _write_gate(x_jftools)
     if gate:
@@ -138,6 +151,9 @@ async def internal_execute(
         return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
 
     deleted, error = _parse_index_list(delete)
+    if error:
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+    files, error = _parse_file_list(delete_files)
     if error:
         return JSONResponse({"ok": False, "error": error}, status_code=400)
     audio_default, error = _parse_optional_index(default_audio, "audio default")
@@ -183,6 +199,18 @@ async def internal_execute(
             return JSONResponse(
                 {"ok": False, "error": f"Could not probe the file: {probe_error}"},
                 status_code=502,
+            )
+
+        external = _external_subtitles(local)
+        external_names = {e["file"] for e in external}
+        unknown_files = [f for f in files if f not in external_names]
+        if unknown_files:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "Not an external subtitle file of this video.",
+                },
+                status_code=403,
             )
 
         subs_by_index = {t["index"]: t for t in subtitles}
@@ -234,7 +262,7 @@ async def internal_execute(
         subtitle_edits, subtitle_target = _default_overrides(
             subtitles, subtitle_default, deleted_set
         )
-        if not deleted_set and not audio_edits and not subtitle_edits:
+        if not deleted_set and not files and not audio_edits and not subtitle_edits:
             entry = _state["files"].get(path)
             smart_mark, preferred = smart_subtitle_marks(
                 (entry or {}).get("internal") or []
@@ -245,28 +273,50 @@ async def internal_execute(
                     "message": "Nothing to change.",
                     "entry": entry,
                     "smart_mark": smart_mark,
+                    "smart_mark_files": external_smart_marks(
+                        (entry or {}).get("external") or [], preferred
+                    ),
                     "preferred_languages": preferred,
                     "jellyfin": None,
                 }
             )
 
-        ok, err = await asyncio.to_thread(
-            _rewrite_tracks,
-            ffmpeg,
-            local,
-            deleted_set,
-            audio_edits,
-            subtitle_edits,
-        )
-        if not ok:
-            log(
-                "Search",
-                "WARN",
-                f"Internal track edit failed ({err}): {os.path.basename(local)}",
+        if deleted_set or audio_edits or subtitle_edits:
+            ok, err = await asyncio.to_thread(
+                _rewrite_tracks,
+                ffmpeg,
+                local,
+                deleted_set,
+                audio_edits,
+                subtitle_edits,
             )
-            return JSONResponse(
-                {"ok": False, "error": err or "ffmpeg failed."}, status_code=502
-            )
+            if not ok:
+                log(
+                    "Search",
+                    "WARN",
+                    f"Track edit failed ({err}): {os.path.basename(local)}",
+                )
+                return JSONResponse(
+                    {"ok": False, "error": err or "ffmpeg failed."}, status_code=502
+                )
+
+        # Delete the marked external subtitle files. Any rewrite above has
+        # already succeeded, so these go after it.
+        deleted_files: list[str] = []
+        file_errors: list[str] = []
+        if files:
+            from .files import browser_roots, delete_entry
+
+            folder = os.path.dirname(local)
+            for name in sorted(files):
+                result = delete_entry(os.path.join(folder, name), browser_roots())
+                if result.get("ok"):
+                    deleted_files.append(name)
+                    log("Search", "INFO", f"Deleted subtitle file: {name}")
+                else:
+                    err_text = result.get("error") or "delete failed"
+                    file_errors.append(f"{name}: {err_text}")
+                    log("Search", "WARN", f"Subtitle file delete refused ({err_text}): {name}")
 
         # Stream indices shift when tracks are removed, so both halves of the
         # stored entry are replaced from a fresh probe.
@@ -288,13 +338,18 @@ async def internal_execute(
         if deleted_set:
             count = len(deleted_set)
             bits.append(f"Deleted {count} track{'s' if count != 1 else ''}.")
+        if deleted_files:
+            count = len(deleted_files)
+            bits.append(f"Deleted {count} subtitle file{'s' if count != 1 else ''}.")
+        if file_errors:
+            bits.append("Some files could not be deleted: " + "; ".join(file_errors) + ".")
         if audio_target is not None:
             name = audio_by_index[audio_target].get("name") or "audio track"
             bits.append(f"Default audio: {name}.")
         if subtitle_target is not None:
             name = subs_by_index[subtitle_target].get("name") or "subtitle track"
             bits.append(f"Default subtitle: {name}.")
-        message = " ".join(bits) or "Updated the internal tracks."
+        message = " ".join(bits) or "Updated the tracks."
         log("Search", "INFO", f"{message} ({os.path.basename(local)})")
         smart_mark, preferred = smart_subtitle_marks(entry.get("internal") or [])
         return JSONResponse(
@@ -303,9 +358,13 @@ async def internal_execute(
                 "message": message,
                 "entry": entry,
                 "deleted": sorted(deleted_set),
+                "deleted_files": deleted_files,
                 "default_audio": audio_target,
                 "default_subtitle": subtitle_target,
                 "smart_mark": smart_mark,
+                "smart_mark_files": external_smart_marks(
+                    entry.get("external") or [], preferred
+                ),
                 "preferred_languages": preferred,
                 "jellyfin": jellyfin,
             }
@@ -453,6 +512,19 @@ def _parse_index_list(raw: str) -> tuple[list[int] | None, str | None]:
             return None, "Stream indices cannot be negative."
         if value not in values:
             values.append(value)
+    return values, None
+
+
+def _parse_file_list(raw: str) -> tuple[list[str] | None, str | None]:
+    """Parse a comma-separated list of external subtitle file names."""
+    values: list[str] = []
+    raw = raw if isinstance(raw, str) else ""
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if part not in values:
+            values.append(part)
     return values, None
 
 
