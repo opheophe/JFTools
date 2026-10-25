@@ -7,6 +7,9 @@
 
 const PL = window.JF_PLAY || { path: "", file: "", track: "" };
 
+// The Subfind dialog embeds this page in an iframe; the popup window does not.
+const PL_EMBEDDED = window.self !== window.top;
+
 const plVideo = document.getElementById("pl-video");
 const plFile = document.getElementById("pl-file");
 const plStatus = document.getElementById("pl-status");
@@ -43,6 +46,18 @@ function plEl(tag, props) {
 }
 
 function plEnc(s) { return encodeURIComponent(s || ""); }
+
+// Tell the embedding page (the Subfind dialog) which subtitle track is showing
+// so its Sync and Delete buttons act on the right file. Does nothing when this
+// page is the popup window.
+function plPostParent(msg) {
+  if (!PL_EMBEDDED) return;
+  try {
+    window.parent.postMessage({ jftools: true, ...msg }, window.location.origin);
+  } catch (err) {
+    /* ignore */
+  }
+}
 
 function plSetStatus(text, kind) {
   plStatus.textContent = text || "";
@@ -214,6 +229,14 @@ function plApplyModes(index) {
   plCurrent = index;
   plSubs.value = index >= 0 ? String(index) : "";
   plRenderCues();
+  const t = (index >= 0 && plTracks[index]) ? plTracks[index] : null;
+  plPostParent({
+    action: "track",
+    spec: t ? t.spec : "",
+    label: t ? t.label : "",
+    kind: t ? t.kind : "",
+    file: t ? (t.file || "") : "",
+  });
 }
 
 // The browser's own caption menu can turn a track on behind our back; follow it.
@@ -260,6 +283,35 @@ async function plChooseTrack(value) {
   }
   plApplyModes(index);
   plIdleStatus();
+}
+
+// Pick a subtitle track by its spec (used by the Subfind dialog, which sends
+// ``external:<file>`` for a freshly downloaded subtitle). The video keeps
+// playing; only the subtitle track changes.
+async function plSelectBySpec(spec) {
+  await plLoadTracks();
+  const index = plTracks.findIndex((t) => t.spec === spec);
+  if (index >= 0) await plChooseTrack(String(index));
+  plTryPlay();
+}
+
+// Re-list the subtitle tracks (after a sync or delete changed the files on
+// disk) and keep the current track when it still exists. The video keeps
+// playing; only the track list and the captions refresh.
+async function plReloadTracks() {
+  const prev = plCurrent >= 0 ? plTracks[plCurrent] : null;
+  const prevSpec = prev ? prev.spec : "";
+  await plLoadTracks();
+  if (prevSpec) {
+    const index = plTracks.findIndex((t) => t.spec === prevSpec);
+    if (index >= 0) {
+      await plChooseTrack(String(index));
+      return;
+    }
+  }
+  const index = plTracks.findIndex((t) => t.default && t.playable);
+  if (index >= 0) await plChooseTrack(String(index));
+  else plApplyModes(-1);
 }
 
 async function plLoadTracks() {
@@ -555,6 +607,29 @@ function plInit() {
 
   plSubs.addEventListener("change", () => plChooseTrack(plSubs.value));
   plPrepare.addEventListener("click", plPrepareCopy);
+
+  // The Subfind dialog drives this page from its iframe: select a track (a
+  // freshly downloaded subtitle) or re-list the tracks (a sync/delete changed
+  // the files on disk). "hello" lets the dialog re-sync its Now playing state.
+  window.addEventListener("message", (ev) => {
+    if (ev.source !== window.parent) return;
+    const msg = (ev.data && typeof ev.data === "object") ? ev.data : {};
+    if (!msg.jftools) return;
+    if (msg.action === "hello") {
+      const t = plCurrent >= 0 ? plTracks[plCurrent] : null;
+      plPostParent({
+        action: "ready",
+        spec: t ? t.spec : "",
+        label: t ? t.label : "",
+        kind: t ? t.kind : "",
+        file: t ? (t.file || "") : "",
+      });
+    } else if (msg.action === "select" && msg.spec) {
+      plSelectBySpec(String(msg.spec));
+    } else if (msg.action === "reload") {
+      plReloadTracks();
+    }
+  });
 
   plUpdateTime();
   plLoadTracks().then(() => {

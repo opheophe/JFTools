@@ -323,6 +323,8 @@ section.card { margin-top: 1.25rem; }
 .id-google-btn.id-btn-sync:hover { background: rgba(224, 164, 88, 0.16); }
 .id-google-btn.id-btn-play { color: var(--ok); border-color: var(--ok); }
 .id-google-btn.id-btn-play:hover { background: rgba(62, 207, 142, 0.16); }
+.id-google-btn.id-btn-sfind { color: var(--fire); border-color: var(--fire); }
+.id-google-btn.id-btn-sfind:hover { background: rgba(255, 122, 24, 0.16); }
 .id-google-btn.id-btn-subs { color: var(--magenta); border-color: var(--magenta); }
 .id-google-btn.id-btn-subs:hover { background: rgba(217, 122, 209, 0.16); }
 .id-google-btn.id-btn-audio { color: var(--violet); border-color: var(--violet); }
@@ -453,7 +455,7 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl h3 { margin: 0; }
 .subdl p { margin: 0; }
-.subdl-methods { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.subdl-methods { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.35rem; }
 .subdl-methods button { font-size: 0.75rem; padding: 0.25rem 0.55rem; }
 .subdl-method.subdl-method-on { color: var(--accent); border-color: var(--accent); }
 .subdl .row { justify-content: flex-end; margin-top: 0.35rem; }
@@ -550,6 +552,22 @@ td.fb-actions { white-space: nowrap; }
 .subdl-actions .subdl-help { margin: 0; font-size: 0.75rem; flex: 1 1 12rem; }
 .subdl-actions .subdl-btn { flex-shrink: 0; }
 .subdl-help { font-size: 0.78rem; }
+
+/* Subfind dialog: the subtitles dialog with a live player on the right.
+   A fixed height so the player keeps the space even before results exist. */
+.subdl.subfind { height: 82vh; }
+.subfind-side {
+  flex: 0 0 50%; display: flex; flex-direction: column; gap: 0.5rem;
+  min-width: 0; min-height: 0; border-left: 1px solid var(--border); padding-left: 0.9rem;
+}
+.subfind-now { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+.subfind-now h4 { margin: 0; font-size: 0.8rem; }
+.subfind-now-name { flex: 1 1 auto; min-width: 0; font-size: 0.8rem; overflow-wrap: anywhere; }
+.subfind-hint { font-size: 0.72rem; margin: 0; }
+.subfind-frame {
+  flex: 1 1 auto; min-height: 10rem; width: 100%; display: block;
+  border: 1px solid var(--border); border-radius: 8px; background: #000;
+}
 
 /* player window (/play) */
 .play-body { background: #000; overflow: hidden; }

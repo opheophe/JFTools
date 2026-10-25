@@ -30,7 +30,13 @@ existing server over the API.
 - Jellyfin connection test, library listing, recently added, library stats,
   active sessions and scheduled scans. **Latest additions** names each item's
   library and carries the same action pills as the other tabs (Open, Sync, Play,
-  Subtitles, Internal, Google).
+  Subfind, Subtitles, Internal, Google).
+- Subfind: the **Subfind** pill opens the subtitle search with a live player on
+  the right half. Downloading a candidate makes the player start it at once
+  (later downloads switch the subtitle without restarting the video), and the
+  **Sync** and **Delete** buttons act on whichever subtitle is playing in the
+  player right now — a success chime plays when they finish. Embedded streams
+  are left to the Internal dialog.
 - Internal tracks: the **Audio** column lists every embedded audio track, a
   filter can match scan state or track count plus a case-insensitive track-name
   regex, and the **Internal** pill opens a dialog for embedded audio and
@@ -367,6 +373,12 @@ action on a row (Movie Match and Search tabs). It identifies the video the same
 way VLSub does — by its OpenSubtitles "moviehash" (first + last 64 KiB) — and
 falls back to a name search when the hash finds nothing. Pick a candidate and
 JFTools saves `<video-name>.<language>.srt` next to the video.
+
+The **Subfind** pill is the same dialog with the right column replaced by a
+live player: a downloaded subtitle starts playing immediately, later downloads
+switch the subtitle without restarting the video, and **Sync** / **Delete**
+above the player act on whichever subtitle is playing at that moment (a
+success chime plays when they finish).
 
 The dialog's **Search Hash**, **Search Filename** and **Search Jellyfin name**
 buttons re-run the search one way instead of the default, for when the automatic

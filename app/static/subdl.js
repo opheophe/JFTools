@@ -444,7 +444,6 @@ function subdlOpen(path) {
     btn.addEventListener("click", () => subdlSearch(id));
     methods.appendChild(btn);
   });
-  box.appendChild(methods);
   const warn = el("p", {
     class: "muted subdl-fm",
     hidden: true,
@@ -457,6 +456,8 @@ function subdlOpen(path) {
 
   const cols = el("div", { class: "subdl-cols" });
   const results = el("div", { class: "subdl-col subdl-results" });
+  // The search buttons belong to the OpenSubtitles column, not the split view.
+  results.appendChild(methods);
   results.appendChild(el("h4", { class: "subdl-col-title", text: "OpenSubtitles results" }));
   results.appendChild(el("div", { id: "subdl-meta", class: "subdl-meta" }));
   const langBox = el("div", { id: "subdl-lang", class: "subdl-lang", hidden: true });
