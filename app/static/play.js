@@ -11,6 +11,7 @@ const PL = window.JF_PLAY || { path: "", file: "", track: "" };
 const PL_EMBEDDED = window.self !== window.top;
 
 const plVideo = document.getElementById("pl-video");
+const plAudio = document.getElementById("pl-audio");
 const plFile = document.getElementById("pl-file");
 const plStatus = document.getElementById("pl-status");
 const plTime = document.getElementById("pl-time");
@@ -27,7 +28,9 @@ let plTracks = [];      // track descriptors from /api/player/tracks
 let plTrackEls = [];    // matching <track> elements
 let plCurrent = -1;     // selected track index, -1 for off
 let plPrepared = false; // streaming the remuxed copy?
+let plCompanion = false; // playing the video muted + the converted audio track?
 let plPreparePoll = null;
+let plPrepareKind = "audio"; // what the Fix audio button will ask the server for
 let plDead = false;
 let plAudioChecked = false;
 let plHasAudio = null;  // server's answer: null unknown, false = no audio stream
@@ -35,6 +38,7 @@ let plCopyWhy = "";     // e.g. "DTS audio": the server knows it won't play
 let plStatusHold = false; // the status line is explaining something, not noting
 let plPlayTries = 0;    // rejected play() attempts, for the retry ladder
 let plCaptionText = null;
+let plSyncTimer = null; // drift correction while the companion audio plays
 
 function plEl(tag, props) {
   const node = document.createElement(tag);
@@ -76,6 +80,7 @@ function plStatusHeld() {
 function plIdleStatus() {
   if (plStatusHeld()) return;
   if (plPrepared) plSetStatus(plPlayingCopy(), plCopyWhy ? "warn" : "");
+  else if (plCompanion) plSetStatus(plPlayingCompanion(), plCopyWhy ? "warn" : "");
   else plSetStatus("");
 }
 
@@ -331,7 +336,7 @@ async function plLoadTracks() {
   }
 }
 
-// ---- browser copy (remux) ----------------------------------------------------
+// ---- audio fallback (converted track / browser copy) -------------------------
 
 // A file whose audio the browser cannot decode (a DTS or TrueHD rip) plays with
 // picture and no sound, and fires no error at all. The server probes the first
@@ -354,7 +359,7 @@ function plUnsupportedAc3(audio) {
 }
 
 function plHandleAudio(data) {
-  if (plDead || plPrepared) return;
+  if (plDead || plPrepared || plCompanion) return;
   if (data.audio) plHasAudio = Boolean(data.audio.codec);
   if (data.audio && !data.audio.codec) {
     plSetStatus("This file has no audio track.", "warn");
@@ -368,22 +373,28 @@ function plHandleAudio(data) {
     plSwitchToPrepared();
     return;
   }
-  // Keep the copy button reachable for surround audio even when the browser
-  // claims it can decode it: a silent chrome/firefox is not obvious until it
-  // happens, and the manual copy is the way out.
+  // A converted audio track exists: play the original (muted) video alongside
+  // it right away.
+  if (data.audio_ready) {
+    plStartCompanion();
+    return;
+  }
+  // Keep the button reachable for surround audio even when the browser claims
+  // it can decode it: a silent chrome/firefox is not obvious until it happens,
+  // and converting the audio is the way out.
   if (plIsAc3(data.audio)) plPrepare.hidden = false;
   if (plUnsupportedAc3(data.audio)) {
     plCopyWhy = "AC-3 audio";
-    plPrepareCopy();
+    plPrepareAudio();
     return;
   }
   if (!data.needs_copy) return;
   plPrepare.hidden = false;
-  plPrepareCopy();
+  plPrepareAudio();
 }
 
-// Why the browser copy was needed, as a lead-in for the status line; empty when
-// the viewer asked for the copy themselves.
+// Why the audio was converted, as a lead-in for the status line; empty when
+// the viewer asked for it themselves.
 function plCopyNote() {
   return plCopyWhy ? plCopyWhy + " won't play in this browser. " : "";
 }
@@ -392,9 +403,72 @@ function plPlayingCopy() {
   return plCopyNote() + "Playing the browser copy.";
 }
 
+function plPlayingCompanion() {
+  return plCopyNote() + "Playing with converted audio.";
+}
+
 function plCopyProgress(message) {
-  const tail = message || "Making a browser copy…";
+  const tail = message || "Converting audio…";
   return plCopyNote() + tail;
+}
+
+// ---- companion audio --------------------------------------------------------
+//
+// The file's own audio cannot be decoded, so the server converted it to a
+// small AAC track. The original video plays muted, and the converted track
+// plays next to it; play/pause, seek, speed and drift correction keep the two
+// aligned. This avoids the slow full remux (and its movie-sized copy).
+
+function plAudioUrl() {
+  return "/api/player/audio?path=" + plEnc(PL.path) + "&prepared=1";
+}
+
+function plStartCompanion() {
+  if (plCompanion || !plAudio) return;
+  plCompanion = true;
+  plPrepare.hidden = true;
+  plPrepare.disabled = false;
+  plVideo.muted = true;
+  plAudio.src = plAudioUrl();
+  plAudio.load();
+
+  const sync = () => {
+    if (plVideo.paused || plVideo.ended) {
+      if (!plAudio.paused) plAudio.pause();
+      return;
+    }
+    const attempt = plAudio.play();
+    if (attempt && typeof attempt.catch === "function") attempt.catch(() => { /* ignore */ });
+  };
+  plVideo.addEventListener("play", sync);
+  plVideo.addEventListener("pause", sync);
+  plVideo.addEventListener("seeked", () => {
+    try { plAudio.currentTime = plVideo.currentTime; } catch (err) { /* ignore */ }
+    sync();
+  });
+  plVideo.addEventListener("ratechange", () => {
+    try { plAudio.playbackRate = plVideo.playbackRate; } catch (err) { /* ignore */ }
+  });
+  plAudio.addEventListener("loadedmetadata", () => {
+    try {
+      if (plVideo.currentTime > 0.1) plAudio.currentTime = plVideo.currentTime;
+      plAudio.playbackRate = plVideo.playbackRate;
+    } catch (err) { /* ignore */ }
+    sync();
+  });
+  // Two elements never stay sample-perfect; nudge the audio back onto the
+  // video whenever they drift apart.
+  clearInterval(plSyncTimer);
+  plSyncTimer = setInterval(() => {
+    if (!plCompanion || plVideo.paused || plAudio.paused) return;
+    if (Math.abs(plVideo.currentTime - plAudio.currentTime) > 0.4) {
+      try { plAudio.currentTime = plVideo.currentTime; } catch (err) { /* ignore */ }
+    }
+  }, 4000);
+
+  plSetStatus(plPlayingCompanion(), plCopyWhy ? "warn" : "");
+  sync();
+  plTryPlay();
 }
 
 function plSwitchToPrepared() {
@@ -402,6 +476,14 @@ function plSwitchToPrepared() {
   plPrepared = true;
   plDead = false;
   plPrepare.hidden = true;
+  if (plCompanion) {
+    // The full copy carries its own audio; drop the companion track.
+    plCompanion = false;
+    clearInterval(plSyncTimer);
+    plVideo.muted = false;
+    try { plAudio.pause(); } catch (err) { /* ignore */ }
+    plAudio.removeAttribute("src");
+  }
   plSetStatus(plPlayingCopy(), plCopyWhy ? "warn" : "");
   const restore = () => {
     plVideo.removeEventListener("loadedmetadata", restore);
@@ -432,18 +514,48 @@ async function plPollPrepare() {
     }
     clearInterval(plPreparePoll);
     plPrepare.disabled = false;
-    if (data.status === "done") plSwitchToPrepared();
-    else if (data.status === "error") plSetStatus(data.error || "The browser copy failed.", "error");
-    else plIdleStatus();
+    if (data.status === "done") {
+      if (data.kind === "copy" || plPrepareKind === "copy") plSwitchToPrepared();
+      else plStartCompanion();
+    } else if (data.status === "error") {
+      plSetStatus(data.error || "The audio conversion failed.", "error");
+    } else plIdleStatus();
   }, 1500);
+}
+
+async function plPrepareAudio() {
+  if (plPrepare.disabled) return;
+  plPrepare.disabled = true;
+  plPrepareKind = "audio";
+  plPrepare.textContent = "Fix audio";
+  plSetStatus(plCopyProgress("Starting…"), "warn");
+  try {
+    const res = await fetch("/api/player/prepare?path=" + plEnc(PL.path) + "&kind=audio");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      plSetStatus(data.error || "Could not start the audio conversion.", "error");
+      plPrepare.disabled = false;
+      return;
+    }
+    if (data.status === "done") {
+      plStartCompanion();
+      return;
+    }
+    plPollPrepare();
+  } catch (err) {
+    plSetStatus("Could not start the audio conversion: " + err, "error");
+    plPrepare.disabled = false;
+  }
 }
 
 async function plPrepareCopy() {
   if (plPrepare.disabled) return;
   plPrepare.disabled = true;
+  plPrepareKind = "copy";
+  plPrepare.textContent = "Make browser copy";
   plSetStatus(plCopyProgress("Starting…"), "warn");
   try {
-    const res = await fetch("/api/player/prepare?path=" + plEnc(PL.path));
+    const res = await fetch("/api/player/prepare?path=" + plEnc(PL.path) + "&kind=copy");
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
       plSetStatus(data.error || "Could not start the browser copy.", "error");
@@ -462,6 +574,9 @@ async function plPrepareCopy() {
 }
 
 function plSuggestCopy(message) {
+  // The video itself will not play: only a full remux can fix that.
+  plPrepareKind = "copy";
+  plPrepare.textContent = "Make browser copy";
   plSetStatus(message, "warn");
   plPrepare.hidden = false;
   plPrepare.disabled = false;
@@ -548,12 +663,12 @@ function plInit() {
 
   // A container the browser can open but whose audio it cannot decode plays
   // silently, with no error at all. Chrome counts decoded audio bytes, so a
-  // file with an audio track and nothing decoded is a silent one: make a copy
-  // without being asked. The server has already done this for the codecs no
-  // browser can handle (DTS, TrueHD); this catches the rest — AC-3 and E-AC-3
-  // play on some platforms and are silent on others.
+  // file with an audio track and nothing decoded is a silent one: convert the
+  // audio without being asked. The server has already done this for the codecs
+  // no browser can handle (DTS, TrueHD); this catches the rest — AC-3 and
+  // E-AC-3 play on some platforms and are silent on others.
   plVideo.addEventListener("timeupdate", () => {
-    if (plDead || plPrepared || plAudioChecked || plCopyWhy) return;
+    if (plDead || plPrepared || plCompanion || plAudioChecked || plCopyWhy) return;
     if (plHasAudio === false) return;
     if (plVideo.currentTime < 4) return;
     if (typeof plVideo.webkitAudioDecodedByteCount !== "number") return;
@@ -565,7 +680,7 @@ function plInit() {
     plAudioChecked = true;
     plCopyWhy = "This file's audio";
     plPrepare.hidden = false;
-    plPrepareCopy();
+    plPrepareAudio();
   });
 
   plVideo.addEventListener("stalled", () => {
@@ -606,7 +721,10 @@ function plInit() {
   });
 
   plSubs.addEventListener("change", () => plChooseTrack(plSubs.value));
-  plPrepare.addEventListener("click", plPrepareCopy);
+  plPrepare.addEventListener("click", () => {
+    if (plPrepareKind === "copy") plPrepareCopy();
+    else plPrepareAudio();
+  });
 
   // The Subfind dialog drives this page from its iframe: select a track (a
   // freshly downloaded subtitle) or re-list the tracks (a sync/delete changed

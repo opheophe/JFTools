@@ -47,9 +47,11 @@ existing server over the API.
   in-place rewrite.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
-  (embedded streams extracted, external files converted to WebVTT), and an
-  ffmpeg remux for files the browser cannot decode (a file with DTS or TrueHD
-  audio plays with no sound otherwise, so the player starts one on its own).
+  (embedded streams extracted, external files converted to WebVTT). Files whose
+  audio the browser cannot decode (DTS, TrueHD, often AC-3) get a fast
+  audio-only AAC conversion played alongside the muted video instead of a
+  full remux; the slow remux is reserved for files whose video itself won't
+  play.
 - Single small container image, published to GitHub Container Registry for both
   `linux/amd64` and `linux/arm64`.
 - `/healthz` healthcheck.
@@ -474,30 +476,39 @@ media folders, exactly like the file browser.
 **A browser can only decode what it supports.** A remuxed MKV with DTS or
 TrueHD audio plays with picture and *no sound at all* — the video element does
 not even fire an error for it. The player therefore probes the file's first
-audio stream when it opens, and when the codec is one no browser decodes it says
-so and starts making **a browser copy** right away: ffmpeg remuxes the file into
-`play_cache/` in the data folder — video stream copied untouched, audio
-converted to AAC — and the player switches to it, keeping the position. If a
-copy has already been made, the player opens on it directly. The status line
-shows which codec is at fault and how far the remux is; the first copy takes a
-minute or two for a feature film; later plays reuse it. The cache is pruned at
-startup (older than a week, then oldest-first above ~5 GB, always keeping the
-newest copy — a film's copy is nearly the size of the film itself).
+audio stream when it opens, and when the codec is one no browser decodes it
+says so and converts **only the audio**: ffmpeg writes the audio track to a
+small AAC `.m4a` in `play_cache/` in the data folder (a feature film's track is
+a few hundred MB, and the conversion takes a fraction of a full remux because
+no video is copied). The player then plays the original video — muted — and the
+converted track next to it, keeping them aligned through seeks, speed changes
+and a drift check. If the conversion has already been made, the player starts
+with it directly. The status line shows which codec is at fault and how far the
+conversion is; the first one takes a minute or two for a feature film; later
+plays reuse it. The cache is pruned at startup (older than a week, then
+oldest-first above ~5 GB, always keeping the newest copy).
 
 ffprobe cannot answer for every codec: AC-3 and E-AC-3 are decoded through the
 operating system in some browsers and are silent in others. The player asks the
-browser whether it can take AC-3 at all; when it cannot, the copy starts
-immediately. When the browser claims support, the player watches whether audio
-is actually being decoded — a few seconds of silence with an audio track
-present starts the same copy. The **Make browser copy** button stays available
+browser whether it can take AC-3 at all; when it cannot, the audio conversion
+starts immediately. When the browser claims support, the player watches whether
+audio is actually being decoded — a few seconds of silence with an audio track
+present starts the same conversion. The **Fix audio** button stays available
 for AC-3/E-AC-3 so a viewer who hears nothing can start it by hand, including in
-browsers that expose no decoded-audio counter. Nothing switches away from the
-original until the copy is finished — it keeps playing meanwhile.
+browsers that expose no decoded-audio counter. Nothing switches until the
+conversion is finished — the video keeps playing meanwhile (silently).
+
+A full **browser copy** is only made when the *video itself* will not play —
+the container or video codec is something the browser cannot open. Then the
+**Make browser copy** button remuxes the file into a browser-friendly MP4
+(video copied untouched, audio converted to AAC) and the player switches to it,
+keeping the position. This is the slow path, and it is no longer used for audio
+problems.
 
 **Requirements:** ffmpeg (bundled in the Docker image, or in `Tools/` next to
-the app) for embedded subtitle extraction and browser copies. Without it the
-player still streams files the browser can decode, but the embedded tracks
-report that they cannot be converted.
+the app) for embedded subtitle extraction, audio conversion and browser
+copies. Without it the player still streams files the browser can decode, but
+the embedded tracks report that they cannot be converted.
 
 ## User watching
 

@@ -3,6 +3,7 @@
 Playback is read-only, so these routes need a login but not the File management
 setting — but they still must never serve a file outside the media roots.
 """
+import asyncio
 import json
 import os
 import subprocess
@@ -260,6 +261,7 @@ async def test_tracks_route_reports_audio_the_browser_cannot_decode(
     assert data["needs_copy"] is True
     assert data["copy_reason"] == "DTS audio"
     assert data["copy_ready"] is False
+    assert data["audio_ready"] is False
 
 
 async def test_tracks_route_leaves_audio_the_browser_can_decode_alone(
@@ -303,6 +305,30 @@ async def test_tracks_route_reports_a_browser_copy_that_already_exists(
     async with _client() as client:
         resp = await client.get("/api/player/tracks", params={"path": str(video)})
     assert resp.json()["copy_ready"] is True
+
+
+async def test_tracks_route_reports_converted_audio_that_already_exists(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+
+    async def no_tracks(path):
+        return ([], [])
+
+    monkeypatch.setattr(player, "subtitle_tracks_for", no_tracks)
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: media_root / "cache")
+    monkeypatch.setattr(
+        player, "_audio_info", lambda local: {"codec": "dts", "channels": 6, "layout": ""}
+    )
+    cached = player._companion_file(str(video), str(video))
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(b"m4a")
+
+    async with _client() as client:
+        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+    data = resp.json()
+    assert data["audio_ready"] is True
+    assert data["copy_ready"] is False
 
 
 def test_pick_default_prefers_the_configured_languages(monkeypatch):
@@ -353,6 +379,9 @@ def test_prune_play_cache_drops_old_and_oversized_files(media_root, monkeypatch)
     old = cache / "old.mp4"
     old.write_bytes(b"x" * 8)
     os.utime(old, (1000, 1000))
+    old_audio = cache / "old.m4a"
+    old_audio.write_bytes(b"a" * 4)
+    os.utime(old_audio, (1000, 1000))
     now = time.time()
     large = cache / "large.mp4"
     large.write_bytes(b"y" * 8)
@@ -364,6 +393,7 @@ def test_prune_play_cache_drops_old_and_oversized_files(media_root, monkeypatch)
     player.prune_play_cache()
 
     assert not old.is_file()          # older than a week
+    assert not old_audio.is_file()    # converted audio ages out the same way
     assert not large.is_file()        # kept the dir under the byte cap
     assert recent.is_file()
 
@@ -486,3 +516,85 @@ def test_audio_copy_reason_flags_only_what_no_browser_can_decode():
         assert player.audio_copy_reason({"codec": codec}) == ""
     assert player.audio_copy_reason({}) == ""
     assert player.audio_copy_reason(None) == ""
+
+
+# ---- the audio conversion ----------------------------------------------------
+
+
+async def test_audio_route_serves_the_converted_track(logged_in, media_root, monkeypatch):
+    video = _video(media_root, name="movie.mkv")
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: media_root / "cache")
+    cached = player._companion_file(str(video), str(video))
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(b"m4a-audio")
+
+    async with _client() as client:
+        resp = await client.get(
+            "/api/player/audio", params={"path": str(video), "prepared": "1"}
+        )
+        missing = await client.get(
+            "/api/player/audio",
+            params={"path": str(media_root / "other.mkv"), "prepared": "1"},
+        )
+    assert resp.status_code == 200
+    assert resp.content == b"m4a-audio"
+    assert resp.headers["content-type"].startswith("audio/mp4")
+    assert missing.status_code == 404
+
+
+async def test_prepare_rejects_an_unknown_kind(logged_in, media_root):
+    video = _video(media_root)
+    async with _client() as client:
+        resp = await client.get(
+            "/api/player/prepare", params={"path": str(video), "kind": "nope"}
+        )
+    assert resp.status_code == 400
+
+
+async def test_prepare_audio_kind_starts_an_audio_conversion(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: media_root / "cache")
+    monkeypatch.setattr(player, "resolve_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(player, "_prepare_task", None)
+    monkeypatch.setattr(
+        player, "_prepare",
+        {"status": "idle", "path": "", "percent": 0, "error": None, "kind": ""},
+    )
+    seen = {}
+
+    async def fake_run(ffmpeg, path, local, kind):
+        seen["kind"] = kind
+
+    monkeypatch.setattr(player, "_run_prepare", fake_run)
+
+    async with _client() as client:
+        resp = await client.get(
+            "/api/player/prepare", params={"path": str(video), "kind": "audio"}
+        )
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["status"] == "running"
+    assert data["kind"] == "audio"
+    await asyncio.sleep(0.05)
+    assert seen == {"kind": "audio"}
+
+
+async def test_prepare_audio_kind_reports_an_existing_conversion(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+    monkeypatch.setattr(player, "_play_cache_dir", lambda: media_root / "cache")
+    cached = player._companion_file(str(video), str(video))
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(b"m4a")
+
+    async with _client() as client:
+        resp = await client.get(
+            "/api/player/prepare", params={"path": str(video), "kind": "audio"}
+        )
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["status"] == "done"
+    assert data["kind"] == "audio"

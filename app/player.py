@@ -1,9 +1,12 @@
 """Playback — stream a library video to the browser, with its subtitle tracks.
 
 The subtitle dialog and the Actions menus open ``/play`` in a small popup
-window. That page streams the original file (or a remuxed copy the browser can
-decode) and offers every subtitle track the scanner knows about — embedded
-streams are extracted with ffmpeg, external files are converted to WebVTT.
+window. That page streams the original file and offers every subtitle track the
+scanner knows about — embedded streams are extracted with ffmpeg, external
+files are converted to WebVTT. When the browser cannot decode the file's audio
+(DTS, TrueHD, often AC-3), the player converts *only the audio* to a small
+cached AAC track and plays it next to the muted video; a full remux into a
+browser-friendly MP4 is kept just for files whose video itself will not play.
 
 Everything here is read-only, so it needs a login but not the File management
 setting. Paths go through the Media-path mappings and must land inside the
@@ -370,12 +373,26 @@ def _cache_file(path: str, local: str) -> Path:
     return _play_cache_dir() / f"{key}.mp4"
 
 
+def _companion_file(path: str, local: str) -> Path:
+    """The cached audio-only conversion for ``path`` (same key as the copy)."""
+    return _cache_file(path, local).with_suffix(".m4a")
+
+
 def _prepared_file(path: str) -> str | None:
     """The cached browser copy for ``path``, if one has already been made."""
     local = _local_video(path)
     if not local:
         return None
     dest = _cache_file(path, local)
+    return str(dest) if dest.is_file() else None
+
+
+def _prepared_audio(path: str) -> str | None:
+    """The cached audio-only conversion for ``path``, if one exists."""
+    local = _local_video(path)
+    if not local:
+        return None
+    dest = _companion_file(path, local)
     return str(dest) if dest.is_file() else None
 
 
@@ -391,7 +408,7 @@ def prune_play_cache() -> None:
         return
     now = time.time()
     files: list[tuple[float, int, Path]] = []
-    for f in folder.glob("*.mp4"):
+    for f in list(folder.glob("*.mp4")) + list(folder.glob("*.m4a")):
         try:
             st = f.stat()
         except OSError:
@@ -412,7 +429,7 @@ def prune_play_cache() -> None:
             total -= size
         except OSError:
             pass
-    for part in folder.glob("*.part.mp4"):
+    for part in list(folder.glob("*.part.mp4")) + list(folder.glob("*.part.m4a")):
         try:
             if now - part.stat().st_mtime > 3600:
                 part.unlink()
@@ -465,27 +482,47 @@ def _run_ffmpeg_with_progress(cmd: list[str], duration: float) -> tuple[int, str
     return code, tail
 
 
-async def _run_prepare(ffmpeg: str, path: str, local: str) -> None:
-    """Remux ``local`` into a browser-friendly MP4, then swap it into the cache."""
-    dest = _cache_file(path, local)
-    tmp = dest.with_name(f"{dest.stem}.part.mp4")
+async def _run_prepare(ffmpeg: str, path: str, local: str, kind: str) -> None:
+    """Prepare a playback aid, then swap it into the cache.
+
+    ``kind`` is ``"audio"`` (a fast audio-only AAC conversion the player pairs
+    with the original video when its audio cannot be decoded) or ``"copy"`` (a
+    full remux into a browser-friendly MP4, for files whose video itself will
+    not play).
+    """
+    dest = _cache_file(path, local) if kind == "copy" else _companion_file(path, local)
+    tmp = dest.with_name(f"{dest.stem}.part{dest.suffix}")
+    what = "browser copy" if kind == "copy" else "audio conversion"
     try:
         prune_play_cache()
         dest.parent.mkdir(parents=True, exist_ok=True)
         if tmp.is_file():
             tmp.unlink()
         duration = await _duration_for(path, local)
-        cmd = [
-            ffmpeg, "-v", "error", "-y",
-            "-i", local,
-            "-map", "0:v:0", "-map", "0:a:0?",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-sn", "-dn",
-            "-movflags", "+faststart",
-            "-progress", "pipe:1", "-nostats",
-            str(tmp),
-        ]
-        log("Player", "INFO", f"Making a browser copy of {os.path.basename(local)}")
+        if kind == "audio":
+            cmd = [
+                ffmpeg, "-v", "error", "-y",
+                "-i", local,
+                "-map", "0:a:0?",
+                "-vn",
+                "-c:a", "aac", "-b:a", "192k",
+                "-progress", "pipe:1", "-nostats",
+                str(tmp),
+            ]
+            what = "audio conversion"
+        else:
+            cmd = [
+                ffmpeg, "-v", "error", "-y",
+                "-i", local,
+                "-map", "0:v:0", "-map", "0:a:0?",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-sn", "-dn",
+                "-movflags", "+faststart",
+                "-progress", "pipe:1", "-nostats",
+                str(tmp),
+            ]
+            what = "browser copy"
+        log("Player", "INFO", f"Making a {what} of {os.path.basename(local)}")
         code, tail = await asyncio.to_thread(
             _run_ffmpeg_with_progress, cmd, duration
         )
@@ -494,18 +531,18 @@ async def _run_prepare(ffmpeg: str, path: str, local: str) -> None:
             _prepare.update({
                 "status": "error",
                 "percent": 0,
-                "error": "ffmpeg could not remux this file"
+                "error": "ffmpeg could not convert this file"
                          + (f": {detail[-1][:200]}" if detail else "."),
             })
-            log("Player", "WARN", f"Browser copy failed for {os.path.basename(local)}")
+            log("Player", "WARN", f"{what} failed for {os.path.basename(local)}")
             return
         os.replace(tmp, dest)
         _prepare.update({"status": "done", "percent": 100, "error": None})
-        log("Player", "INFO", f"Browser copy ready: {dest.name}")
+        log("Player", "INFO", f"{what} ready: {dest.name}")
     except Exception as exc:  # noqa: BLE001
         _prepare.update({
             "status": "error", "percent": 0,
-            "error": f"Could not make a browser copy: {exc}",
+            "error": f"Could not make the {what}: {exc}",
         })
     finally:
         try:
@@ -652,6 +689,7 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
         "needs_copy": bool(reason),
         "copy_reason": reason,
         "copy_ready": _prepared_file(path) is not None,
+        "audio_ready": _prepared_audio(path) is not None,
     })
 
 
@@ -695,6 +733,31 @@ async def player_sub(
     )
 
 
+@router.api_route("/api/player/audio", methods=["GET", "HEAD"])
+async def player_audio(
+    user: str = Depends(require_login),
+    path: str = Query(""),
+    prepared: str = Query(""),
+):
+    """The cached audio-only conversion, for the companion <audio> element.
+
+    The conversion is AAC, so every browser can decode it; the page plays it
+    alongside the original (muted) video when the file's own audio cannot be
+    decoded.
+    """
+    local = _prepared_audio(path)
+    if not local:
+        return JSONResponse(
+            {"ok": False, "error": "No converted audio for this file."},
+            status_code=404,
+        )
+    return FileResponse(
+        local,
+        media_type="audio/mp4",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.api_route("/api/player/stream", methods=["GET", "HEAD"])
 async def player_stream(
     user: str = Depends(require_login),
@@ -732,11 +795,26 @@ def _prepare_running() -> bool:
 
 
 @router.get("/api/player/prepare")
-async def player_prepare(user: str = Depends(require_login), path: str = Query("")):
-    """Start (or report) an ffmpeg remux into a browser-friendly MP4."""
+async def player_prepare(
+    user: str = Depends(require_login),
+    path: str = Query(""),
+    kind: str = Query("copy"),
+):
+    """Start (or report) a playback aid.
+
+    ``kind="audio"`` converts only the audio track to AAC — fast and small —
+    which the page plays next to the original video. ``kind="copy"`` is the
+    full remux into a browser-friendly MP4, for files whose video itself will
+    not play.
+    """
     global _prepare_task
 
     path = (path or "").strip()
+    kind = (kind or "copy").strip().lower()
+    if kind not in ("audio", "copy"):
+        return JSONResponse(
+            {"ok": False, "error": "Unknown preparation kind."}, status_code=400
+        )
     if not path:
         return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
     local = _local_video(path)
@@ -744,13 +822,20 @@ async def player_prepare(user: str = Depends(require_login), path: str = Query("
         return JSONResponse(
             {"ok": False, "error": "The video file is not reachable."}, status_code=404
         )
-    if _prepared_file(path):
-        return JSONResponse({"ok": True, "status": "done", "percent": 100})
+    if kind == "audio" and _prepared_audio(path):
+        return JSONResponse({"ok": True, "status": "done", "percent": 100, "kind": kind})
+    if kind == "copy" and _prepared_file(path):
+        return JSONResponse({"ok": True, "status": "done", "percent": 100, "kind": kind})
 
     if _prepare_running():
-        if _prepare.get("path") == path:
+        if _prepare.get("path") == path and _prepare.get("kind") == kind:
             return JSONResponse(
-                {"ok": True, "status": "running", "percent": _prepare["percent"]}
+                {
+                    "ok": True,
+                    "status": "running",
+                    "percent": _prepare["percent"],
+                    "kind": kind,
+                }
             )
         return JSONResponse(
             {"ok": False, "error": "Another file is already being prepared."},
@@ -762,34 +847,40 @@ async def player_prepare(user: str = Depends(require_login), path: str = Query("
         return JSONResponse(
             {
                 "ok": False,
-                "error": "ffmpeg is not available, so a browser copy can't be made.",
+                "error": "ffmpeg is not available, so the audio can't be converted.",
             },
             status_code=400,
         )
 
     _prepare.update({
-        "status": "running", "path": path, "percent": 0, "error": None,
+        "status": "running", "path": path, "percent": 0, "error": None, "kind": kind,
     })
-    _prepare_task = asyncio.create_task(_run_prepare(ffmpeg, path, local))
-    return JSONResponse({"ok": True, "status": "running", "percent": 0})
+    _prepare_task = asyncio.create_task(_run_prepare(ffmpeg, path, local, kind))
+    return JSONResponse({"ok": True, "status": "running", "percent": 0, "kind": kind})
 
 
 @router.get("/api/player/prepare/status")
 async def player_prepare_status(user: str = Depends(require_login), path: str = Query("")):
-    """Progress for the browser copy of one file."""
+    """Progress for the audio conversion or browser copy of one file."""
     path = (path or "").strip()
+    kind = _prepare.get("kind")
     if _prepare.get("path") == path and not _prepare_running():
         if _prepare["status"] == "error":
             return JSONResponse({
                 "ok": True, "status": "error", "percent": 0,
                 "error": _prepare["error"],
+                "kind": kind,
             })
     if _prepare.get("path") == path and _prepare_running():
         percent = int(_prepare["percent"] or 0)
+        label = "Converting audio…" if kind == "audio" else "Making a browser copy…"
         return JSONResponse({
             "ok": True, "status": "running", "percent": percent,
-            "message": f"Making a browser copy… {percent}%",
+            "message": f"{label} {percent}%",
+            "kind": kind,
         })
     if path and _prepared_file(path):
-        return JSONResponse({"ok": True, "status": "done", "percent": 100})
+        return JSONResponse({"ok": True, "status": "done", "percent": 100, "kind": "copy"})
+    if path and _prepared_audio(path):
+        return JSONResponse({"ok": True, "status": "done", "percent": 100, "kind": "audio"})
     return JSONResponse({"ok": True, "status": "idle", "percent": 0})
