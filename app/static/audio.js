@@ -244,7 +244,7 @@ function audioRender() {
     smart.addEventListener("click", audioSmartMarkTracks);
   }
   actions.appendChild(smart);
-  const exec = el("button", { type: "button", class: "subdl-btn primary", text: "Execute" });
+  const exec = el("button", { type: "button", class: "subdl-btn subdl-exec", text: "Execute" });
   exec.disabled = !audioFileMgmt || audioBusy || !audioHasChanges();
   if (exec.disabled) {
     exec.title = !audioFileMgmt

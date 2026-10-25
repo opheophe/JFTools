@@ -184,12 +184,14 @@ function subdlRenderList(langFilter) {
   }
   rows.forEach((c) => {
     const item = el("div", { class: "subdl-item" });
+    const body = el("div", { class: "subdl-item-body" });
     const line = el("div", { class: "subdl-line" });
     line.appendChild(el("span", { class: "subdl-c-lang", text: subdlLangName(c.language) }));
     line.appendChild(el("span", { class: "subdl-name", text: c.file_name || "subtitle", title: c.file_name }));
     if (c.from_trusted) line.appendChild(el("span", { class: "subdl-badge", text: "trusted" }));
-    item.appendChild(line);
-    item.appendChild(el("div", { class: "muted subdl-sub", text: subdlMetaText(c) }));
+    body.appendChild(line);
+    body.appendChild(el("div", { class: "muted subdl-sub", text: subdlMetaText(c) }));
+    item.appendChild(body);
     const dl = el("button", { type: "button", class: "subdl-btn", text: "Download" });
     dl.addEventListener("click", () => subdlDownload(c, dl));
     item.appendChild(dl);
