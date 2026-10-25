@@ -35,8 +35,9 @@ existing server over the API.
   filter can match scan state or track count plus a case-insensitive track-name
   regex, and the **Internal** pill opens a dialog for embedded audio and
   subtitles — mark several tracks for deletion with row buttons, choose one
-  default of each type, or let **Smart mark** pick every subtitle outside your
-  preferred languages, then execute it in a single in-place rewrite.
+  default of each type, or let **Smart mark** pick every non-forced subtitle
+  outside your preferred languages, then execute it in a single in-place
+  rewrite.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT), and an
@@ -321,6 +322,11 @@ The same value can appear in more than one section (for example **No
 subtitles** under Language and Quality); the checkboxes stay in sync. Matching
 uses the preferred languages from Settings, not a fixed English/Swedish list.
 
+The **Subtitle regex** box next to the Subtitles filter is case-insensitive and
+searches the labels in the Subtitles column plus the underlying track names and
+external file names. `forced|srt$` finds forced and `.srt` tracks; `ext` finds
+external subtitles. It is combined with the selected subtitle filters.
+
 ## Internal tracks (audio and subtitles)
 
 The **Audio** column lists each file's embedded audio tracks as
@@ -328,8 +334,8 @@ The **Audio** column lists each file's embedded audio tracks as
 track. The **Audio** filter offers **No track**, **Single track**,
 **Multi track**, **Not scanned** (not probed yet) and **Probe failed** (the path
 was unreachable, not a file, or ffprobe failed — the column names the exact
-reason). The **Audio regex** box next to it filters on the track names,
-case-insensitively (`swe|nor`, `5\.1`, …).
+reason). The **Audio regex** box next to the Audio filter matches the track
+names, case-insensitively (`swe|nor`, `5\.1`, …).
 
 The **Internal** pill on a row opens the embedded-track dialog. It lists the
 audio tracks and the embedded subtitle tracks. Toggle any number of rows with
@@ -338,8 +344,10 @@ one subtitle default, then press **Execute**. **Smart mark** replaces the
 subtitle marks with every track outside your preferred languages (Settings →
 **Subtitle preferences**). Matching is by language, not exact label, so with
 English preferred, `English SDH`, `En SDH` and `En` all stay unmarked; French,
-`fr`, Czech and similar tracks are marked. Tracks whose language is **Unknown**
-are left unmarked, and Smart mark never changes audio marks. Leaving the
+`fr`, Czech and similar tracks are marked. **Forced** tracks are never marked,
+even when their language is not preferred — they carry only the foreign-dialogue
+lines and are needed alongside the audio. Tracks whose language is **Unknown**
+are left unmarked too, and Smart mark never changes audio marks. Leaving the
 preferred list empty defaults to English. The whole change is one ffmpeg rewrite
 — every other stream is copied as-is — into a temporary file in the same
 folder, which replaces the original only if ffmpeg succeeds. A new default
@@ -454,12 +462,14 @@ startup (older than a week, then oldest-first above ~5 GB, always keeping the
 newest copy — a film's copy is nearly the size of the film itself).
 
 ffprobe cannot answer for every codec: AC-3 and E-AC-3 are decoded through the
-operating system in some browsers and are silent in others. Those play as they
-are, and the player watches whether audio is actually being decoded — a few
-seconds of silence with an audio track present starts the same copy. When the
-file cannot be played at all, the player offers **Make browser copy** in its
-bar. Nothing switches away from the original until the copy is finished — it
-keeps playing meanwhile.
+operating system in some browsers and are silent in others. The player asks the
+browser whether it can take AC-3 at all; when it cannot, the copy starts
+immediately. When the browser claims support, the player watches whether audio
+is actually being decoded — a few seconds of silence with an audio track
+present starts the same copy. The **Make browser copy** button stays available
+for AC-3/E-AC-3 so a viewer who hears nothing can start it by hand, including in
+browsers that expose no decoded-audio counter. Nothing switches away from the
+original until the copy is finished — it keeps playing meanwhile.
 
 **Requirements:** ffmpeg (bundled in the Docker image, or in `Tools/` next to
 the app) for embedded subtitle extraction and browser copies. Without it the

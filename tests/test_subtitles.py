@@ -82,6 +82,20 @@ def test_smart_mark_marks_non_preferred_but_leaves_unknown_alone():
     assert marks == [10, 11, 12, 13]
 
 
+def test_smart_mark_never_marks_forced_tracks():
+    subtitles = [
+        {"index": 4, "lang": "Swedish", "name": "Swedish", "forced": False},
+        {"index": 5, "lang": "English", "name": "English forced", "forced": True},
+        {"index": 6, "lang": "French", "name": "French forced", "forced": True},
+        {"index": 7, "lang": "German", "name": "German", "forced": False},
+    ]
+
+    marks, preferred = smart_subtitle_marks(subtitles, "sv")
+
+    assert preferred == ["Swedish"]
+    assert marks == [7]
+
+
 def test_smart_mark_defaults_to_english_without_a_setting():
     subtitles = [
         {"index": 4, "lang": "English", "name": "English SDH"},

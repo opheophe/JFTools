@@ -332,6 +332,8 @@ def smart_subtitle_marks(
 
     ``Unknown`` tracks are deliberately left unmarked: deleting a track whose
     language could not be read is the one mistake Smart mark must not make.
+    Forced tracks are left alone too, even in a non-preferred language: they
+    carry only the foreign-dialogue lines and are needed next to the audio.
     Audio marks are handled by the dialog and are never touched here.
     """
     preferred = preferred_language_names(raw)
@@ -340,6 +342,8 @@ def smart_subtitle_marks(
     wanted = set(preferred)
     marks: list[int] = []
     for track in subtitles:
+        if track.get("forced"):
+            continue
         lang = track.get("lang") or "Unknown"
         if lang == "Unknown":
             lang = _language_from_text(str(track.get("name") or ""))

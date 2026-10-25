@@ -285,6 +285,22 @@ async function plLoadTracks() {
 // picture and no sound, and fires no error at all. The server probes the first
 // audio stream, so act on that here rather than leaving the viewer to wonder
 // where the sound went.
+function plIsAc3(audio) {
+  const codec = ((audio || {}).codec || "").toLowerCase();
+  return codec === "ac3" || codec === "eac3";
+}
+
+// AC-3 and E-AC-3 are decoded by the operating system on some browsers and not
+// at all on others. When the browser says it cannot take either in MP4, make the
+// copy up front instead of waiting for the four-second silence check, which some
+// browsers cannot perform at all (they have no decoded-byte counter).
+function plUnsupportedAc3(audio) {
+  if (!plIsAc3(audio)) return false;
+  const probe = document.createElement("video");
+  return !probe.canPlayType('video/mp4; codecs="ac-3"')
+    && !probe.canPlayType('video/mp4; codecs="ec-3"');
+}
+
 function plHandleAudio(data) {
   if (plDead || plPrepared) return;
   if (data.audio) plHasAudio = Boolean(data.audio.codec);
@@ -298,6 +314,15 @@ function plHandleAudio(data) {
   // it wasn't.
   if (data.copy_ready) {
     plSwitchToPrepared();
+    return;
+  }
+  // Keep the copy button reachable for surround audio even when the browser
+  // claims it can decode it: a silent chrome/firefox is not obvious until it
+  // happens, and the manual copy is the way out.
+  if (plIsAc3(data.audio)) plPrepare.hidden = false;
+  if (plUnsupportedAc3(data.audio)) {
+    plCopyWhy = "AC-3 audio";
+    plPrepareCopy();
     return;
   }
   if (!data.needs_copy) return;

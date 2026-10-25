@@ -4,7 +4,7 @@ const SE = {
   rows: [], jellyfin: "", radarr: "", sonarr: "",
   scans: {}, subtitlesOk: new Set(),
   fetched: false, page: 1, sort: { col: null, dir: 1 },
-  filters: { lib: [], type: [], file: "", jf: "", fav: [], subs: [], audio: [], audioRe: "", subsok: [] },
+  filters: { lib: [], type: [], file: "", jf: "", fav: [], subs: [], subsRe: "", audio: [], audioRe: "", subsok: [] },
   ms: {},
 };
 
@@ -126,6 +126,24 @@ function seSubsText(r) {
   return { text, title: text };
 }
 
+// Everything a subtitle regex can sensibly match: the labels shown in the
+// Subtitles column plus the track names and external file names behind them.
+function seSubsSearchText(r) {
+  const e = seSubsEntry(r);
+  if (!e || !e.scanned) return "";
+  const bits = [...(e.subs || [])];
+  (e.internal || []).forEach((t) => {
+    bits.push(t.name, t.lang, t.codec);
+    if (t.forced) bits.push("forced");
+  });
+  (e.external || []).forEach((s) => {
+    // Keep the file name last so a regex like ``srt$`` matches it.
+    bits.push([s.lang, s.forced ? "forced" : "", s.ai ? "ai" : "", s.file]
+      .filter(Boolean).join(" "));
+  });
+  return bits.filter(Boolean).join(" ");
+}
+
 function seAudioText(r) {
   const e = seScanEntry(r);
   if (!e) return { text: "Not scanned", title: "The media scan has not probed this file yet" };
@@ -187,6 +205,7 @@ function seVisible() {
   const f = SE.filters;
   const fileRe = seSafeRe(f.file);
   const jfRe = seSafeRe(f.jf);
+  const subsRe = seSafeRe(f.subsRe);
   const audioRe = seSafeRe(f.audioRe);
   return SE.rows.filter((r) => {
     if (f.lib.length && !f.lib.includes(r.library)) return false;
@@ -206,6 +225,7 @@ function seVisible() {
       const ok = f.subs.some((v) => SUBS_PREDS[v] && SUBS_PREDS[v](state, flags));
       if (!ok) return false;
     }
+    if (subsRe && !subsRe.test(seSubsSearchText(r))) return false;
     if (f.audio.length && !f.audio.some((v) => seAudioMatch(r, v))) return false;
     if (audioRe) {
       const e = seScanEntry(r);
@@ -240,6 +260,7 @@ function loadFilters() {
       SE.filters.jf = typeof f.jf === "string" ? f.jf : "";
       SE.filters.fav = Array.isArray(f.fav) ? f.fav : [];
       SE.filters.subs = migrateSubs(f.subs);
+      SE.filters.subsRe = typeof f.subsRe === "string" ? f.subsRe : "";
       SE.filters.audio = Array.isArray(f.audio) ? f.audio : [];
       SE.filters.audioRe = typeof f.audioRe === "string" ? f.audioRe : "";
       SE.filters.subsok = Array.isArray(f.subsok) ? f.subsok : [];
@@ -427,6 +448,7 @@ function applyFilterUI() {
   SE.ms.subsok.setValues(SE.filters.subsok);
   document.getElementById("se-search-file").value = SE.filters.file;
   document.getElementById("se-search-jf").value = SE.filters.jf;
+  document.getElementById("se-subs-re").value = SE.filters.subsRe;
   document.getElementById("se-audio-re").value = SE.filters.audioRe;
 }
 
@@ -589,6 +611,12 @@ function bindSeControls() {
     onFilter();
   });
 
+  const subsRe = document.getElementById("se-subs-re");
+  subsRe.addEventListener("input", () => {
+    SE.filters.subsRe = subsRe.value;
+    onFilter();
+  });
+
   const audioRe = document.getElementById("se-audio-re");
   audioRe.addEventListener("input", () => {
     SE.filters.audioRe = audioRe.value;
@@ -625,6 +653,7 @@ document.addEventListener("DOMContentLoaded", () => {
         jf: typeof f.jf === "string" ? f.jf : "",
         fav: Array.isArray(f.fav) ? f.fav : [],
         subs: migrateSubs(f.subs),
+        subsRe: typeof f.subsRe === "string" ? f.subsRe : "",
         audio: Array.isArray(f.audio) ? f.audio : [],
         audioRe: typeof f.audioRe === "string" ? f.audioRe : "",
         subsok: Array.isArray(f.subsok) ? f.subsok : [],
