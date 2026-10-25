@@ -445,9 +445,10 @@ the row of controls adds a time readout, −30/−5/+5/+30 second jumps, a **Go 
 box (`mm:ss` or `hh:mm:ss`), a speed selector and a **Subtitles** selector.
 
 Every subtitle track the scanner knows about is in that selector: embedded
-streams are extracted with ffmpeg, external `.srt`/`.vtt`/`.ass`/`.ssa` files
-are converted to WebVTT first. Embedded bitmap subtitles (PGS/DVD) are listed
-but marked unavailable, since a browser cannot render them. **The best track is
+streams are extracted with ffmpeg, external `.srt`/`.vtt`/`.ass`/`.ssa`/`.sub`
+files are converted to WebVTT first. Bitmap subtitles (PGS/DVD, including
+VobSub `.sub` files) are listed but marked unavailable, since a browser cannot
+render them. **The best track is
 already selected when the window opens** — the external file in one of the
 default subtitle languages if there is one, otherwise the first usable track —
 so subtitles are visible without touching the selector; choose **Off** to hide

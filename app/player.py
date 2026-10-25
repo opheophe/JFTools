@@ -95,6 +95,11 @@ _AUDIO_CACHE_MAX = 64
 _SUB_CACHE: dict[tuple[str, str, float], str] = {}
 _SUB_CACHE_MAX = 24
 
+# Codec of an external subtitle file, keyed by (path, mtime, demuxer). Probing
+# is quick but the player lists tracks often, so keep the last few.
+_EXT_CODEC_CACHE: dict[tuple[str, float, tuple], str] = {}
+_EXT_CODEC_CACHE_MAX = 64
+
 # One remux job at a time, polled by the player page.
 _prepare: dict = {"status": "idle", "path": "", "percent": 0, "error": None}
 _prepare_task: asyncio.Task | None = None
@@ -262,9 +267,80 @@ def _vtt_external(local: str, filename: str) -> str:
         return text if "WEBVTT" in text[:64].upper() else srt_to_vtt(text)
     if ext == ".srt":
         return srt_to_vtt(_read_text(full))
+    if ext == ".sub":
+        # A .sub can be a VobSub image stream or a text MicroDVD/SubViewer
+        # file; probe it rather than letting ffmpeg print a cryptic error.
+        codec = _probe_sub_codec(full)
+        if codec in IMAGE_SUB_CODECS:
+            raise SubError(
+                "This track holds image-based subtitles (PGS/DVD), which a "
+                "browser can't display."
+            )
+        if codec in ("microdvd", "subviewer"):
+            return _ffmpeg_to_vtt(["-f", codec, "-i", full])
     if ext in CONVERTIBLE_SUBTITLE_EXTENSIONS:
         return _ffmpeg_to_vtt(["-i", full])
     raise SubError(f"{ext or 'This'} subtitles can't be shown in a browser.")
+
+
+def _probe_codec_with(full: str, extra: list[str] | None = None) -> str:
+    """The codec of an external subtitle file from one ffprobe call.
+
+    ``extra`` are extra ffprobe arguments (e.g. ``["-f", "microdvd"]`` for the
+    text formats whose extension ffprobe cannot trust). Returns "" when the
+    probe fails.
+    """
+    try:
+        st = os.stat(full)
+        key = (os.path.normcase(os.path.abspath(full)), st.st_mtime, tuple(extra or []))
+    except OSError:
+        key = (os.path.normcase(os.path.abspath(full)), 0.0, tuple(extra or []))
+    if key in _EXT_CODEC_CACHE:
+        return _EXT_CODEC_CACHE[key]
+    ffprobe = resolve_ffprobe()
+    if not ffprobe:
+        return ""
+    cmd = [
+        ffprobe, "-v", "error", *(extra or []),
+        "-show_entries", "stream=codec_name",
+        "-of", "json", full,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30,
+            encoding="utf-8", errors="replace", creationflags=_no_window(),
+        )
+    except Exception:  # noqa: BLE001
+        return ""
+    codec = ""
+    if result.returncode == 0:
+        try:
+            streams = json.loads(result.stdout or "{}").get("streams") or []
+        except (TypeError, ValueError):
+            streams = []
+        if streams:
+            codec = (streams[0].get("codec_name") or "").lower()
+    if len(_EXT_CODEC_CACHE) >= _EXT_CODEC_CACHE_MAX:
+        _EXT_CODEC_CACHE.clear()
+    _EXT_CODEC_CACHE[key] = codec
+    return codec
+
+
+def _probe_sub_codec(full: str) -> str:
+    """The codec of an external subtitle file, or "" when it can't be decided.
+
+    ffprobe sniffs most files by content, but not every text format whose
+    extension it cannot trust, so MicroDVD and SubViewer each get one probe
+    with their demuxer forced.
+    """
+    codec = _probe_codec_with(full)
+    if codec:
+        return codec
+    for demuxer in ("microdvd", "subviewer"):
+        codec = _probe_codec_with(full, ["-f", demuxer])
+        if codec:
+            return codec
+    return ""
 
 
 def _vtt_embedded(local: str, kind: str, key: str) -> str:
@@ -681,15 +757,25 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
         # The file name too: a film often has an English embedded track *and* an
         # English .srt, and "English" twice in the selector is no help.
         label += f" — {e['file']}"
+        codec = Path(e["file"]).suffix.lstrip(".").lower()
+        playable = True
+        if codec == "sub":
+            # A .sub can be a VobSub image stream or MicroDVD/SubViewer text.
+            probed = await asyncio.to_thread(
+                _probe_sub_codec, os.path.join(os.path.dirname(local), e["file"])
+            )
+            if probed in IMAGE_SUB_CODECS:
+                playable = False
+                label += " — image subtitles"
         tracks.append({
             "spec": f"external:{e['file']}",
             "kind": "external",
             "label": label,
             "file": e["file"],
             "lang": e.get("lang") or "",
-            "codec": Path(e["file"]).suffix.lstrip(".").lower(),
+            "codec": codec,
             "forced": bool(e.get("forced")),
-            "playable": True,
+            "playable": playable,
         })
 
     default = _pick_default(tracks)

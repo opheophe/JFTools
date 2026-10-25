@@ -110,6 +110,47 @@ def test_image_subtitle_files_are_refused(tmp_path):
         player._vtt_external(str(tmp_path / "movie.mp4"), "movie.en.sup")
 
 
+def test_vobsub_sub_file_is_refused_as_image_subtitles(tmp_path, monkeypatch):
+    (tmp_path / "movie.mp4").write_bytes(b"x")
+    (tmp_path / "movie.en.sub").write_bytes(b"\x00" * 4096)
+    monkeypatch.setattr(player, "_probe_sub_codec", lambda full: "dvd_subtitle")
+    with pytest.raises(player.SubError) as exc:
+        player._vtt_external(str(tmp_path / "movie.mp4"), "movie.en.sub")
+    assert "image-based subtitles" in str(exc.value)
+
+
+def test_microdvd_sub_file_converts_with_its_demuxer(tmp_path, monkeypatch):
+    (tmp_path / "movie.mp4").write_bytes(b"x")
+    (tmp_path / "movie.en.sub").write_text("{25}{100}Hello\n", encoding="utf-8")
+    monkeypatch.setattr(player, "_probe_sub_codec", lambda full: "microdvd")
+    seen = {}
+
+    def fake_convert(args):
+        seen["args"] = args
+        return "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nHello\n"
+
+    monkeypatch.setattr(player, "_ffmpeg_to_vtt", fake_convert)
+    text = player._vtt_external(str(tmp_path / "movie.mp4"), "movie.en.sub")
+    assert text.startswith("WEBVTT")
+    assert seen["args"] == ["-f", "microdvd", "-i", str(tmp_path / "movie.en.sub")]
+
+
+def test_probe_sub_codec_tries_microdvd_and_subviewer(monkeypatch):
+    calls = []
+
+    def fake(full, extra=None):
+        calls.append(tuple(extra or []))
+        if not extra:
+            return ""                      # plain probe finds nothing
+        if extra == ["-f", "microdvd"]:
+            return "microdvd"
+        return ""                          # subviewer is not tried further
+
+    monkeypatch.setattr(player, "_probe_codec_with", fake)
+    assert player._probe_sub_codec("x.sub") == "microdvd"
+    assert calls == [(), ("-f", "microdvd")]
+
+
 # ---- track specs -------------------------------------------------------------
 
 
@@ -228,6 +269,41 @@ async def test_tracks_list_embedded_and_external(logged_in, media_root, monkeypa
     assert data["tracks"][2].get("default") is True
     assert "default" not in data["tracks"][0]
     assert "default" not in data["tracks"][1]
+
+
+async def test_tracks_route_marks_image_sub_files_unplayable(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+    (media_root / "movie.en.sub").write_bytes(b"\x00" * 4096)
+    (media_root / "movie.sv.sub").write_text("{25}{100}Hej\n", encoding="utf-8")
+
+    async def fake_tracks(path):
+        return (
+            [],
+            [
+                {"file": "movie.en.sub", "lang": "English", "forced": False, "ai": False, "size": 40},
+                {"file": "movie.sv.sub", "lang": "Swedish", "forced": False, "ai": False, "size": 20},
+            ],
+        )
+
+    def fake_probe(full):
+        return "dvd_subtitle" if full.endswith("movie.en.sub") else "microdvd"
+
+    monkeypatch.setattr(player, "subtitle_tracks_for", fake_tracks)
+    monkeypatch.setattr(player, "_probe_sub_codec", fake_probe)
+
+    async with _client() as client:
+        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+    data = resp.json()
+
+    image = data["tracks"][0]
+    text = data["tracks"][1]
+    assert image["playable"] is False
+    assert "image subtitles" in image["label"]
+    assert text["playable"] is True
+    # The image file cannot be the auto-selected default.
+    assert text.get("default") is True
 
 
 async def test_tracks_route_needs_a_reachable_video(logged_in, media_root):
