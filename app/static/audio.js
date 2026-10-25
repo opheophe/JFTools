@@ -199,12 +199,12 @@ function audioSmartMarkTracks() {
   const languages = audioPreferred.join(", ");
   if (count) {
     audioNotice(
-      "Marked " + count + " non-preferred subtitle track" + (count === 1 ? "" : "s") +
-      " (preferred: " + languages + ").",
+      "Marked " + count + " subtitle track" + (count === 1 ? "" : "s") +
+      " (non-preferred or forced; preferred: " + languages + ").",
       "ok",
     );
   } else {
-    audioNotice("No non-preferred subtitles found (preferred: " + languages + ").", "muted");
+    audioNotice("No subtitle tracks to mark (preferred: " + languages + ").", "muted");
   }
   audioRender();
 }

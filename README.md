@@ -35,9 +35,9 @@ existing server over the API.
   filter can match scan state or track count plus a case-insensitive track-name
   regex, and the **Internal** pill opens a dialog for embedded audio and
   subtitles — mark several tracks for deletion with row buttons, choose one
-  default of each type, or let **Smart mark** pick every non-forced subtitle
-  outside your preferred languages, then execute it in a single in-place
-  rewrite.
+  default of each type, or let **Smart mark** pick every subtitle outside your
+  preferred languages plus every forced track, then execute it in a single
+  in-place rewrite.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT), and an
@@ -344,10 +344,10 @@ one subtitle default, then press **Execute**. **Smart mark** replaces the
 subtitle marks with every track outside your preferred languages (Settings →
 **Subtitle preferences**). Matching is by language, not exact label, so with
 English preferred, `English SDH`, `En SDH` and `En` all stay unmarked; French,
-`fr`, Czech and similar tracks are marked. **Forced** tracks are never marked,
-even when their language is not preferred — they carry only the foreign-dialogue
-lines and are needed alongside the audio. Tracks whose language is **Unknown**
-are left unmarked too, and Smart mark never changes audio marks. Leaving the
+`fr`, Czech and similar tracks are marked. **Forced** tracks are marked too,
+including English forced, because a full subtitle track normally makes the
+forced one redundant. Tracks whose language is **Unknown** are left unmarked
+unless they are forced, and Smart mark never changes audio marks. Leaving the
 preferred list empty defaults to English. The whole change is one ffmpeg rewrite
 — every other stream is copied as-is — into a temporary file in the same
 folder, which replaces the original only if ffmpeg succeeds. A new default
@@ -372,7 +372,10 @@ The dialog's **Search Hash**, **Search Filename** and **Search Jellyfin name**
 buttons re-run the search one way instead of the default, for when the automatic
 one comes up short: the hash alone (an exact match for that release), the release
 name on disk (`Onslaught 2026 1080p WEB H264-YTS`), or the Jellyfin item's name
-with its year. The line above the results says which search is on screen.
+with its year. The line above the results says which search is on screen. The
+dialog is split into two independently scrolling columns: **OpenSubtitles
+results** on the left and the tracks already on the video on the right, so a
+long result list cannot push the track actions out of view.
 
 The dialog lists **every subtitle track** on the video — the embedded tracks
 first (read-only here; use the **Internal** dialog to delete or make one

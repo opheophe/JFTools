@@ -328,13 +328,13 @@ def _language_from_text(text: str) -> str:
 def smart_subtitle_marks(
     subtitles: list[dict], raw: str | None = None
 ) -> tuple[list[int], list[str]]:
-    """Indices of subtitle tracks outside the preferred languages.
+    """Indices of subtitles Smart mark would delete: non-preferred and forced.
 
-    ``Unknown`` tracks are deliberately left unmarked: deleting a track whose
-    language could not be read is the one mistake Smart mark must not make.
-    Forced tracks are left alone too, even in a non-preferred language: they
-    carry only the foreign-dialogue lines and are needed next to the audio.
-    Audio marks are handled by the dialog and are never touched here.
+    ``Unknown`` non-forced tracks are deliberately left unmarked: deleting a
+    track whose language could not be read is the one mistake Smart mark must
+    not make. Forced tracks are different: they are normally disposable when a
+    full subtitle is available, so they are marked even when their language is
+    preferred. Audio marks are handled by the dialog and are never touched here.
     """
     preferred = preferred_language_names(raw)
     if not preferred:
@@ -342,13 +342,16 @@ def smart_subtitle_marks(
     wanted = set(preferred)
     marks: list[int] = []
     for track in subtitles:
+        index = track.get("index")
+        if index is None:
+            continue
         if track.get("forced"):
+            marks.append(index)
             continue
         lang = track.get("lang") or "Unknown"
         if lang == "Unknown":
             lang = _language_from_text(str(track.get("name") or ""))
-        index = track.get("index")
-        if index is not None and lang and lang != "Unknown" and lang not in wanted:
+        if lang and lang != "Unknown" and lang not in wanted:
             marks.append(index)
     return marks, preferred
 

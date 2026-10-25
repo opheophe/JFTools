@@ -216,9 +216,11 @@ function subdlTrackButtons(rowEl, file, spec) {
     del.addEventListener("click", () => subdlDelete(file, del));
     sync.addEventListener("click", () => subdlSync(file, sync));
   }
-  rowEl.appendChild(play);
-  rowEl.appendChild(del);
-  rowEl.appendChild(sync);
+  const actions = el("div", { class: "subdl-row-actions" });
+  actions.appendChild(play);
+  actions.appendChild(del);
+  actions.appendChild(sync);
+  rowEl.appendChild(actions);
 }
 
 function subdlRenderTracks() {
@@ -450,12 +452,20 @@ function subdlOpen(path) {
   box.appendChild(warn);
   const statusEl = el("div", { id: "subdl-status", class: "subdl-status" });
   box.appendChild(statusEl);
-  box.appendChild(el("div", { id: "subdl-meta", class: "subdl-meta" }));
+
+  const cols = el("div", { class: "subdl-cols" });
+  const results = el("div", { class: "subdl-col subdl-results" });
+  results.appendChild(el("h4", { class: "subdl-col-title", text: "OpenSubtitles results" }));
+  results.appendChild(el("div", { id: "subdl-meta", class: "subdl-meta" }));
   const langBox = el("div", { id: "subdl-lang", class: "subdl-lang", hidden: true });
-  box.appendChild(langBox);
-  const list = el("div", { id: "subdl-list", class: "subdl-list" });
-  box.appendChild(list);
-  box.appendChild(el("div", { id: "subdl-existing", class: "subdl-existing" }));
+  results.appendChild(langBox);
+  results.appendChild(el("div", { id: "subdl-list", class: "subdl-list" }));
+  cols.appendChild(results);
+  cols.appendChild(el("div", {
+    id: "subdl-existing",
+    class: "subdl-existing subdl-col",
+  }));
+  box.appendChild(cols);
 
   back.appendChild(box);
   document.body.appendChild(back);
