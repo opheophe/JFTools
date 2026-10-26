@@ -28,6 +28,7 @@ const SUBS_OPTIONS = [
   { section: "Acceptable" },
   { value: "acceptable", label: "Acceptable" },
   { value: "acceptable_ai", label: "Acceptable AI" },
+  { value: "unknown", label: "Unknown" },
   { value: "not_acceptable", label: "Not acceptable" },
   { section: "Quality" },
   { value: "good", label: "Good subtitle" },
@@ -75,6 +76,8 @@ function seScanState(r) {
 // Each group is exhaustive when all its values are selected:
 // Language: preferred / foreign / unknown, plus nosubs for a scanned file with
 // no tracks. A not-scanned, failed or folder row is "unknown" language.
+// Acceptable: acceptable / acceptable_ai, unknown (not scanned, failed or no
+// detectable language) and not_acceptable, which is everything else.
 // Quality: good / forced / tiny, plus nosubs, not_scanned and failed.
 const SUBS_PREDS = {
   preferred: (st, f) => st === "scanned" && !!(f && f.preferred),

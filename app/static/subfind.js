@@ -59,6 +59,22 @@ let subfindPendingSpec = null; // spec to select once the player answers hello
 let subfindLanguages = [];    // preferred language codes, for the Rename menu
 let subfindRenameBtn = null;  // the Rename dropdown's button
 
+// The language picked in the results filter. Remembered across searches — and
+// page loads — so a new search or a new title keeps the same language instead
+// of snapping back to "All languages".
+const SUBFIND_LANG_FILTER_KEY = "jftools.subfind.lang";
+
+function subfindLoadLangFilter() {
+  try { return localStorage.getItem(SUBFIND_LANG_FILTER_KEY) || ""; } catch (e) { return ""; }
+}
+
+let subfindLangFilter = subfindLoadLangFilter();
+
+function subfindSetLangFilter(value) {
+  subfindLangFilter = value || "";
+  try { localStorage.setItem(SUBFIND_LANG_FILTER_KEY, subfindLangFilter); } catch (e) { /* ignore */ }
+}
+
 function subfindLangName(code) {
   const c = (code || "").toLowerCase();
   if (SUBFIND_LANG_NAMES[c]) return SUBFIND_LANG_NAMES[c];
@@ -186,15 +202,26 @@ function subfindRenderMeta(data) {
   if (data.note) bits.push(data.note);
   if (bits.length) metaEl.appendChild(el("p", { class: "muted", text: bits.join(" · ") }));
   const langBox = document.getElementById("subfind-lang");
-  if (!langBox || !data.candidates || !data.candidates.length) return;
-  const langs = [...new Set(data.candidates.map((c) => c.language).filter(Boolean))].sort();
-  if (langs.length > 1) {
+  if (!langBox) return;
+  const candidates = data.candidates || [];
+  const langs = [...new Set(candidates.map((c) => c.language).filter(Boolean))].sort();
+  if (candidates.length && langs.length > 1) {
+    // Keep the picked language in the list even when this search has no results
+    // in it, so the picker still shows it (the list then says there are none).
+    if (subfindLangFilter && !langs.includes(subfindLangFilter)) {
+      langs.push(subfindLangFilter);
+      langs.sort();
+    }
     langBox.hidden = false;
     langBox.innerHTML = "";
     const sel = el("select", { class: "subdl-lang-sel" });
     sel.appendChild(el("option", { value: "", text: "All languages" }));
     langs.forEach((l) => sel.appendChild(el("option", { value: l, text: subfindLangName(l) })));
-    sel.addEventListener("change", () => subfindRenderList(sel.value));
+    sel.value = subfindLangFilter;
+    sel.addEventListener("change", () => {
+      subfindSetLangFilter(sel.value);
+      subfindRenderList(subfindLangFilter);
+    });
     langBox.appendChild(el("span", { class: "muted", text: "Language: " }));
     langBox.appendChild(sel);
   } else {
@@ -530,7 +557,10 @@ async function subfindSearch(method) {
     subfindFileMgmt = !!data.file_mgmt;
     subfindLanguages = (data.languages || []).slice();
     subfindRenderMeta(data);
-    subfindRenderList("");
+    const langBox = document.getElementById("subfind-lang");
+    // The remembered language only filters while the picker is on screen; a
+    // single-language search shows everything rather than an empty list.
+    subfindRenderList(langBox && !langBox.hidden ? subfindLangFilter : "");
     subfindBuildRename();
     subfindUpdateNow();
     if (!subfindFileMgmt) {

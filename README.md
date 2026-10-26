@@ -323,8 +323,9 @@ one can cover the whole library when all of its options are selected:
   **Foreign languages**, **Unknown** (including items not scanned yet or whose
   probe failed), and **No subtitles** (a scanned file with no tracks).
 - **Acceptable** — **Acceptable** means a normal subtitle in a preferred
-  language, AI or not; **Acceptable AI** is the AI-generated subset; **Not
-  acceptable** is everything else.
+  language, AI or not; **Acceptable AI** is the AI-generated subset; **Unknown**
+  is a file that is not scanned, failed its probe or has no detectable language;
+  **Not acceptable** is everything else.
 - **Quality** — **Good subtitle** is any normal subtitle in any language, AI or
   not, excluding forced and tiny files. **Forced subtitles** and **Tiny
   subtitles** call out those special kinds; **No subtitles**, **Not scanned**
@@ -403,7 +404,9 @@ The dialog's **Search Hash**, **Search Filename** and **Search Jellyfin name**
 buttons re-run the search one way instead of the default, for when the automatic
 one comes up short: the hash alone (an exact match for that release), the release
 name on disk (`Onslaught 2026 1080p WEB H264-YTS`), or the Jellyfin item's name
-with its year. The line above the results says which search is on screen.
+with its year. The line above the results says which search is on screen. The
+**Language** picker above the results filters them in place and remembers the
+language you chose — a new search, or another title, keeps it selected.
 
 **Sync** re-aligns the playing subtitle to the video with
 [ffsubsync](https://github.com/smacke/ffsubsync) — the original is only replaced
