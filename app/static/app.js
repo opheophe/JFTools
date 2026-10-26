@@ -679,6 +679,78 @@ function bindFormSubmit(formId, url, resultId) {
   });
 }
 
+function bindApiKeys() {
+  const form = document.getElementById("apikey-form");
+  const resultEl = document.getElementById("apikey-result");
+  if (form && resultEl) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      showSpinner(resultEl);
+      try {
+        const data = await postJSON("/settings/api-keys", serializeForm(form));
+        if (data.ok) {
+          resultEl.innerHTML = "";
+          resultEl.appendChild(el("p", {
+            class: "ok",
+            text: "API key created — copy it now, it is shown only once:",
+          }));
+          const code = el("code", { text: data.key });
+          code.style.wordBreak = "break-all";
+          resultEl.appendChild(code);
+          form.reset();
+          setTimeout(() => window.location.reload(), 6000);
+        } else {
+          showMessage(resultEl, data);
+        }
+      } catch (err) {
+        resultEl.innerHTML = "";
+        resultEl.appendChild(el("p", { class: "error", text: String(err) }));
+      }
+    });
+  }
+  document.querySelectorAll("[data-revoke-key]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!window.confirm("Revoke this API key? Instances using it stop working at once.")) return;
+      try {
+        const data = await postJSON(
+          "/settings/api-keys/revoke",
+          "key=" + encodeURIComponent(btn.dataset.revokeKey),
+        );
+        if (data.ok) window.location.reload();
+        else window.alert(data.error || "Could not revoke the key.");
+      } catch (err) {
+        window.alert(String(err));
+      }
+    });
+  });
+}
+
+function bindRemoteSync() {
+  const runBtn = document.getElementById("remotesync-now");
+  const resultEl = document.getElementById("remotesync-result");
+  if (!runBtn || !resultEl) return;
+  runBtn.addEventListener("click", async () => {
+    runBtn.disabled = true;
+    const label = runBtn.textContent;
+    runBtn.textContent = "Importing…";
+    showSpinner(resultEl);
+    try {
+      const data = await postJSON("/api/remotesync/run", "");
+      resultEl.innerHTML = "";
+      resultEl.appendChild(el("p", {
+        class: data.ok ? "ok" : "error",
+        text: data.message || data.error || "Done.",
+      }));
+    } catch (err) {
+      resultEl.innerHTML = "";
+      resultEl.appendChild(el("p", { class: "error", text: String(err) }));
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = label;
+    }
+  });
+}
+
 function bindSettings() {
   bindFormSubmit("jellyfin-form", "/settings", "jellyfin-result");
   bindFormSubmit("auth-form", "/settings/auth", "auth-result");
@@ -688,6 +760,9 @@ function bindSettings() {
   bindFormSubmit("subtitle-prefs-form", "/settings/subtitles", "subtitle-prefs-result");
   bindFormSubmit("opensubtitles-form", "/settings/opensubtitles", "opensubtitles-result");
   bindFormSubmit("play-cache-form", "/settings/play-cache", "play-cache-result");
+  bindFormSubmit("remotesync-form", "/settings/remote-sync", "remotesync-result");
+  bindApiKeys();
+  bindRemoteSync();
   bindSettingsBackup();
   bindPathMaps();
 

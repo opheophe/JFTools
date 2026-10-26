@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import secrets
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -79,6 +80,25 @@ def _parse_path_map_env(raw: str) -> list[dict]:
     return out
 
 
+def _sanitize_api_keys(value) -> list[dict]:
+    """Normalise persisted API keys: ``{name, key, created}`` entries."""
+    out: list[dict] = []
+    if not isinstance(value, list):
+        return out
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        key = str(entry.get("key") or "").strip()
+        if not name or not key:
+            continue
+        created = entry.get("created")
+        if not isinstance(created, (int, float)):
+            created = 0.0
+        out.append({"name": name, "key": key, "created": created})
+    return out
+
+
 def hash_password(password: str) -> str:
     """Hash a password with scrypt and return a self-describing string."""
     salt = secrets.token_hex(16)
@@ -137,6 +157,15 @@ class Settings:
     # than keep_days, or a folder larger than max_gb, are pruned.
     play_cache_keep_days: int = 7
     play_cache_max_gb: int = 5
+    # API keys other instances/scripts use for the read-only media export.
+    # Deliberately not part of the settings export: each install keeps its own.
+    api_keys: list[dict] = field(default_factory=list)
+    # Remote sync: pull Movie Match data and the scan store from another
+    # JFTools server (e.g. the production one) so this instance mirrors it.
+    remote_sync_url: str = ""
+    remote_sync_api_key: str = ""
+    remote_sync_enabled: bool = False
+    remote_sync_on_startup: bool = False
 
 
 class Config:
@@ -246,6 +275,16 @@ class Config:
                         )
                     except (TypeError, ValueError):
                         pass
+                if "api_keys" in data:
+                    settings.api_keys = _sanitize_api_keys(data["api_keys"])
+                if isinstance(data.get("remote_sync_url"), str):
+                    settings.remote_sync_url = data["remote_sync_url"].strip().rstrip("/")
+                if isinstance(data.get("remote_sync_api_key"), str):
+                    settings.remote_sync_api_key = data["remote_sync_api_key"].strip()
+                if isinstance(data.get("remote_sync_enabled"), bool):
+                    settings.remote_sync_enabled = data["remote_sync_enabled"]
+                if isinstance(data.get("remote_sync_on_startup"), bool):
+                    settings.remote_sync_on_startup = data["remote_sync_on_startup"]
         except (OSError, ValueError, TypeError):
             pass
         return settings
@@ -273,6 +312,11 @@ class Config:
             "backup_include_logs": s.backup_include_logs,
             "play_cache_keep_days": s.play_cache_keep_days,
             "play_cache_max_gb": s.play_cache_max_gb,
+            "api_keys": s.api_keys,
+            "remote_sync_url": s.remote_sync_url,
+            "remote_sync_api_key": s.remote_sync_api_key,
+            "remote_sync_enabled": s.remote_sync_enabled,
+            "remote_sync_on_startup": s.remote_sync_on_startup,
         }
         tmp = self.settings_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -378,6 +422,48 @@ class Config:
         self._settings.play_cache_max_gb = max(1, min(1024, int(max_gb)))
         self._persist()
 
+    def create_api_key(self, name: str) -> str:
+        """Create a named API key and return it (shown only once)."""
+        key = "jft_" + secrets.token_hex(24)
+        self._settings.api_keys = [
+            *self._settings.api_keys,
+            {"name": name.strip(), "key": key, "created": time.time()},
+        ]
+        self._persist()
+        return key
+
+    def revoke_api_key(self, key: str) -> bool:
+        """Remove one API key; True when it existed."""
+        before = len(self._settings.api_keys)
+        self._settings.api_keys = [
+            k for k in self._settings.api_keys
+            if not hmac.compare_digest(k["key"], key)
+        ]
+        if len(self._settings.api_keys) == before:
+            return False
+        self._persist()
+        return True
+
+    def valid_api_key(self, key: str) -> dict | None:
+        """The API-key entry matching ``key`` (constant-time), or None."""
+        if not key:
+            return None
+        for entry in self._settings.api_keys:
+            if hmac.compare_digest(entry["key"], key):
+                return entry
+        return None
+
+    def save_remote_sync(
+        self, url: str, api_key: str, enabled: bool, on_startup: bool
+    ) -> None:
+        """Persist the remote-sync source (the other server's URL + API key)."""
+        s = self._settings
+        s.remote_sync_url = (url or "").strip().rstrip("/")
+        s.remote_sync_api_key = (api_key or "").strip()
+        s.remote_sync_enabled = bool(enabled)
+        s.remote_sync_on_startup = bool(on_startup)
+        self._persist()
+
     # ---- backup / restore ---------------------------------------------------
 
     _EXPORT_FIELDS = (
@@ -400,6 +486,10 @@ class Config:
         "backup_include_logs",
         "play_cache_keep_days",
         "play_cache_max_gb",
+        "remote_sync_url",
+        "remote_sync_api_key",
+        "remote_sync_enabled",
+        "remote_sync_on_startup",
     )
 
     def export_settings(self) -> dict:
@@ -440,6 +530,10 @@ class Config:
                         )
                     except (TypeError, ValueError):
                         pass
+                elif field == "remote_sync_enabled":
+                    self._settings.remote_sync_enabled = bool(data[field])
+                elif field == "remote_sync_on_startup":
+                    self._settings.remote_sync_on_startup = bool(data[field])
                 elif field == "backup_include_logs":
                     self._settings.backup_include_logs = bool(data[field])
                 elif field == "backup_dir":

@@ -52,6 +52,12 @@ existing server over the API.
   audio-only AAC conversion played alongside the muted video instead of a
   full remux; the slow remux is reserved for files whose video itself won't
   play.
+- Remote sync: Settings → **Remote sync** lets a test instance mirror another
+  JFTools server (e.g. the production one) — set the URL and an API key and
+  the Movie Match data and the subtitle/audio scan store are imported, either
+  with **Import now** or automatically when the server starts. Inactive by
+  default. Settings → **API keys** creates the named keys the remote side
+  authenticates with, and each can be revoked.
 - Single small container image, published to GitHub Container Registry for both
   `linux/amd64` and `linux/arm64`.
 - `/healthz` healthcheck.
@@ -521,6 +527,24 @@ and the position is preserved. If Jellyfin is unavailable or refuses, the
 the app) for embedded subtitle extraction, audio conversion and browser
 copies. Without it the player still streams files the browser can decode, but
 the embedded tracks report that they cannot be converted.
+
+## Remote sync and API keys
+
+A test or dev instance can mirror a production server instead of building its
+own Movie Match and scan data. On the **source** server, Settings → **API
+keys**: name a key (e.g. `Local dev instance`) and create it — the full key is
+shown once. The key grants read-only access to `/api/sync/export`, which
+returns the Movie Match rows and the whole subtitle/audio scan store as one
+JSON document; **Revoke** cuts a key off at once.
+
+On the **mirror** instance, Settings → **Remote sync**: the source's URL (e.g.
+`http://192.168.1.114:8099`), the API key, and two toggles — **Enable remote
+sync** (inactive by default) and **Run when this server starts** (the import
+waits a few seconds for the server to finish loading, and runs in the
+background so a slow or unreachable source never blocks startup). **Import
+now** runs the same import by hand. The import replaces the local stores
+wholesale — it mirrors, it does not merge — and a failed fetch leaves the
+local data untouched. Both sides must run the same or newer JFTools versions.
 
 ## User watching
 

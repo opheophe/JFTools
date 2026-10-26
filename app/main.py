@@ -25,6 +25,7 @@ from .logs import log, router as logs_router
 from .media import router as media_router
 from .paths import resolve_path
 from .player import prune_play_cache, router as player_router
+from .remotesync import run_import
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
 from .subtitles import router as subtitles_router
 from .users import router as users_router
@@ -39,12 +40,36 @@ async def lifespan(app):
     start_scheduler()
     asyncio.create_task(check_for_updates())
     prune_play_cache()
+    if config.settings.remote_sync_enabled and config.settings.remote_sync_on_startup:
+        asyncio.create_task(_startup_remote_sync())
     yield
     shutdown_scheduler()
     await close_shared_client()
     from .opensubtitles import close_shared_client as close_os_client
 
     await close_os_client()
+
+
+async def _startup_remote_sync() -> None:
+    """Run the configured remote import once the server is fully up.
+
+    Waits a few seconds so uvicorn has bound the port and the app is serving
+    before any request goes out; the import itself is backgrounded and its
+    result only logged, so a slow or unreachable remote never blocks startup.
+    """
+    await asyncio.sleep(5)
+    result = await run_import(
+        config.settings.remote_sync_url, config.settings.remote_sync_api_key
+    )
+    if result.get("ok"):
+        log(
+            "Remote sync",
+            "INFO",
+            f"Startup import: {result['rows']} media item(s), "
+            f"{result['scanned']} scan entrie(s)",
+        )
+    else:
+        log("Remote sync", "WARN", f"Startup import failed: {result.get('error')}")
 
 
 app = FastAPI(title="JFTools", lifespan=lifespan)
@@ -278,8 +303,33 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "backup_include_logs": config.settings.backup_include_logs,
             "play_cache_keep_days": config.settings.play_cache_keep_days,
             "play_cache_max_gb": config.settings.play_cache_max_gb,
+            "api_keys": _api_keys_for_page(),
+            "remote_sync_url": config.settings.remote_sync_url,
+            "remote_sync_api_key_set": bool(config.settings.remote_sync_api_key),
+            "remote_sync_enabled": config.settings.remote_sync_enabled,
+            "remote_sync_on_startup": config.settings.remote_sync_on_startup,
         },
     )
+
+
+def _api_keys_for_page() -> list[dict]:
+    """The API keys as the Settings page renders them (created as text)."""
+    from datetime import datetime
+
+    out = []
+    for entry in config.settings.api_keys:
+        created = entry.get("created") or 0
+        try:
+            stamp = datetime.fromtimestamp(created).strftime("%Y-%m-%d %H:%M")
+        except (OSError, OverflowError, ValueError):
+            stamp = ""
+        out.append({
+            "name": entry["name"],
+            "key": entry["key"],
+            "short": f"{entry['key'][:10]}…{entry['key'][-6:]}",
+            "created": stamp,
+        })
+    return out
 
 
 def _saved(request: Request, message: str) -> Response:
@@ -293,6 +343,50 @@ def _saved(request: Request, message: str) -> Response:
     if "text/html" in request.headers.get("accept", ""):
         return RedirectResponse("/settings", status_code=303)
     return JSONResponse({"ok": True, "message": message})
+
+
+async def api_key_or_login(request: Request) -> str:
+    """A session login or one of the Settings API keys.
+
+    The media export is read-only, but it contains the whole library, so it
+    must not be public: a logged-in user or a bearer of a named API key may
+    read it. Returns the username or the key's name.
+    """
+    key = (request.headers.get("x-api-key") or "").strip()
+    if not key:
+        key = (request.query_params.get("api_key") or "").strip()
+    entry = config.valid_api_key(key)
+    if entry:
+        return entry["name"]
+    return await require_login(request)
+
+
+@app.get("/api/sync/export")
+async def sync_export(request: Request, user: str = Depends(api_key_or_login)):
+    """The Movie Match rows and the subtitle/audio scan store, as one JSON
+    document another JFTools instance can import with Remote sync."""
+    from . import jellyfin_id, subtitles
+    from .version import current_version
+
+    id_state = jellyfin_id._state
+    sub_state = subtitles._state
+    return JSONResponse({
+        "ok": True,
+        "app": "jftools",
+        "version": current_version(),
+        "media": {
+            "rows": id_state["rows"],
+            "marks": sorted(id_state["marks"]),
+            "favorites": id_state["favorites"],
+            "last_sync": id_state["last_sync"],
+        },
+        "scans": {
+            "files": sub_state["files"],
+            "ok": sub_state["ok"],
+            "full_scan_at": sub_state.get("full_scan_at"),
+            "change_scan_at": sub_state.get("change_scan_at"),
+        },
+    })
 
 
 @app.post("/settings")
@@ -523,6 +617,83 @@ async def settings_play_cache_save(
         f"max {config.settings.play_cache_max_gb} GB)",
     )
     return _saved(request, "Player cache settings saved.")
+
+
+@app.post("/settings/api-keys")
+async def settings_api_keys_create(
+    request: Request,
+    user: str = Depends(require_login),
+    name: str = Form(""),
+):
+    name = name.strip()
+    if not name:
+        return JSONResponse(
+            {"ok": False, "error": "Give the key a name so you know what it is for."},
+            status_code=400,
+        )
+    if len(name) > 64:
+        return JSONResponse(
+            {"ok": False, "error": "Key names are at most 64 characters."},
+            status_code=400,
+        )
+    key = config.create_api_key(name)
+    log("Settings", "INFO", f"API key created ({name})")
+    return JSONResponse({"ok": True, "key": key, "message": "API key created."})
+
+
+@app.post("/settings/api-keys/revoke")
+async def settings_api_keys_revoke(
+    request: Request,
+    user: str = Depends(require_login),
+    key: str = Form(""),
+):
+    if config.revoke_api_key((key or "").strip()):
+        log("Settings", "INFO", "API key revoked")
+        return _saved(request, "API key revoked.")
+    return JSONResponse(
+        {"ok": False, "error": "That API key does not exist."}, status_code=400
+    )
+
+
+@app.post("/settings/remote-sync")
+async def settings_remote_sync_save(
+    request: Request,
+    user: str = Depends(require_login),
+    url: str = Form(""),
+    api_key: str = Form(""),
+    enabled: str = Form(""),
+    on_startup: str = Form(""),
+):
+    key = api_key.strip() or config.settings.remote_sync_api_key
+    config.save_remote_sync(
+        url,
+        key,
+        enabled.strip().lower() in ("1", "true", "yes", "on"),
+        on_startup.strip().lower() in ("1", "true", "yes", "on"),
+    )
+    log("Settings", "INFO", "Remote sync settings saved")
+    return _saved(request, "Remote sync settings saved.")
+
+
+@app.post("/api/remotesync/run")
+async def remotesync_run(request: Request, user: str = Depends(require_login)):
+    """Pull the configured remote export into this server's stores, now."""
+    result = await run_import(
+        config.settings.remote_sync_url, config.settings.remote_sync_api_key
+    )
+    if result.get("ok"):
+        return JSONResponse({
+            "ok": True,
+            "message": (
+                f"Imported {result['rows']} media item(s) and "
+                f"{result['scanned']} scan entrie(s)."
+            ),
+            **result,
+        })
+    return JSONResponse(
+        {"ok": False, "error": result.get("error") or "Import failed."},
+        status_code=502,
+    )
 
 
 @app.get("/settings/backup/download")

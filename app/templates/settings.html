@@ -183,6 +183,78 @@
 </section>
 
 <section class="card">
+  <h2>API keys</h2>
+  <p class="muted">
+    Let another JFTools instance (or a script) read the media and scan export from
+    <code>/api/sync/export</code>. Name each key so you know what it is for; revoke
+    a key to cut it off.
+  </p>
+  {% if api_keys %}
+  <div class="table-wrap" style="margin-bottom:.5rem">
+    <table>
+      <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for k in api_keys %}
+        <tr>
+          <td>{{ k.name }}</td>
+          <td><code title="{{ k.key }}">{{ k.short }}</code></td>
+          <td class="muted">{{ k.created }}</td>
+          <td><button type="button" class="mini btn-danger" data-revoke-key="{{ k.key }}">Revoke</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <form id="apikey-form">
+    <label for="apikey-name">Key name</label>
+    <input type="text" id="apikey-name" name="name" placeholder="Local dev instance" maxlength="64">
+    <p class="hint">The full key is shown once when it is created — copy it then.</p>
+    <div class="row">
+      <button type="submit" class="primary">Create API key</button>
+    </div>
+  </form>
+  <div class="result" id="apikey-result" hidden></div>
+</section>
+
+<section class="card">
+  <h2>Remote sync</h2>
+  <p class="muted">
+    Pull Movie Match data and the subtitle/audio scan store from another JFTools
+    server (e.g. the production one), so this instance mirrors it — handy for a
+    test instance. Inactive by default; replacing the local stores.
+  </p>
+  <form id="remotesync-form" method="post" action="/settings/remote-sync">
+    <label for="remotesync-url">Server URL</label>
+    <input type="text" id="remotesync-url" name="url" value="{{ remote_sync_url }}"
+           placeholder="http://192.168.1.114:8099">
+
+    <label for="remotesync-key">API key</label>
+    <input type="password" id="remotesync-key" name="api_key" value=""
+           placeholder="{{ 'A key is set — leave blank to keep it' if remote_sync_api_key_set else 'API key from the other server' }}"
+           autocomplete="off">
+
+    <div class="row" style="align-items:center; margin-top:.5rem">
+      <input type="checkbox" id="remotesync-enabled" name="enabled" value="1"
+             {% if remote_sync_enabled %}checked{% endif %}>
+      <label for="remotesync-enabled">Enable remote sync</label>
+    </div>
+
+    <div class="row" style="align-items:center">
+      <input type="checkbox" id="remotesync-startup" name="on_startup" value="1"
+             {% if remote_sync_on_startup %}checked{% endif %}>
+      <label for="remotesync-startup">Run when this server starts</label>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="primary">Save remote sync settings</button>
+      <button type="button" id="remotesync-now" class="btn-run">Import now</button>
+    </div>
+  </form>
+  <div class="result" id="remotesync-result" hidden></div>
+</section>
+
+<section class="card">
   <h2>Local login</h2>
   <p class="muted">This username/password only works when connecting from your local network (localhost / LAN). Jellyfin admin accounts can always log in from anywhere.</p>
   <form id="auth-form" method="post" action="/settings/auth">

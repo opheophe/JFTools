@@ -182,6 +182,48 @@ def test_play_cache_settings_round_trip_and_clamp(tmp_path, monkeypatch):
     assert cfg.settings.play_cache_max_gb == 1024
 
 
+def test_api_keys_create_revoke_and_persist(tmp_path, monkeypatch):
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    key = cfg.create_api_key("Local dev")
+    assert key.startswith("jft_")
+    assert cfg.valid_api_key(key)["name"] == "Local dev"
+    assert cfg.valid_api_key("nope") is None
+
+    # Persisted, so a restart keeps them.
+    cfg2 = Config()
+    assert cfg2.valid_api_key(key)["name"] == "Local dev"
+    assert cfg2.revoke_api_key(key) is True
+    assert cfg2.valid_api_key(key) is None
+    assert cfg2.revoke_api_key(key) is False
+
+    # API keys are per-install secrets: they stay out of the settings export.
+    cfg2.create_api_key("Other")
+    assert "api_keys" not in cfg2.export_settings()
+
+
+def test_remote_sync_settings_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    cfg.save_remote_sync("http://192.168.1.114:8099/", "jft_abc", True, True)
+
+    cfg2 = Config()
+    assert cfg2.settings.remote_sync_url == "http://192.168.1.114:8099"
+    assert cfg2.settings.remote_sync_api_key == "jft_abc"
+    assert cfg2.settings.remote_sync_enabled is True
+    assert cfg2.settings.remote_sync_on_startup is True
+
+    # They travel with the settings export (a full backup).
+    cfg2.save_remote_sync("", "", False, False)
+    cfg2.import_settings(cfg.export_settings())
+    assert cfg2.settings.remote_sync_url == "http://192.168.1.114:8099"
+    assert cfg2.settings.remote_sync_api_key == "jft_abc"
+    assert cfg2.settings.remote_sync_enabled is True
+    assert cfg2.settings.remote_sync_on_startup is True
+
+
 def test_path_map_env_parsing(tmp_path, monkeypatch):
     monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JFTOOLS_PATH_MAP", r"/Filmer=\\NAS\Filmer;/Ero=Z:\Ero")
