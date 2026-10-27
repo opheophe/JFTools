@@ -322,10 +322,12 @@ one can cover the whole library when all of its options are selected:
 - **Language** — **Preferred languages** (the Settings → Subtitle preferences),
   **Foreign languages**, **Unknown** (including items not scanned yet or whose
   probe failed), and **No subtitles** (a scanned file with no tracks).
-- **Acceptable** — **Acceptable** means a normal subtitle in a preferred
-  language, AI or not; **Acceptable AI** is the AI-generated subset; **Unknown**
-  is a file that is not scanned, failed its probe or has no detectable language;
-  **Not acceptable** is everything else.
+- **Acceptable** — **Preferred language** is a normal, non-AI subtitle in one
+  of the preferred languages; **AI-generated** is a normal AI subtitle in a
+  preferred language; **Unknown** is a file that is not scanned, failed its
+  probe, or has a normal subtitle whose language could not be detected;
+  **Not acceptable** is everything that matches none of those three (no
+  subtitles, or only forced, tiny or foreign-language subtitles).
 - **Quality** — **Good subtitle** is any normal subtitle in any language, AI or
   not, excluding forced and tiny files. **Forced subtitles** and **Tiny
   subtitles** call out those special kinds; **No subtitles**, **Not scanned**

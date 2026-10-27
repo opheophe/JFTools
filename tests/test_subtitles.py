@@ -192,6 +192,7 @@ def test_classify_nothing_is_nosubs():
         "preferred": False,
         "foreign": False,
         "unknown": False,
+        "unknown_normal": False,
         "good": False,
         "acceptable": False,
         "acceptable_ai": False,
@@ -232,13 +233,37 @@ def test_classify_foreign():
     assert flags["acceptable"] is False
 
 
-def test_classify_ai_in_a_preferred_language_is_acceptable():
+def test_classify_ai_in_a_preferred_language_is_not_the_preferred_language_kind():
     flags = _classify_tracks(
         [], [_ext("English", ai=True, file="x.english_ai.srt")], PREFERRED
     )
     assert flags["ai"] is True
+    assert flags["acceptable"] is False
+    assert flags["acceptable_ai"] is True
+
+
+def test_classify_ai_beside_a_human_preferred_subtitle_keeps_both_kinds():
+    flags = _classify_tracks(
+        [],
+        [
+            _ext("English", file="x.en.srt"),
+            _ext("Swedish", ai=True, file="x.sv_ai.srt"),
+        ],
+        PREFERRED,
+    )
     assert flags["acceptable"] is True
     assert flags["acceptable_ai"] is True
+
+
+def test_classify_foreign_ai_is_not_acceptable():
+    # The AI kind is about the preferred languages; a French AI subtitle does
+    # not make a file acceptable when English/Swedish are wanted.
+    flags = _classify_tracks(
+        [], [_ext("French", ai=True, file="x.fr_ai.srt")], PREFERRED
+    )
+    assert flags["ai"] is True
+    assert flags["acceptable"] is False
+    assert flags["acceptable_ai"] is False
 
 
 def test_classify_unrelated_ai_does_not_downgrade_acceptable():
@@ -266,10 +291,21 @@ def test_classify_tiny_is_not_good_or_acceptable():
 def test_classify_unknown_language():
     flags = _classify_tracks([], [_ext("Unknown")], PREFERRED)
     assert flags["unknown"] is True
+    assert flags["unknown_normal"] is True
     assert flags["foreign"] is False
     assert flags["acceptable"] is False
     # Unknown is still a normal subtitle, so Quality's Good catches it.
     assert flags["good"] is True
+
+
+def test_classify_forced_or_tiny_unknown_is_not_acceptable_unknown():
+    forced = _classify_tracks([_int("Unknown", forced=True)], [], PREFERRED)
+    tiny = _classify_tracks([], [_ext("Unknown", tiny=True)], PREFERRED)
+    for flags in (forced, tiny):
+        assert flags["unknown"] is True
+        assert flags["unknown_normal"] is False
+        assert flags["acceptable"] is False
+        assert flags["acceptable_ai"] is False
 
 
 def test_scans_map_rebuilds_flags_with_current_preferences(monkeypatch):

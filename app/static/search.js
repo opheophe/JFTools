@@ -26,9 +26,9 @@ const SUBS_OPTIONS = [
   { value: "unknown", label: "Unknown" },
   { value: "nosubs", label: "No subtitles" },
   { section: "Acceptable" },
-  { value: "acceptable", label: "Acceptable" },
-  { value: "acceptable_ai", label: "Acceptable AI" },
-  { value: "unknown", label: "Unknown" },
+  { value: "acceptable", label: "Preferred language" },
+  { value: "acceptable_ai", label: "AI-generated" },
+  { value: "acceptable_unknown", label: "Unknown" },
   { value: "not_acceptable", label: "Not acceptable" },
   { section: "Quality" },
   { value: "good", label: "Good subtitle" },
@@ -45,7 +45,10 @@ const SUBS_OPTIONS = [
 const SUBS_VALUES = new Set(SUBS_OPTIONS.filter((o) => o.value !== undefined).map((o) => o.value));
 const SUBS_ALIASES = {
   "Acceptable": "acceptable",
+  "Preferred language": "acceptable",
   "AI Sub": "acceptable_ai",
+  "Acceptable AI": "acceptable_ai",
+  "AI-generated": "acceptable_ai",
   "No acceptable": "not_acceptable",
   "No acceptable (inc. AI)": "not_acceptable",
   "Forced": "forced",
@@ -76,8 +79,10 @@ function seScanState(r) {
 // Each group is exhaustive when all its values are selected:
 // Language: preferred / foreign / unknown, plus nosubs for a scanned file with
 // no tracks. A not-scanned, failed or folder row is "unknown" language.
-// Acceptable: acceptable / acceptable_ai, unknown (not scanned, failed or no
-// detectable language) and not_acceptable, which is everything else.
+// Acceptable: preferred language (a normal, non-AI track in the Settings
+// languages), AI-generated (a normal preferred-language AI track), unknown
+// (not scanned, failed, or a normal track whose language is unknown), and
+// not_acceptable, which is everything the three do not match.
 // Quality: good / forced / tiny, plus nosubs, not_scanned and failed.
 const SUBS_PREDS = {
   preferred: (st, f) => st === "scanned" && !!(f && f.preferred),
@@ -86,7 +91,10 @@ const SUBS_PREDS = {
   nosubs: (st, f) => st === "scanned" && (!f || !!f.nosubs),
   acceptable: (st, f) => st === "scanned" && !!(f && f.acceptable),
   acceptable_ai: (st, f) => st === "scanned" && !!(f && f.acceptable_ai),
-  not_acceptable: (st, f) => st !== "scanned" || !(f && f.acceptable),
+  acceptable_unknown: (st, f) => st !== "scanned" || !!(f && f.unknown_normal),
+  not_acceptable: (st, f) => st === "scanned" && !(f && (
+    f.acceptable || f.acceptable_ai || f.unknown_normal
+  )),
   good: (st, f) => st === "scanned" && !!(f && f.good),
   forced: (st, f) => st === "scanned" && !!(f && f.forced),
   tiny: (st, f) => st === "scanned" && !!(f && f.tiny),
