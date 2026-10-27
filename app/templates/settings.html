@@ -165,21 +165,48 @@
            autocomplete="off">
     <p class="hint">{{ "A key is already set — leave blank to keep it." if os_api_key_is_set else "Create a free consumer key on opensubtitles.com. Without a key, search/download is unavailable." }}</p>
 
-    <label for="opensubtitles_username">Username (optional)</label>
-    <input type="text" id="opensubtitles_username" name="opensubtitles_username" value="{{ os_username }}"
-           autocomplete="username">
-    <p class="hint">Logging in raises the daily download quota (~20/day vs ~5 anonymously).</p>
-
-    <label for="opensubtitles_password">Password (optional)</label>
-    <input type="password" id="opensubtitles_password" name="opensubtitles_password" value=""
-           placeholder="Leave blank to keep current password" autocomplete="off">
-
     <div class="row">
       <button type="submit" class="primary">Save</button>
       <button type="button" id="os-test-btn">Test</button>
     </div>
   </form>
   <div class="result" id="opensubtitles-result" hidden></div>
+
+  <h3 style="margin-top:1rem">Accounts</h3>
+  <p class="hint">
+    Tried from top to bottom: when an account has used its downloads for the day,
+    the next one is used. With no account, JFTools downloads on the anonymous
+    quota (a few a day).
+  </p>
+  {% if os_accounts %}
+  <div class="table-wrap" style="margin-bottom:.5rem">
+    <table>
+      <thead><tr><th>Account</th><th>Password</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for a in os_accounts %}
+        <tr>
+          <td>{{ a.username }}</td>
+          <td class="muted">{{ "set" if a.has_password else "missing" }}</td>
+          <td><button type="button" class="mini btn-danger" data-os-remove="{{ a.username }}">Remove</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <form id="os-account-form">
+    <label for="os-account-username">Username</label>
+    <input type="text" id="os-account-username" name="username" autocomplete="username">
+
+    <label for="os-account-password">Password</label>
+    <input type="password" id="os-account-password" name="password" autocomplete="new-password">
+    <p class="hint">Adding an existing username replaces that account's password.</p>
+
+    <div class="row">
+      <button type="submit" class="primary">Add account</button>
+    </div>
+  </form>
+  <div class="result" id="os-account-result" hidden></div>
 </section>
 
 <section class="card">

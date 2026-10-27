@@ -751,6 +751,47 @@ function bindRemoteSync() {
   });
 }
 
+function bindOsAccounts() {
+  const form = document.getElementById("os-account-form");
+  const resultEl = document.getElementById("os-account-result");
+  if (form && resultEl) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      showSpinner(resultEl);
+      try {
+        const data = await postJSON(
+          "/settings/opensubtitles/accounts",
+          serializeForm(form),
+        );
+        if (data.ok) {
+          window.location.reload();
+        } else {
+          showMessage(resultEl, data);
+        }
+      } catch (err) {
+        resultEl.innerHTML = "";
+        resultEl.appendChild(el("p", { class: "error", text: String(err) }));
+      }
+    });
+  }
+  document.querySelectorAll("[data-os-remove]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const name = btn.dataset.osRemove;
+      if (!window.confirm(`Remove the OpenSubtitles account ${name}?`)) return;
+      try {
+        const data = await postJSON(
+          "/settings/opensubtitles/accounts/remove",
+          "username=" + encodeURIComponent(name),
+        );
+        if (data.ok) window.location.reload();
+        else window.alert(data.error || "Could not remove the account.");
+      } catch (err) {
+        window.alert(String(err));
+      }
+    });
+  });
+}
+
 function bindSettings() {
   bindFormSubmit("jellyfin-form", "/settings", "jellyfin-result");
   bindFormSubmit("auth-form", "/settings/auth", "auth-result");
@@ -763,6 +804,7 @@ function bindSettings() {
   bindFormSubmit("remotesync-form", "/settings/remote-sync", "remotesync-result");
   bindApiKeys();
   bindRemoteSync();
+  bindOsAccounts();
   bindSettingsBackup();
   bindPathMaps();
 

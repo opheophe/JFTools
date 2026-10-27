@@ -80,6 +80,27 @@ def _parse_path_map_env(raw: str) -> list[dict]:
     return out
 
 
+def _sanitize_accounts(value) -> list[dict]:
+    """Normalise OpenSubtitles accounts: ``{username, password}`` entries.
+
+    A username may only appear once (an account added twice would spend the
+    same daily quota twice), so later duplicates are dropped.
+    """
+    out: list[dict] = []
+    if not isinstance(value, list):
+        return out
+    seen: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        username = str(entry.get("username") or "").strip()
+        if not username or username.lower() in seen:
+            continue
+        seen.add(username.lower())
+        out.append({"username": username, "password": str(entry.get("password") or "")})
+    return out
+
+
 def _sanitize_api_keys(value) -> list[dict]:
     """Normalise persisted API keys: ``{name, key, created}`` entries."""
     out: list[dict] = []
@@ -140,8 +161,10 @@ class Settings:
     path_maps: list[dict] = field(default_factory=list)
     file_mgmt: bool = False
     opensubtitles_api_key: str = ""
-    opensubtitles_username: str = ""
-    opensubtitles_password: str = ""
+    # OpenSubtitles accounts, used in this order: when one has spent its daily
+    # downloads the next one is used. Each entry is {"username", "password"}.
+    # An empty list means the anonymous quota (a few downloads a day).
+    opensubtitles_accounts: list[dict] = field(default_factory=list)
     # Preferred subtitle languages: the default for OpenSubtitles searches and
     # the language list used by the Internal dialog's Smart mark.
     opensubtitles_languages: str = "en"
@@ -217,8 +240,12 @@ class Config:
             timezone=_env("JFTOOLS_TIMEZONE", "Europe/Stockholm"),
             path_maps=_parse_path_map_env(_env("JFTOOLS_PATH_MAP", "")),
             opensubtitles_api_key=_env("JFTOOLS_OPENSUBTITLES_API_KEY", ""),
-            opensubtitles_username=_env("JFTOOLS_OPENSUBTITLES_USERNAME", ""),
-            opensubtitles_password=_env("JFTOOLS_OPENSUBTITLES_PASSWORD", ""),
+            opensubtitles_accounts=_sanitize_accounts([
+                {
+                    "username": _env("JFTOOLS_OPENSUBTITLES_USERNAME", ""),
+                    "password": _env("JFTOOLS_OPENSUBTITLES_PASSWORD", ""),
+                }
+            ]),
             opensubtitles_languages=_env("JFTOOLS_OPENSUBTITLES_LANGUAGES", "en"),
         )
         try:
@@ -244,10 +271,20 @@ class Config:
                     settings.file_mgmt = bool(data["file_mgmt"])
                 if data.get("opensubtitles_api_key"):
                     settings.opensubtitles_api_key = data["opensubtitles_api_key"]
-                if data.get("opensubtitles_username"):
-                    settings.opensubtitles_username = data["opensubtitles_username"]
-                if data.get("opensubtitles_password"):
-                    settings.opensubtitles_password = data["opensubtitles_password"]
+                if "opensubtitles_accounts" in data:
+                    # The key is authoritative, even when empty: removing every
+                    # account must stick rather than fall back to the env login.
+                    settings.opensubtitles_accounts = _sanitize_accounts(
+                        data["opensubtitles_accounts"]
+                    )
+                elif data.get("opensubtitles_username"):
+                    # Older configs kept one login in two scalar fields.
+                    settings.opensubtitles_accounts = _sanitize_accounts([
+                        {
+                            "username": data["opensubtitles_username"],
+                            "password": data.get("opensubtitles_password") or "",
+                        }
+                    ])
                 if data.get("opensubtitles_languages"):
                     settings.opensubtitles_languages = data["opensubtitles_languages"]
                 if "filter_profiles" in data:
@@ -303,8 +340,7 @@ class Config:
             "path_maps": s.path_maps,
             "file_mgmt": s.file_mgmt,
             "opensubtitles_api_key": s.opensubtitles_api_key,
-            "opensubtitles_username": s.opensubtitles_username,
-            "opensubtitles_password": s.opensubtitles_password,
+            "opensubtitles_accounts": s.opensubtitles_accounts,
             "opensubtitles_languages": s.opensubtitles_languages,
             "filter_profiles": s.filter_profiles,
             "backup_dir": s.backup_dir,
@@ -383,17 +419,40 @@ class Config:
         self._settings.file_mgmt = bool(enabled)
         self._persist()
 
-    def save_opensubtitles(self, api_key: str, username: str, password: str, languages: str) -> None:
-        s = self._settings
-        if api_key is not None:
-            s.opensubtitles_api_key = api_key.strip()
-        if username is not None:
-            s.opensubtitles_username = username.strip()
-        if password is not None:
-            s.opensubtitles_password = password
-        if languages is not None:
-            s.opensubtitles_languages = languages.strip() or "en"
+    def save_opensubtitles(self, api_key: str) -> None:
+        """Persist the OpenSubtitles API key (accounts have their own helpers)."""
+        self._settings.opensubtitles_api_key = (api_key or "").strip()
         self._persist()
+
+    def add_opensubtitles_account(self, username: str, password: str) -> bool:
+        """Add an account (or replace its password); True when it was new.
+
+        Accounts are tried in list order, so a new one goes at the end.
+        """
+        username = (username or "").strip()
+        password = password or ""
+        accounts = list(self._settings.opensubtitles_accounts)
+        for entry in accounts:
+            if entry["username"].lower() == username.lower():
+                entry["password"] = password
+                self._settings.opensubtitles_accounts = accounts
+                self._persist()
+                return False
+        accounts.append({"username": username, "password": password})
+        self._settings.opensubtitles_accounts = accounts
+        self._persist()
+        return True
+
+    def remove_opensubtitles_account(self, username: str) -> bool:
+        """Drop one account; True when it was in the list."""
+        target = (username or "").strip().lower()
+        accounts = self._settings.opensubtitles_accounts
+        kept = [a for a in accounts if a["username"].lower() != target]
+        if len(kept) == len(accounts):
+            return False
+        self._settings.opensubtitles_accounts = kept
+        self._persist()
+        return True
 
     def save_subtitle_languages(self, languages: str) -> None:
         """Persist the shared preferred-subtitle-language list."""
@@ -477,8 +536,7 @@ class Config:
         "path_maps",
         "file_mgmt",
         "opensubtitles_api_key",
-        "opensubtitles_username",
-        "opensubtitles_password",
+        "opensubtitles_accounts",
         "opensubtitles_languages",
         "filter_profiles",
         "backup_dir",
@@ -511,6 +569,10 @@ class Config:
                     self._settings.path_maps = _sanitize_path_maps(data[field])
                 elif field == "filter_profiles":
                     self._settings.filter_profiles = _sanitize_profiles(data[field])
+                elif field == "opensubtitles_accounts":
+                    self._settings.opensubtitles_accounts = _sanitize_accounts(
+                        data[field]
+                    )
                 elif field == "backup_keep":
                     try:
                         self._settings.backup_keep = max(0, min(100, int(data[field])))

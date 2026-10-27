@@ -1521,6 +1521,7 @@ async def subtitles_search(
     return JSONResponse(
         {
             **base,
+            "remaining": client.remaining(),
             "method": used,
             "query": query_used,
             "total": result["total_count"] if result else 0,

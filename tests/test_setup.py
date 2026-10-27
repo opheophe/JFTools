@@ -1,3 +1,5 @@
+import json
+
 from app.config import Config
 
 
@@ -201,6 +203,72 @@ def test_api_keys_create_revoke_and_persist(tmp_path, monkeypatch):
     # API keys are per-install secrets: they stay out of the settings export.
     cfg2.create_api_key("Other")
     assert "api_keys" not in cfg2.export_settings()
+
+
+def test_opensubtitles_accounts_add_remove_and_persist(tmp_path, monkeypatch):
+    monkeypatch.delenv("JFTOOLS_OPENSUBTITLES_USERNAME", raising=False)
+    monkeypatch.delenv("JFTOOLS_OPENSUBTITLES_PASSWORD", raising=False)
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    assert cfg.settings.opensubtitles_accounts == []
+    assert cfg.add_opensubtitles_account("alice", "pw1") is True
+    assert cfg.add_opensubtitles_account("bob", "pw2") is True
+    # Adding an existing name updates that account instead of duplicating it.
+    assert cfg.add_opensubtitles_account("Alice", "new-pw") is False
+    assert [a["username"] for a in cfg.settings.opensubtitles_accounts] == ["alice", "bob"]
+    assert cfg.settings.opensubtitles_accounts[0]["password"] == "new-pw"
+
+    # Persisted, in order, so a restart keeps the priority.
+    cfg2 = Config()
+    assert [a["username"] for a in cfg2.settings.opensubtitles_accounts] == ["alice", "bob"]
+
+    assert cfg2.remove_opensubtitles_account("nobody") is False
+    assert cfg2.remove_opensubtitles_account("ALICE") is True
+    assert [a["username"] for a in cfg2.settings.opensubtitles_accounts] == ["bob"]
+
+    # They travel with the settings export (and are sanitised on import).
+    cfg3 = Config()
+    exported = cfg2.export_settings()
+    assert exported["opensubtitles_accounts"] == [{"username": "bob", "password": "pw2"}]
+    cfg3.import_settings(
+        {**exported, "opensubtitles_accounts": [
+            {"username": "x", "password": "y"},
+            {"username": "x", "password": "dup"},
+            {"username": "", "password": "skip"},
+        ]}
+    )
+    assert cfg3.settings.opensubtitles_accounts == [{"username": "x", "password": "y"}]
+
+
+def test_opensubtitles_legacy_single_login_is_migrated(tmp_path, monkeypatch):
+    monkeypatch.delenv("JFTOOLS_OPENSUBTITLES_USERNAME", raising=False)
+    monkeypatch.delenv("JFTOOLS_OPENSUBTITLES_PASSWORD", raising=False)
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {"opensubtitles_username": "old", "opensubtitles_password": "secret"}
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = Config()
+    assert cfg.settings.opensubtitles_accounts == [
+        {"username": "old", "password": "secret"}
+    ]
+
+    cfg.add_opensubtitles_account("second", "pw")
+    saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    assert "opensubtitles_username" not in saved
+    assert [a["username"] for a in saved["opensubtitles_accounts"]] == ["old", "second"]
+
+
+def test_opensubtitles_removing_every_account_sticks(tmp_path, monkeypatch):
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+    cfg = Config()
+    cfg.add_opensubtitles_account("only", "pw")
+    cfg.remove_opensubtitles_account("only")
+    assert Config().settings.opensubtitles_accounts == []
 
 
 def test_remote_sync_settings_round_trip(tmp_path, monkeypatch):

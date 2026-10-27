@@ -153,7 +153,7 @@ values.
 | `JFTOOLS_TIMEZONE` / `TZ` | Time zone for logs and scheduled jobs (default `Europe/Stockholm`). |
 | `JFTOOLS_PATH_MAP` | Optional. Semicolon-separated `from=to` path mappings, e.g. `/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`. Maps Jellyfin's container paths to paths this machine can open. Also editable in-app (Settings → Media paths). |
 | `JFTOOLS_OPENSUBTITLES_API_KEY` | Optional. OpenSubtitles API key (opensubtitles.com → Consumers) used by subtitle search/download. Also editable in-app. |
-| `JFTOOLS_OPENSUBTITLES_USERNAME` / `JFTOOLS_OPENSUBTITLES_PASSWORD` | Optional. OpenSubtitles account login — raises the daily download quota. |
+| `JFTOOLS_OPENSUBTITLES_USERNAME` / `JFTOOLS_OPENSUBTITLES_PASSWORD` | Optional. The first OpenSubtitles account — raises the daily download quota. More accounts can be added in-app (Settings → OpenSubtitles); accounts are used in order. |
 | `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Preferred subtitle languages, e.g. `en,sv` (default `en`). Used by OpenSubtitles searches and the Tracks dialog's Smart mark. |
 | `PUID` / `PGID` | Container user/group that owns the data files. Set in `docker-compose.yml`. |
 | `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
@@ -429,8 +429,10 @@ A manual "Subtitle Ok" mark is cleared when the subtitle files change.
 
 - **OpenSubtitles API key** — Settings → OpenSubtitles (create a free consumer
   key at opensubtitles.com). The key alone works anonymously (~5 downloads/day);
-  adding your account username/password raises it to the free-account quota
-  (~20/day). The dialog shows how many downloads remain.
+  adding an account raises it to the free-account quota (~20/day). Several
+  accounts can be added: they are tried from the top of the list, and when one
+  has spent its downloads for the day the next one is used, so the quota is the
+  sum of the accounts. The dialog shows how many downloads remain in total.
 - **ffsubsync** for the per-subtitle **Sync** button — the Docker image ships
   it (`pip` install). For a native Windows install, drop `ffsubsync.exe` in a
   `Tools` folder next to the app, put it on PATH, or set `JFTOOLS_FFSUBSYNC`.

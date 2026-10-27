@@ -273,6 +273,167 @@ async def test_download_rejects_unknown_format():
         await client.download(1, "docx")
 
 
+# ---- several accounts --------------------------------------------------------
+
+
+def _ok_login():
+    return {
+        "token": "tok",
+        "user": {"allowed_downloads": 20, "downloads_count": 15, "level": "2"},
+    }
+
+
+class FakeAccountClient:
+    """Just enough of OpenSubtitlesClient for the pool."""
+
+    def __init__(self, username, remaining=None, quota=False, login_error=""):
+        self.username = username
+        self._remaining = remaining
+        self.quota = quota
+        self.login_error = login_error
+        self.downloads = []
+        self.logins = 0
+
+    @property
+    def logged_in(self):
+        return bool(self.username) and not self.login_error
+
+    def remaining(self):
+        return self._remaining
+
+    async def login(self):
+        self.logins += 1
+        if self.login_error:
+            raise OpenSubtitlesError(self.login_error)
+        return _ok_login()["user"]
+
+    async def search(self, **params):
+        return {"total_count": 0, "data": []}
+
+    async def download(self, file_id, sub_format="srt"):
+        self.downloads.append(file_id)
+        if self.quota:
+            raise osmod.OpenSubtitlesQuotaError("out of downloads")
+        if self._remaining is not None:
+            self._remaining -= 1
+        return {
+            "content": b"1\n",
+            "file_name": "a.srt",
+            "remaining": self._remaining,
+        }
+
+
+def _pool(clients):
+    pool = osmod.OpenSubtitlesPool("key", [{"username": "x"} for _ in clients])
+    pool._clients = clients
+    return pool
+
+
+def test_download_quota_is_a_specific_error():
+    assert issubclass(osmod.OpenSubtitlesQuotaError, OpenSubtitlesError)
+
+
+async def test_download_406_is_reported_as_a_quota_error():
+    def handler(request):
+        if request.url.path == "/api/v1/login":
+            return httpx.Response(200, json=_ok_login())
+        return httpx.Response(
+            406, json={"message": "You have downloaded your allowed 20 subtitles for 24h."}
+        )
+
+    client = OpenSubtitlesClient("key", "user", "pw", transport=httpx.MockTransport(handler))
+    with pytest.raises(osmod.OpenSubtitlesQuotaError, match="allowed 20 subtitles"):
+        await client.download(11)
+
+
+async def test_pool_moves_to_the_next_account_when_one_is_out():
+    first = FakeAccountClient("one", remaining=0, quota=True)
+    second = FakeAccountClient("two", remaining=7)
+    pool = _pool([first, second])
+
+    data = await pool.download(11)
+
+    assert data["file_name"] == "a.srt"
+    assert first.downloads == [11]
+    assert second.downloads == [11]
+    # The spent account counts as zero; the other one lost one download.
+    assert pool.remaining() == 6
+
+
+async def test_pool_reports_when_every_account_is_out():
+    pool = _pool([FakeAccountClient("one", quota=True), FakeAccountClient("two", quota=True)])
+    with pytest.raises(osmod.OpenSubtitlesQuotaError, match="Every OpenSubtitles account"):
+        await pool.download(1)
+
+
+async def test_pool_with_one_account_keeps_the_api_message():
+    pool = _pool([FakeAccountClient("only", quota=True)])
+    with pytest.raises(osmod.OpenSubtitlesQuotaError, match="out of downloads"):
+        await pool.download(1)
+
+
+async def test_pool_prepare_logs_in_every_account_and_sums_remaining():
+    first = FakeAccountClient("one", remaining=4)
+    second = FakeAccountClient("two", remaining=9)
+    pool = _pool([first, second])
+
+    await pool.prepare()
+    await pool.prepare()  # only once
+
+    assert (first.logins, second.logins) == (1, 1)
+    assert pool.remaining() == 13
+
+
+async def test_pool_search_uses_the_first_logged_in_account():
+    bad = FakeAccountClient("bad", login_error="wrong password")
+    good = FakeAccountClient("good", remaining=3)
+    pool = _pool([bad, good])
+
+    assert await pool.search(query="movie") == {"total_count": 0, "data": []}
+    assert good.logins == 1
+
+
+async def test_pool_test_lists_every_account():
+    pool = _pool([FakeAccountClient("one"), FakeAccountClient("two")])
+    entries = await pool.test()
+    assert [e["username"] for e in entries] == ["one", "two"]
+    assert all(e["user"]["level"] == "2" for e in entries)
+
+
+async def test_pool_test_reports_a_broken_account_beside_a_good_one():
+    pool = _pool([
+        FakeAccountClient("one", login_error="OpenSubtitles login failed"),
+        FakeAccountClient("two"),
+    ])
+    entries = await pool.test()
+    assert "login failed" in entries[0]["error"]
+    assert entries[1]["user"]["level"] == "2"
+
+
+async def test_pool_test_raises_when_every_account_fails():
+    pool = _pool([
+        FakeAccountClient("one", login_error="bad key"),
+        FakeAccountClient("two", login_error="bad key"),
+    ])
+    with pytest.raises(OpenSubtitlesError, match="bad key"):
+        await pool.test()
+
+
+async def test_pool_without_accounts_is_anonymous(monkeypatch):
+    pool = osmod.OpenSubtitlesPool("key", [])
+    assert len(pool.clients) == 1 and pool.clients[0].username == ""
+    called = {}
+
+    async def fake_test():
+        called["anonymous"] = True
+        return {}
+
+    monkeypatch.setattr(pool.clients[0], "test", fake_test)
+    entries = await pool.test()
+    assert called["anonymous"] is True
+    assert entries[0]["anonymous"] is True
+
+
 # ---- routes -----------------------------------------------------------------
 
 
@@ -288,8 +449,7 @@ def os_env(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(config._settings, "file_mgmt", True)
     monkeypatch.setattr(config._settings, "opensubtitles_api_key", "key")
-    monkeypatch.setattr(config._settings, "opensubtitles_username", "")
-    monkeypatch.setattr(config._settings, "opensubtitles_password", "")
+    monkeypatch.setattr(config._settings, "opensubtitles_accounts", [])
     monkeypatch.setattr(config._settings, "opensubtitles_languages", "en,sv")
     monkeypatch.setattr(
         jellyfin_id,

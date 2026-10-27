@@ -296,7 +296,10 @@ async def settings_page(request: Request, user: str = Depends(require_login)):
             "path_maps": config.settings.path_maps,
             "file_mgmt": config.settings.file_mgmt,
             "os_api_key_is_set": bool(config.settings.opensubtitles_api_key),
-            "os_username": config.settings.opensubtitles_username,
+            "os_accounts": [
+                {"username": a["username"], "has_password": bool(a.get("password"))}
+                for a in config.settings.opensubtitles_accounts
+            ],
             "preferred_languages": config.settings.opensubtitles_languages,
             "backup_dir": config.settings.backup_dir,
             "backup_keep": config.settings.backup_keep,
@@ -493,25 +496,72 @@ async def settings_opensubtitles_save(
     request: Request,
     user: str = Depends(require_login),
     opensubtitles_api_key: str = Form(""),
-    opensubtitles_username: str = Form(""),
-    opensubtitles_password: str = Form(""),
 ):
-    # Blank API key/password fields keep the stored value (they are never
-    # echoed back to the page), so a user can save a login without retyping it.
-    # Languages now live under Settings -> Subtitle preferences.
+    # A blank API key keeps the stored value (it is never echoed back to the
+    # page), so the key can be saved without retyping it. Accounts have their
+    # own add/remove routes below; languages live under Subtitle preferences.
     api_key = opensubtitles_api_key.strip() or config.settings.opensubtitles_api_key
-    password = opensubtitles_password or config.settings.opensubtitles_password
-    config.save_opensubtitles(
-        api_key,
-        opensubtitles_username,
-        password,
-        config.settings.opensubtitles_languages,
-    )
+    config.save_opensubtitles(api_key)
     from .opensubtitles import invalidate
 
     invalidate()
     log("Jellyfin", "INFO", "OpenSubtitles settings saved")
     return _saved(request, "OpenSubtitles settings saved.")
+
+
+@app.post("/settings/opensubtitles/accounts")
+async def settings_opensubtitles_account_add(
+    request: Request,
+    user: str = Depends(require_login),
+    username: str = Form(""),
+    password: str = Form(""),
+):
+    username = username.strip()
+    if not username:
+        return JSONResponse(
+            {"ok": False, "error": "Enter the account's username."}, status_code=400
+        )
+    if not password:
+        return JSONResponse(
+            {"ok": False, "error": "Enter the account's password."}, status_code=400
+        )
+    added = config.add_opensubtitles_account(username, password)
+    from .opensubtitles import invalidate
+
+    invalidate()
+    log(
+        "Jellyfin",
+        "INFO",
+        f"OpenSubtitles account {'added' if added else 'updated'} ({username})",
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "added": added,
+            "message": (
+                f"Account {username} added."
+                if added
+                else f"Account {username} updated."
+            ),
+        }
+    )
+
+
+@app.post("/settings/opensubtitles/accounts/remove")
+async def settings_opensubtitles_account_remove(
+    request: Request,
+    user: str = Depends(require_login),
+    username: str = Form(""),
+):
+    if config.remove_opensubtitles_account(username):
+        from .opensubtitles import invalidate
+
+        invalidate()
+        log("Jellyfin", "INFO", f"OpenSubtitles account removed ({username.strip()})")
+        return _saved(request, "OpenSubtitles account removed.")
+    return JSONResponse(
+        {"ok": False, "error": "That account is not in the list."}, status_code=400
+    )
 
 
 @app.post("/api/paths/test")
@@ -920,33 +970,40 @@ async def settings_opensubtitles_test(
     request: Request,
     user: str = Depends(require_login),
     opensubtitles_api_key: str = Form(""),
-    opensubtitles_username: str = Form(""),
-    opensubtitles_password: str = Form(""),
 ):
-    from .opensubtitles import OpenSubtitlesClient, OpenSubtitlesError
+    from .opensubtitles import OpenSubtitlesError, OpenSubtitlesPool
 
     api_key = opensubtitles_api_key.strip() or config.settings.opensubtitles_api_key
-    username = opensubtitles_username.strip() or config.settings.opensubtitles_username
-    password = opensubtitles_password or config.settings.opensubtitles_password
-    client = OpenSubtitlesClient(api_key, username, password)
+    pool = OpenSubtitlesPool(api_key, list(config.settings.opensubtitles_accounts))
     try:
-        user_info = await client.test()
+        accounts = await pool.test()
     except OpenSubtitlesError as exc:
         log("Jellyfin", "ERROR", f"OpenSubtitles test: {exc}")
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
 
     items = []
-    if user_info:
-        allowed = user_info.get("allowed_downloads")
-        used = user_info.get("downloads_count")
-        items.append(["Account", username or "?"])
-        items.append(["Level", user_info.get("level") or (user_info.get("vip") and "VIP") or "?"])
-        items.append(["Downloads used today", f"{used} / {allowed}" if isinstance(used, int) and isinstance(allowed, int) else "?"])
-    else:
-        items.append(["API key", "accepted"])
-        items.append(
-            ["Account", "anonymous — add a username/password for a higher daily quota"]
-        )
+    for index, entry in enumerate(accounts):
+        name = entry.get("username") or ""
+        label = "Account" if not name else f"Account {index + 1} ({name})"
+        if entry.get("anonymous"):
+            items.append(["API key", "accepted"])
+            items.append(
+                ["Account", "anonymous — add an account for a higher daily quota"]
+            )
+            continue
+        if entry.get("error"):
+            items.append([label, f"failed — {entry['error']}"])
+            continue
+        info = entry.get("user") or {}
+        used = info.get("downloads_count")
+        allowed = info.get("allowed_downloads")
+        level = info.get("level") or ("VIP" if info.get("vip") else "?")
+        if isinstance(used, int) and isinstance(allowed, int):
+            items.append([label, f"{level} · {used} / {allowed} downloads used today"])
+        elif isinstance(allowed, int):
+            items.append([label, f"{level} · {allowed} downloads a day"])
+        else:
+            items.append([label, level])
     log("Jellyfin", "INFO", "OpenSubtitles test OK")
     return JSONResponse(
         {"ok": True, "type": "kv", "title": "OpenSubtitles OK", "items": items}

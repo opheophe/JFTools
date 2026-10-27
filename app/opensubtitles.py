@@ -46,6 +46,10 @@ class OpenSubtitlesError(Exception):
     """Raised for configuration or upstream OpenSubtitles errors."""
 
 
+class OpenSubtitlesQuotaError(OpenSubtitlesError):
+    """Raised when an account has spent its downloads for the day."""
+
+
 def opensubtitles_hash(path: str) -> tuple[str, int]:
     """The OpenSubtitles "moviehash" for a file, plus its size in bytes.
 
@@ -385,6 +389,16 @@ class OpenSubtitlesClient:
                 retried_login = True
                 await self.login()
                 continue
+            # 406 is "you have downloaded your allowed N subtitles for 24h";
+            # 429 there means the account is being rate-limited. Both are a
+            # reason to try the next account rather than to fail the download.
+            if resp.status_code in (406, 429):
+                raise OpenSubtitlesQuotaError(
+                    _error_message(
+                        resp,
+                        "This OpenSubtitles account is out of downloads for today.",
+                    )
+                )
             self._raise_for_status(resp, "download")
 
     async def _fetch_link(self, link: str) -> tuple[bytes, str]:
@@ -411,30 +425,177 @@ class OpenSubtitlesClient:
         return content, name
 
 
+# ---- several accounts --------------------------------------------------------
+# OpenSubtitles' daily download limit is per account, so a household with a few
+# free accounts can keep downloading after the first one runs dry. The pool
+# tries the accounts in their configured order and moves on when one is spent.
+
+
+class OpenSubtitlesPool:
+    """Every configured account, tried in order until one can download.
+
+    Searching only needs the API key, so it runs on a logged-in account when
+    there is one. A download walks the list from the top: an account that
+    answers "out of downloads" is skipped (until the settings change), and the
+    next one is tried. Without accounts the pool holds one anonymous client.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        accounts: list[dict],
+        timeout: float = 20.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+        http: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._clients = [
+            OpenSubtitlesClient(
+                api_key,
+                str(a.get("username") or ""),
+                str(a.get("password") or ""),
+                timeout,
+                transport,
+                http,
+            )
+            for a in accounts
+        ] or [OpenSubtitlesClient(api_key, "", "", timeout, transport, http)]
+        self._left: dict[int, int] = {}  # downloads left today, per account
+        self._prepared = False
+
+    @property
+    def clients(self) -> list["OpenSubtitlesClient"]:
+        return self._clients
+
+    async def prepare(self) -> None:
+        """Log every account in once (in parallel) so ``remaining`` is known."""
+        if self._prepared:
+            return
+        self._prepared = True
+        await asyncio.gather(
+            *(self._prepare_one(i) for i in range(len(self._clients)))
+        )
+
+    async def _prepare_one(self, index: int) -> None:
+        client = self._clients[index]
+        if not client.username:
+            return
+        try:
+            await client.login()
+        except OpenSubtitlesError as exc:
+            from .logs import log
+
+            log("Search", "WARN", f"OpenSubtitles account {client.username}: {exc}")
+            return
+        left = client.remaining()
+        if left is not None:
+            self._left[index] = left
+
+    def remaining(self) -> int | None:
+        """Downloads left today across every account, or None when unknown."""
+        total = 0
+        known = False
+        for index, client in enumerate(self._clients):
+            left = self._left.get(index)
+            if left is None:
+                left = client.remaining()
+            if left is None:
+                continue
+            known = True
+            total += left
+        return total if known else None
+
+    def _search_client(self) -> "OpenSubtitlesClient":
+        for client in self._clients:
+            if client.logged_in:
+                return client
+        return self._clients[0]
+
+    async def search(self, **params) -> dict:
+        await self.prepare()
+        return await self._search_client().search(**params)
+
+    async def download(self, file_id, sub_format: str = "srt") -> dict:
+        """Download with the first account that still has quota for today."""
+        out_of_downloads = ""
+        for index, client in enumerate(self._clients):
+            try:
+                data = await client.download(file_id, sub_format)
+            except OpenSubtitlesQuotaError as exc:
+                out_of_downloads = str(exc)
+                self._left[index] = 0
+                if len(self._clients) > 1:
+                    from .logs import log
+
+                    log(
+                        "Search",
+                        "INFO",
+                        f"OpenSubtitles account {client.username or 'anonymous'} "
+                        "is out of downloads — trying the next account",
+                    )
+                continue
+            if isinstance(data.get("remaining"), int):
+                self._left[index] = data["remaining"]
+            return data
+        if len(self._clients) > 1:
+            raise OpenSubtitlesQuotaError(
+                "Every OpenSubtitles account is out of downloads for today. "
+                "Try again tomorrow, or add another account on the Settings page."
+            )
+        raise OpenSubtitlesQuotaError(
+            out_of_downloads
+            or "The OpenSubtitles download quota is used up for today."
+        )
+
+    async def test(self) -> list[dict]:
+        """Log in every account and return one entry per account.
+
+        A broken account does not hide the others; when every account fails the
+        first error is raised so the Settings page shows it.
+        """
+        if not any(c.username for c in self._clients):
+            await self._clients[0].test()
+            return [{"username": "", "anonymous": True, "user": {}}]
+        results: list[dict] = []
+        for client in self._clients:
+            entry: dict = {"username": client.username, "user": {}}
+            try:
+                entry["user"] = await client.login()
+            except OpenSubtitlesError as exc:
+                entry["error"] = str(exc)
+            results.append(entry)
+        if results and all(e.get("error") for e in results):
+            raise OpenSubtitlesError(results[0]["error"])
+        return results
+
+
 # ---- shared client ----------------------------------------------------------
 # One process-wide client (and HTTP connection pool) rebuilt when the
 # OpenSubtitles settings change, mirroring the shared Jellyfin client.
 
 _shared_http: httpx.AsyncClient | None = None
-_shared_client: "OpenSubtitlesClient | None" = None
-_shared_key: tuple[str, str, str] | None = None
+_shared_client: "OpenSubtitlesPool | None" = None
+_shared_key: tuple[str, tuple[tuple[str, str], ...]] | None = None
 
 
-def get_opensubtitles() -> "OpenSubtitlesClient":
+def get_opensubtitles() -> "OpenSubtitlesPool":
     global _shared_http, _shared_client, _shared_key
     from .config import config
 
-    key = (
-        config.settings.opensubtitles_api_key,
-        config.settings.opensubtitles_username,
-        config.settings.opensubtitles_password,
-    )
+    accounts = [
+        (a["username"], a["password"])
+        for a in config.settings.opensubtitles_accounts
+    ]
+    key = (config.settings.opensubtitles_api_key, tuple(accounts))
     if _shared_client is None or _shared_key != key:
         if _shared_http is None:
             # follow_redirects: the API answers a cold connection with a 301 to
             # the same URL (see OpenSubtitlesClient._use).
             _shared_http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
-        _shared_client = OpenSubtitlesClient(key[0], key[1], key[2], http=_shared_http)
+        _shared_client = OpenSubtitlesPool(
+            key[0],
+            [{"username": u, "password": p} for u, p in accounts],
+            http=_shared_http,
+        )
         _shared_key = key
     return _shared_client
 
