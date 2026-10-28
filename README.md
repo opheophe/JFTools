@@ -357,8 +357,10 @@ reason). The **Audio regex** box next to the Audio filter matches the track
 names, case-insensitively (`swe|nor`, `5\.1`, …).
 
 The **Tracks** pill on a row opens the track dialog. It lists the audio
-tracks, the embedded subtitle tracks and the external subtitle files. Toggle
-any number of rows with **Mark delete** / **Unmark**, use **Set default** to
+tracks, the embedded subtitle tracks and the external subtitle files, using
+the same audio names as the Audio column and each embedded subtitle's language
+and container title. Toggle any number of rows with **Mark delete** /
+**Unmark**, use **Set default** to
 choose at most one audio and one subtitle default, then press **Execute** — a
 success chime plays when it finishes.
 The track list scrolls on its own, so **Smart mark** and **Execute** stay

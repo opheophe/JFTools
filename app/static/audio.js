@@ -30,17 +30,6 @@ let audioSmartMark = [];
 let audioSmartMarkFiles = [];
 let audioDoneSound = null; // the Execute success chime, unlocked on click
 
-const AUDIO_CODECS = {
-  aac: "AAC", ac3: "AC3", eac3: "E-AC-3", dts: "DTS", truehd: "TrueHD",
-  flac: "FLAC", opus: "Opus", mp3: "MP3", vorbis: "Vorbis", alac: "ALAC",
-};
-
-function audioTech(t) {
-  const codec = AUDIO_CODECS[(t.codec || "").toLowerCase()] || (t.codec || "?").toUpperCase();
-  const layout = t.layout && t.layout !== "unknown" ? t.layout : "";
-  return [codec, layout].filter(Boolean).join(" ");
-}
-
 // The write routes check X-JFTools: 1 (the same header the subtitle dialog
 // sends); the generic postJSON helper does not.
 async function audioPost(url, body) {
@@ -74,13 +63,14 @@ function audioFind(tracks, index) {
 }
 
 function audioLabel(t, kind) {
-  if (kind === "audio") {
-    let label = t.lang || "Unknown";
-    if (t.title && !t.commentary) label += " — " + t.title;
-    return label;
+  // The server already builds the full label: language, container title and
+  // codec/layout for audio, or language and title for subtitles. Use it as-is
+  // so the Tracks rows show the same names as the Search Audio/Subtitles
+  // columns instead of a second, lossy reconstruction here.
+  const label = t.name || t.lang || "Unknown";
+  if (kind === "subtitle" && t.forced && !/forced/i.test(label)) {
+    return label + " (Forced)";
   }
-  let label = t.name || t.lang || "Unknown";
-  if (t.forced && !/forced/i.test(label)) label += " (Forced)";
   return label;
 }
 
@@ -172,16 +162,17 @@ function audioTrackRow(track, kind) {
   const label = audioLabel(track, kind);
   row.appendChild(el("span", { class: "subdl-name", text: label, title: label }));
 
-  if (kind === "audio" && track.commentary) {
+  if (kind === "audio" && track.commentary && !/commentary/i.test(label)) {
     row.appendChild(el("span", { class: "subdl-badge", text: "commentary" }));
   }
-  if (kind === "subtitle" && track.forced) {
+  if (kind === "subtitle" && track.forced && !/forced/i.test(label)) {
     row.appendChild(el("span", { class: "subdl-badge", text: "forced" }));
   }
-  row.appendChild(el("span", {
-    class: "muted",
-    text: kind === "audio" ? audioTech(track) : (track.codec || ""),
-  }));
+  if (kind !== "audio" && track.codec) {
+    // Audio names include the codec/layout; subtitle names do not. Keep the
+    // codec separate but parenthesised so it cannot run into the label.
+    row.appendChild(el("span", { class: "muted", text: "(" + track.codec + ")" }));
+  }
 
   const def = el("button", {
     type: "button",
