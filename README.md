@@ -348,9 +348,10 @@ external subtitles. It is combined with the selected subtitle filters.
 ## Tracks (audio and subtitles)
 
 The **Audio** column lists each file's embedded audio tracks as
-`English (E-AC-3 5.1), Swedish (AAC stereo)`; a trailing `*` marks the default
-track. The **Audio** filter offers **No track**, **Single track**,
-**Multi track**, **Not scanned** (not probed yet) and **Probe failed** (the path
+`English — RiffTrax (Opus stereo), Swedish (AAC stereo)`; the container title
+is included when present, and a trailing `*` marks the default track. The
+**Audio** filter offers **No track**, **Single track**, **Multi track**,
+**Not scanned** (not probed yet) and **Probe failed** (the path
 was unreachable, not a file, or ffprobe failed — the column names the exact
 reason). The **Audio regex** box next to the Audio filter matches the track
 names, case-insensitively (`swe|nor`, `5\.1`, …).

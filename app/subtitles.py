@@ -705,12 +705,29 @@ def _audio_layout(channels, layout) -> str:
 
 
 def _audio_line(track: dict) -> str:
-    """``English (E-AC-3 5.1)*`` — the star marks the default track."""
-    label = f"{track.get('lang') or 'Unknown'} ({_audio_codec_name(track.get('codec'))}"
+    """``English — RiffTrax (Opus stereo)*`` — the star marks the default.
+
+    The container title is the only place many releases put "RiffTrax",
+    "Unriffed feature" or "Commentary"; without it two audio tracks can look
+    identical in the Search Audio column.
+    """
+    lang = track.get("lang") or "Unknown"
+    title = (track.get("title") or "").strip()
+    label = lang
+    if title and title.casefold() != lang.casefold():
+        # Some files already put the language in the title
+        # ("English (RiffTrax)"); do not repeat it as "English — English ...".
+        prefix = title.casefold().startswith(lang.casefold())
+        boundary = len(title) == len(lang) or (
+            prefix and title[len(lang)] in " ([-–—:,/."
+        )
+        label = title if prefix and boundary else f"{lang} — {title}"
+    tech = _audio_codec_name(track.get("codec"))
     layout = _audio_layout(track.get("channels"), track.get("layout"))
     if layout:
-        label += " " + layout
-    label += ")"
+        tech += " " + layout
+    if tech:
+        label += f" ({tech})"
     if track.get("default"):
         label += "*"
     return label
@@ -733,17 +750,15 @@ def _refresh_subtitle_track(track: dict) -> dict:
 
 
 def _refresh_audio_track(track: dict) -> dict:
-    """Recompute a stored audio label from its saved ISO code."""
+    """Recompute a stored audio label from its saved code and title."""
     code = (track.get("code") or "").strip()
-    if not code:
-        return track
     lang = _subtitle_lang_name(code)
     if lang == "Unknown" and track.get("title"):
         lang = _language_from_text(track["title"]) or "Unknown"
-    if lang == track.get("lang"):
-        return track
     refreshed = {**track, "lang": lang}
     refreshed["name"] = _audio_line(refreshed)
+    if lang == track.get("lang") and refreshed["name"] == track.get("name"):
+        return track
     return refreshed
 
 

@@ -355,6 +355,30 @@ def test_scans_map_rebuilds_flags_with_current_preferences(monkeypatch):
     assert sub._state["files"]["/x.mkv"]["flags"]["acceptable"] is False
 
 
+def test_scans_map_refreshes_audio_names_from_cached_titles(monkeypatch):
+    import app.subtitles as sub
+
+    track = {
+        "index": 1, "lang": "English", "name": "English (Opus stereo)*",
+        "code": "eng", "title": "RiffTrax", "codec": "opus",
+        "channels": 2, "layout": "stereo", "default": True,
+    }
+    monkeypatch.setitem(sub._state, "files", {
+        "/x.mkv": {
+            "scanned": True,
+            "internal": [],
+            "external": [],
+            "audio": [track],
+        },
+    })
+
+    entry = sub.scans_map(["English"])["/x.mkv"]
+
+    assert entry["audio"][0]["name"] == "English — RiffTrax (Opus stereo)*"
+    # The refresh is for display only; the store is updated by the next scan.
+    assert sub._state["files"]["/x.mkv"]["audio"][0]["name"] == "English (Opus stereo)*"
+
+
 def test_load_state_marks_old_unknown_languages_for_one_reprobe(
     tmp_path, monkeypatch
 ):

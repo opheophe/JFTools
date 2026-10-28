@@ -32,6 +32,37 @@ def test_audio_line_uses_codec_and_layout():
     assert sub._audio_line(unknown) == "Unknown (WEIRDCODEC 4ch)"
 
 
+def test_audio_line_includes_container_title():
+    riff = {
+        "lang": "English", "title": "RiffTrax", "codec": "opus",
+        "channels": 2, "layout": "stereo", "default": True,
+    }
+    assert sub._audio_line(riff) == "English — RiffTrax (Opus stereo)*"
+
+    unriffed = {**riff, "title": "Unriffed feature", "default": False}
+    assert sub._audio_line(unriffed) == "English — Unriffed feature (Opus stereo)"
+
+    # Some releases repeat the language in the title.
+    prefixed = {**riff, "title": "English (RiffTrax)", "default": False}
+    assert sub._audio_line(prefixed) == "English (RiffTrax) (Opus stereo)"
+
+    same = {**riff, "title": "English", "default": False}
+    assert sub._audio_line(same) == "English (Opus stereo)"
+
+
+def test_refresh_audio_track_updates_the_cached_title():
+    track = {
+        "index": 1, "lang": "English", "name": "English (Opus stereo)*",
+        "code": "eng", "title": "RiffTrax", "codec": "opus",
+        "channels": 2, "layout": "stereo", "default": True,
+    }
+
+    refreshed = sub._refresh_audio_track(track)
+
+    assert refreshed["name"] == "English — RiffTrax (Opus stereo)*"
+    assert refreshed["title"] == "RiffTrax"
+
+
 # ---- probing ----------------------------------------------------------------
 
 
@@ -47,7 +78,7 @@ def test_probe_streams_collects_audio_and_subtitles_in_one_pass(monkeypatch):
             {
                 "index": 1, "codec_type": "audio", "codec_name": "eac3",
                 "channels": 6, "channel_layout": "5.1",
-                "tags": {"language": "eng", "title": "Surround"},
+                "tags": {"language": "eng", "title": "RiffTrax"},
                 "disposition": {"default": True},
             },
             {
@@ -70,10 +101,11 @@ def test_probe_streams_collects_audio_and_subtitles_in_one_pass(monkeypatch):
     assert err is None
     assert duration == 5400.5
     assert [t["name"] for t in tracks] == [
-        "English (E-AC-3 5.1)*",
+        "English — RiffTrax (E-AC-3 5.1)*",
         "Swedish (AAC stereo)",
     ]
     assert tracks[0]["index"] == 1 and tracks[0]["default"] is True
+    assert tracks[0]["title"] == "RiffTrax"
     assert tracks[1]["code"] == "swe"
     assert subs == [{
         "index": 3, "lang": "English", "name": "English",
