@@ -36,6 +36,12 @@ from fastapi import APIRouter, Depends, Form, Header, Request
 from fastapi.responses import JSONResponse
 
 from .config import config
+from .languages import (
+    language_code,
+    language_family,
+    language_name,
+    language_prefix_name,
+)
 from .logs import log
 from .paths import resolve_path
 from .web import require_login
@@ -45,6 +51,8 @@ router = APIRouter()
 _SCANS_FILE = config.data_dir / "scans.json"
 # The pre-audio store. Read once on upgrade, then kept on disk as a backup.
 _LEGACY_SUBS_FILE = config.data_dir / "subtitles.json"
+# Bumped when a scan-store change means cached language labels need a re-probe.
+_STORE_VERSION = 4
 
 # External subtitle file extensions.
 SUBTITLE_EXTENSIONS = {
@@ -55,89 +63,51 @@ SUBTITLE_EXTENSIONS = {
 # usable subtitle, but the Search filter can still list them as "Tiny".
 TINY_SUBTITLE_MAX_BYTES = 1024
 
-# Name tokens that carry no language information.
-_SUBTITLE_NOISE_TOKENS = {"forced", "sdh", "cc", "hi", "default", "full", "normal"}
+# Name tokens that carry no language information. File extensions and release
+# tags are here because Smart mark and external subtitle detection also read
+# filenames ("Movie.Unknown.srt", "Movie.English.DTS.srt"); without them the
+# ISO 639-3 codes "srt" (Sauri), "aac" (Ari) and "dts" (Toro So Dogon) would
+# look like languages.
+_SUBTITLE_NOISE_TOKENS = {
+    "forced", "sdh", "cc", "hi", "default", "full", "normal",
+    "srt", "ass", "ssa", "sub", "subs", "vtt", "sup", "idx", "sbv", "ttml",
+    "mkv", "mp4", "m4v", "avi", "mov", "txt",
+    "aac", "ac3", "eac3", "dts", "truehd", "atmos", "flac", "opus", "mp3",
+    "x264", "x265", "h264", "h265", "hevc", "av1", "avc",
+    "web", "web-dl", "webdl", "webrip", "bluray", "brrip", "bdrip",
+    "hdrip", "dvdrip", "remux", "uhd", "hdr", "dv", "sdr",
+    "repack", "proper", "extended", "uncut", "multi", "dual",
+    "ai", "dub", "dubbed", "subbed", "commentary",
+}
 
-# Language code/name -> display name. Unknown codes resolve to "Unknown" (which,
-# like Subber, counts as "acceptable").
-_LANG_NAMES = {
-    "en": "English", "eng": "English",
-    "sv": "Swedish", "swe": "Swedish",
-    "no": "Norwegian", "nb": "Norwegian", "nn": "Norwegian", "nor": "Norwegian",
-    "da": "Danish", "dan": "Danish",
-    "fi": "Finnish", "fin": "Finnish",
-    "de": "German", "deu": "German", "ger": "German",
-    "fr": "French", "fra": "French", "fre": "French",
-    "es": "Spanish", "spa": "Spanish",
-    "it": "Italian", "ita": "Italian",
-    "nl": "Dutch", "nld": "Dutch", "dut": "Dutch",
-    "pt": "Portuguese", "por": "Portuguese",
-    "pl": "Polish", "pol": "Polish",
-    "ru": "Russian", "rus": "Russian",
-    "ja": "Japanese", "jpn": "Japanese",
-    "zh": "Chinese", "zho": "Chinese", "chi": "Chinese",
-    "ko": "Korean", "kor": "Korean",
-    "ar": "Arabic", "ara": "Arabic",
-    "hi": "Hindi", "hin": "Hindi",
-    "tr": "Turkish", "tur": "Turkish",
-    "el": "Greek", "ell": "Greek", "gre": "Greek",
-    "cs": "Czech", "ces": "Czech", "cze": "Czech",
-    "hu": "Hungarian", "hun": "Hungarian",
-    "ro": "Romanian", "ron": "Romanian", "rum": "Romanian",
-    "bg": "Bulgarian", "bul": "Bulgarian",
-    "uk": "Ukrainian", "ukr": "Ukrainian",
-    "th": "Thai", "tha": "Thai",
-    "vi": "Vietnamese", "vie": "Vietnamese",
-    "id": "Indonesian", "ind": "Indonesian",
-    "he": "Hebrew", "heb": "Hebrew",
-    "fa": "Persian", "fas": "Persian", "per": "Persian",
-    "is": "Icelandic", "isl": "Icelandic", "ice": "Icelandic",
-    "sk": "Slovak", "slk": "Slovak", "slo": "Slovak",
-    "hr": "Croatian", "hrv": "Croatian",
-    "sr": "Serbian", "srp": "Serbian",
-    "sl": "Slovenian", "slv": "Slovenian",
-    "et": "Estonian", "est": "Estonian",
-    "lv": "Latvian", "lav": "Latvian",
-    "lt": "Lithuanian", "lit": "Lithuanian",
-    "ca": "Catalan", "cat": "Catalan",
-    "eu": "Basque", "eus": "Basque", "baq": "Basque",
-    "gl": "Galician", "glg": "Galician",
-    "kn": "Kannada", "kan": "Kannada",
-    "ml": "Malayalam", "mal": "Malayalam",
-    "ms": "Malay", "msa": "Malay", "may": "Malay",
-    "ta": "Tamil", "tam": "Tamil",
-    "te": "Telugu", "tel": "Telugu",
-}
-_FULL_LANG_NAMES = {
-    "english": "English", "swedish": "Swedish", "norwegian": "Norwegian",
-    "danish": "Danish", "finnish": "Finnish", "german": "German",
-    "french": "French", "spanish": "Spanish", "italian": "Italian",
-    "dutch": "Dutch", "portuguese": "Portuguese", "polish": "Polish",
-    "russian": "Russian", "japanese": "Japanese", "chinese": "Chinese",
-    "korean": "Korean", "arabic": "Arabic", "hindi": "Hindi",
-    "turkish": "Turkish", "greek": "Greek", "czech": "Czech",
-    "hungarian": "Hungarian", "romanian": "Romanian", "bulgarian": "Bulgarian",
-    "ukrainian": "Ukrainian", "thai": "Thai", "vietnamese": "Vietnamese",
-    "indonesian": "Indonesian", "hebrew": "Hebrew", "persian": "Persian",
-    "icelandic": "Icelandic",
-    "catalan": "Catalan", "catala": "Catalan", "català": "Catalan",
-    "basque": "Basque", "euskara": "Basque", "euskera": "Basque",
-    "galician": "Galician", "galego": "Galician", "gallego": "Galician",
-    "kannada": "Kannada", "ಕನ್ನಡ": "Kannada",
-    "malayalam": "Malayalam", "മലയാളം": "Malayalam",
-    "malay": "Malay", "melayu": "Malay",
-    "norsk": "Norwegian", "bokmal": "Norwegian", "bokmål": "Norwegian",
-    "nynorsk": "Norwegian",
-    "tamil": "Tamil", "தமிழ்": "Tamil",
-    "telugu": "Telugu", "తెలుగు": "Telugu",
-}
-# Canonical display name -> the shortest code we know. Used when the Settings
-# field accepts names ("Swedish") but OpenSubtitles expects codes ("sv").
-_LANG_CODES: dict[str, str] = {}
-for _code, _name in _LANG_NAMES.items():
-    _LANG_CODES.setdefault(_name, _code)
+# Language codes and names live in app/languages.py: the old hand-maintained
+# table only knew a few dozen codes, so ISO tags such as fil and nob (Filipino
+# and Norwegian Bokmål) fell through to "Unknown".
 
 # ---- persistence ------------------------------------------------------------
+
+
+def _has_unknown_language(entry: dict) -> bool:
+    """True when an entry cached a language the old table could not resolve.
+
+    Version 3 stored only the display label for embedded subtitles. A file
+    tagged ``fil`` or ``nob`` was written as ``Unknown`` and cannot be fixed by
+    reading the store again. Audio entries did keep their code, so only an
+    ``und``/unknown code there is left alone. External labels are re-read from
+    filenames on the next normal scan and are not worth an ffprobe by themselves.
+    """
+    for key in ("internal", "audio"):
+        for track in entry.get(key) or []:
+            if not isinstance(track, dict):
+                continue
+            if (track.get("lang") or "").strip() != "Unknown":
+                continue
+            code = (track.get("code") or "").strip()
+            if key == "internal" and not code:
+                return True
+            if code and language_name(code) != "Unknown":
+                return True
+    return False
 
 
 def _load_state() -> dict:
@@ -160,11 +130,23 @@ def _load_state() -> dict:
     files = data.get("files")
     if not isinstance(files, dict):
         files = {}
+    stored_version = data.get("version")
+    if not isinstance(stored_version, int):
+        stored_version = 0
     for entry in files.values():
-        if isinstance(entry, dict):
-            entry.setdefault("audio", [])
-            # Dropped when audio joined the one scan engine.
-            entry.pop("audio_scanned", None)
+        if not isinstance(entry, dict):
+            continue
+        entry.setdefault("audio", [])
+        # Dropped when audio joined the one scan engine.
+        entry.pop("audio_scanned", None)
+        if (
+            stored_version < _STORE_VERSION
+            and entry.get("scanned")
+            and not entry.get("folder")
+            and _has_unknown_language(entry)
+        ):
+            # The next scan re-probes this file and stores the real label.
+            entry["scanned"] = False
     ok = data.get("ok")
     if not isinstance(ok, list):
         ok = []
@@ -179,7 +161,7 @@ def _load_state() -> dict:
 
 def _save_state() -> None:
     payload = {
-        "version": 3,
+        "version": _STORE_VERSION,
         "full_scan_at": _state["full_scan_at"],
         "change_scan_at": _state["change_scan_at"],
         "files": _state["files"],
@@ -223,14 +205,23 @@ def scans_map(preferred: list[str] | None = None) -> dict:
         return files
     out: dict = {}
     for path, entry in files.items():
-        if entry.get("scanned") and not entry.get("folder"):
+        if not entry.get("scanned"):
+            # A re-probe is pending. Do not show the previous scan's subtitle
+            # lines or flags as if they were current ("Not scanned" is enough).
+            if entry.get("subs") or entry.get("flags"):
+                entry = {**entry, "subs": [], "flags": None}
+        elif not entry.get("folder"):
+            internal = [
+                _refresh_subtitle_track(t) for t in (entry.get("internal") or [])
+            ]
+            audio = [_refresh_audio_track(t) for t in (entry.get("audio") or [])]
+            external = entry.get("external") or []
             entry = {
                 **entry,
-                "flags": _classify_tracks(
-                    entry.get("internal") or [],
-                    entry.get("external") or [],
-                    preferred,
-                ),
+                "internal": internal,
+                "audio": audio,
+                "flags": _classify_tracks(internal, external, preferred),
+                "subs": _display_lines(internal, external),
             }
         out[path] = entry
     return out
@@ -272,16 +263,32 @@ def set_ok(path: str, marked: bool) -> None:
 
 
 def _subtitle_lang_name(code: str) -> str:
-    c = (code or "").strip().lower()
-    if not c or c == "und":
-        return "Unknown"
-    return _LANG_NAMES.get(c) or _FULL_LANG_NAMES.get(c) or "Unknown"
+    """Resolve an ISO code, full name, or BCP 47 tag to a display name."""
+    return language_name(code)
 
 
 def _language_token(value: str) -> str:
     """One language token, lowercased and stripped of a region suffix."""
     token = re.split(r"[-_]", (value or "").strip(), maxsplit=1)[0].lower()
     return re.sub(r"[^a-z0-9]", "", token)
+
+
+def _language_parts(raw: str) -> list[str]:
+    """Split a Settings value without breaking multi-word language names.
+
+    ``"English, Swedish"`` and ``"en,sv"`` both become one part per language,
+    but ``"Norwegian Bokmål"`` stays whole instead of turning into two codes.
+    """
+    parts: list[str] = []
+    for chunk in re.split(r"[,;]+", raw or ""):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if _subtitle_lang_name(chunk) != "Unknown":
+            parts.append(chunk)
+        else:
+            parts.extend(p for p in re.split(r"\s+", chunk) if p)
+    return parts
 
 
 def normalize_language_codes(raw: str) -> str:
@@ -292,14 +299,9 @@ def normalize_language_codes(raw: str) -> str:
     as-is so a code we do not know still reaches the search API.
     """
     codes: list[str] = []
-    for part in re.split(r"[\s,;]+", (raw or "").strip()):
-        token = _language_token(part)
-        if not token:
-            continue
-        name = _LANG_NAMES.get(token) or _FULL_LANG_NAMES.get(token)
-        code = _LANG_CODES.get(name) if name else None
-        code = code or token
-        if code not in codes:
+    for part in _language_parts(raw):
+        code = language_code(part) or _language_token(part)
+        if code and code not in codes:
             codes.append(code)
     return ",".join(codes)
 
@@ -311,10 +313,9 @@ def preferred_language_names(raw: str | None = None) -> list[str]:
     if not (raw or "").strip():
         raw = "en"
     names: list[str] = []
-    for part in re.split(r"[\s,;]+", (raw or "").strip()):
-        token = _language_token(part)
-        name = _LANG_NAMES.get(token) or _FULL_LANG_NAMES.get(token)
-        if name and name not in names:
+    for part in _language_parts(raw):
+        name = _subtitle_lang_name(part)
+        if name != "Unknown" and name not in names:
             names.append(name)
     return names
 
@@ -344,30 +345,65 @@ def _language_from_text(text: str) -> str:
     it is the sole meaningful token, so titles like "No" do not turn into
     Norwegian by accident."""
     lowered = (text or "").lower()
+    plain = " ".join(_text_tokens(lowered))
     # Two-word names whose first word alone would point at the wrong language:
     # "Bahasa Melayu" is Malay, "Bahasa Indonesia" is Indonesian.
     if "melayu" in lowered:
         return "Malay"
-    if "bahasa indonesia" in lowered or "indonesia" in lowered or "indonesian" in lowered:
+    if "bahasa indonesia" in plain or "indonesia" in lowered or "indonesian" in lowered:
         return "Indonesian"
+    # Keep the dialect when the title says it, instead of collapsing both to
+    # the generic "Norwegian" via the first token. ``plain`` also matches
+    # titles such as "Norwegian (Bokmål)".
+    if (
+        "norsk bokmål" in plain
+        or "norsk bokmal" in plain
+        or "norwegian bokmål" in plain
+        or "norwegian bokmal" in plain
+    ):
+        return "Norwegian Bokmål"
+    if "nynorsk" in plain:
+        return "Norwegian Nynorsk"
     tokens = [
-        t for t in _text_tokens(lowered)
+        t for t in plain.split()
         if t not in _SUBTITLE_NOISE_TOKENS and t != "unknown"
     ]
     for token in tokens:
         if len(token) < 3:
             continue
-        name = _LANG_NAMES.get(token) or _FULL_LANG_NAMES.get(token)
-        if name:
+        name = _subtitle_lang_name(token)
+        if name != "Unknown":
             return name
-        for full, full_name in _FULL_LANG_NAMES.items():
-            if token.startswith(full):
-                rest = token[len(full):]
-                if not rest or rest in _SUBTITLE_NOISE_TOKENS:
-                    return full_name
+        # A title like "English SDH" or "Catalan forced" runs the language and
+        # the noise token together after filename punctuation is stripped.
+        for end in range(3, len(token)):
+            name = language_prefix_name(token[:end])
+            if name == "Unknown":
+                continue
+            rest = token[end:]
+            if not rest or rest in _SUBTITLE_NOISE_TOKENS:
+                return name
     if len(tokens) == 1 and len(tokens[0]) == 2:
-        return _LANG_NAMES.get(tokens[0], "")
+        name = _subtitle_lang_name(tokens[0])
+        return "" if name == "Unknown" else name
     return ""
+
+
+def _subtitle_label(code: str, title: str = "") -> tuple[str, str]:
+    """``(lang, display name)`` for an embedded subtitle stream.
+
+    The container tag wins. When it is missing or ``und``, a title such as
+    ``English SDH`` is still useful, so use it as a fallback and display the
+    title as-is instead of repeating the language twice.
+    """
+    lang = _subtitle_lang_name(code)
+    title = (title or "").strip()
+    if lang == "Unknown" and title:
+        derived = _language_from_text(title)
+        if derived:
+            return derived, title
+    name = lang if (not title or title.lower() == lang.lower()) else f"{lang} ({title})"
+    return lang, name
 
 
 def smart_subtitle_marks(
@@ -384,7 +420,7 @@ def smart_subtitle_marks(
     preferred = preferred_language_names(raw)
     if not preferred:
         return [], []
-    wanted = set(preferred)
+    wanted = {language_family(name) for name in preferred}
     marks: list[int] = []
     for track in subtitles:
         index = track.get("index")
@@ -396,7 +432,7 @@ def smart_subtitle_marks(
         lang = track.get("lang") or "Unknown"
         if lang == "Unknown":
             lang = _language_from_text(str(track.get("name") or ""))
-        if lang and lang != "Unknown" and lang not in wanted:
+        if lang and lang != "Unknown" and language_family(lang) not in wanted:
             marks.append(index)
     return marks, preferred
 
@@ -408,7 +444,7 @@ def external_smart_marks(external: list[dict], preferred: list[str]) -> list[str
     every file whose language is not preferred. A file whose language could
     not be read is left alone unless its name says otherwise.
     """
-    wanted = set(preferred)
+    wanted = {language_family(name) for name in preferred}
     marks: list[str] = []
     for entry in external:
         if entry.get("forced"):
@@ -417,7 +453,7 @@ def external_smart_marks(external: list[dict], preferred: list[str]) -> list[str
         lang = entry.get("lang") or "Unknown"
         if lang == "Unknown":
             lang = _language_from_text(entry["file"])
-        if lang and lang != "Unknown" and lang not in wanted:
+        if lang and lang != "Unknown" and language_family(lang) not in wanted:
             marks.append(entry["file"])
     return marks
 
@@ -449,7 +485,7 @@ def _classify_tracks(
     """
     if preferred is None:
         preferred = preferred_language_names()
-    wanted = set(preferred)
+    wanted = {language_family(name) for name in preferred}
 
     tracks: list[dict] = []
     for t in internal:
@@ -468,11 +504,12 @@ def _classify_tracks(
         })
 
     normal = [t for t in tracks if not t["forced"] and not t["tiny"]]
-    preferred_normal = [t for t in normal if t["lang"] in wanted]
+    preferred_normal = [t for t in normal if language_family(t["lang"]) in wanted]
     return {
-        "preferred": any(t["lang"] in wanted for t in tracks),
+        "preferred": any(language_family(t["lang"]) in wanted for t in tracks),
         "foreign": any(
-            t["lang"] not in wanted and t["lang"] != "Unknown" for t in tracks
+            language_family(t["lang"]) not in wanted and t["lang"] != "Unknown"
+            for t in tracks
         ),
         "unknown": any(t["lang"] == "Unknown" for t in tracks),
         "unknown_normal": any(t["lang"] == "Unknown" for t in normal),
@@ -579,7 +616,8 @@ def _external_signature(external: list[dict] | None) -> list[tuple]:
 def _display_lines(internal: list[dict], external: list[dict]) -> list[str]:
     lines = []
     for t in internal:
-        line = t["name"] + (" (Forced)" if t.get("forced") else "")
+        name = t.get("name") or t.get("lang") or "Unknown"
+        line = name + (" (Forced)" if t.get("forced") else "")
         lines.append(line)
     for e in external:
         star = "*" if e.get("tiny") else ""
@@ -678,6 +716,37 @@ def _audio_line(track: dict) -> str:
     return label
 
 
+def _refresh_subtitle_track(track: dict) -> dict:
+    """Recompute a stored subtitle label from its saved ISO code.
+
+    Entries written before version 4 have no ``code``; the load-time migration
+    marks those for a re-probe. Entries with a code get future table fixes for
+    free, without another ffprobe.
+    """
+    code = (track.get("code") or "").strip()
+    if not code:
+        return track
+    lang, name = _subtitle_label(code, track.get("title") or "")
+    if lang == track.get("lang") and name == track.get("name"):
+        return track
+    return {**track, "lang": lang, "name": name}
+
+
+def _refresh_audio_track(track: dict) -> dict:
+    """Recompute a stored audio label from its saved ISO code."""
+    code = (track.get("code") or "").strip()
+    if not code:
+        return track
+    lang = _subtitle_lang_name(code)
+    if lang == "Unknown" and track.get("title"):
+        lang = _language_from_text(track["title"]) or "Unknown"
+    if lang == track.get("lang"):
+        return track
+    refreshed = {**track, "lang": lang}
+    refreshed["name"] = _audio_line(refreshed)
+    return refreshed
+
+
 # ---- ffprobe -----------------------------------------------------------------
 
 
@@ -726,9 +795,9 @@ def _probe_streams(
         tags = s.get("tags") or {}
         disposition = s.get("disposition") or {}
         if kind == "subtitle":
-            lang = _subtitle_lang_name(tags.get("language"))
+            code = (tags.get("language") or "").strip().lower()
             title = (tags.get("title") or "").strip()
-            name = lang if (not title or title.lower() == lang.lower()) else f"{lang} ({title})"
+            lang, name = _subtitle_label(code, title)
             forced = bool(disposition.get("forced")) or "forced" in title.lower()
             internal.append({
                 # The absolute stream index, so the player can map this track
@@ -736,6 +805,8 @@ def _probe_streams(
                 "index": s.get("index"),
                 "lang": lang,
                 "name": name,
+                "code": code,
+                "title": title,
                 "forced": forced,
                 "default": bool(disposition.get("default")),
                 "codec": s.get("codec_name") or "",
@@ -746,9 +817,12 @@ def _probe_streams(
         elif kind == "audio":
             code = (tags.get("language") or "").strip().lower()
             title = (tags.get("title") or "").strip()
+            lang = _subtitle_lang_name(code)
+            if lang == "Unknown" and title:
+                lang = _language_from_text(title) or "Unknown"
             track = {
                 "index": s.get("index"),
-                "lang": _subtitle_lang_name(code),
+                "lang": lang,
                 "code": code,
                 "title": title,
                 "codec": s.get("codec_name") or "",
@@ -904,6 +978,8 @@ def _probe_one(ffprobe: str, key: str, local: str, st) -> tuple[str, dict]:
             "index": t.get("index"),
             "lang": t["lang"],
             "name": t["name"],
+            "code": t.get("code") or "",
+            "title": t.get("title") or "",
             "forced": t["forced"],
             "default": bool(t.get("default")),
             "codec": t["codec"],
@@ -1173,8 +1249,9 @@ async def subtitle_tracks_for(path: str) -> tuple[list[dict], list[dict]]:
     otherwise from a one-off ffprobe. External tracks are the subtitle files
     sitting next to the video. Shared by the subtitle dialog and the player.
     """
-    stored = (_state["files"].get(path) or {}).get("internal")
-    internal = list(stored or [])
+    entry = _state["files"].get(path) or {}
+    stored = entry.get("internal") if entry.get("scanned") else None
+    internal = [_refresh_subtitle_track(t) for t in (stored or [])]
 
     external: list[dict] = []
     local = resolve_path(path, config.settings.path_maps)
@@ -1208,7 +1285,7 @@ async def audio_tracks_for(path: str, force: bool = False) -> tuple[list[dict], 
     """
     entry = _state["files"].get(path) or {}
     if not force and entry.get("scanned"):
-        return list(entry.get("audio") or []), None
+        return [_refresh_audio_track(t) for t in (entry.get("audio") or [])], None
     fresh = await rescan_one(path)
     return list(fresh.get("audio") or []), fresh.get("error")
 
@@ -1226,8 +1303,8 @@ async def internal_tracks_for(
     entry = _state["files"].get(path) or {}
     if not force and entry.get("scanned"):
         return (
-            list(entry.get("internal") or []),
-            list(entry.get("audio") or []),
+            [_refresh_subtitle_track(t) for t in (entry.get("internal") or [])],
+            [_refresh_audio_track(t) for t in (entry.get("audio") or [])],
             None,
         )
     fresh = await rescan_one(path)

@@ -1,5 +1,6 @@
 """Tests for the subtitle-scan classification and store helpers."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -36,6 +37,14 @@ def _ext(lang="English", forced=False, ai=False, tiny=False, file="x.srt"):
         ("eng", "English"),
         ("english", "English"),
         ("swe", "Swedish"),
+        ("fil", "Filipino"),
+        ("tgl", "Tagalog"),
+        ("nb", "Norwegian Bokmål"),
+        ("nob", "Norwegian Bokmål"),
+        ("nn", "Norwegian Nynorsk"),
+        ("nno", "Norwegian Nynorsk"),
+        ("no", "Norwegian"),
+        ("nor", "Norwegian"),
         ("und", "Unknown"),
         ("xyz", "Unknown"),
         ("", "Unknown"),
@@ -55,6 +64,8 @@ def test_normalize_language_codes_accepts_codes_names_and_regions():
     assert normalize_language_codes("eng swe") == "en,sv"
     assert normalize_language_codes("en-US, sv_SE") == "en,sv"
     assert normalize_language_codes("English, English") == "en"
+    assert normalize_language_codes("Filipino, Norwegian Bokmål") == "fil,nb"
+    assert normalize_language_codes("nob, nno, tgl") == "nb,nn,tl"
 
 
 def test_preferred_language_names_maps_codes_and_names():
@@ -62,6 +73,8 @@ def test_preferred_language_names_maps_codes_and_names():
     assert preferred_language_names("English, Swedish") == ["English", "Swedish"]
     assert preferred_language_names("") == ["English"]
     assert preferred_language_names("nonsense") == []
+    assert preferred_language_names("fil,nb") == ["Filipino", "Norwegian Bokmål"]
+    assert preferred_language_names("Norwegian Nynorsk") == ["Norwegian Nynorsk"]
 
 
 def test_smart_mark_marks_non_preferred_but_leaves_unknown_alone():
@@ -119,7 +132,9 @@ def test_smart_mark_defaults_to_english_without_a_setting():
         ("Unknown (ಕನ್ನಡ)", "Kannada"),
         ("Unknown (മലയാളം)", "Malayalam"),
         ("Unknown (Bahasa Melayu)", "Malay"),
-        ("Unknown (Norsk Bokmål)", "Norwegian"),
+        ("Unknown (Norsk Bokmål)", "Norwegian Bokmål"),
+        ("Unknown (Norwegian (Bokmål))", "Norwegian Bokmål"),
+        ("Unknown (Nynorsk)", "Norwegian Nynorsk"),
         ("Unknown (தமிழ்)", "Tamil"),
         ("Unknown (తెలుగు)", "Telugu"),
         ("Catalan", "Catalan"),
@@ -226,6 +241,18 @@ def test_classify_forced_not_acceptable():
     assert flags["preferred"] is True
 
 
+def test_classify_norwegian_family_matches_all_variants():
+    for lang in ("Norwegian", "Norwegian Bokmål", "Norwegian Nynorsk"):
+        flags = _classify_tracks([_int(lang)], [], ["Norwegian"])
+        assert flags["acceptable"] is True
+        assert flags["preferred"] is True
+
+
+def test_classify_filipino_and_tagalog_share_a_family():
+    assert _classify_tracks([_int("Filipino")], [], ["Tagalog"])["acceptable"] is True
+    assert _classify_tracks([_int("Tagalog")], [], ["Filipino"])["acceptable"] is True
+
+
 def test_classify_foreign():
     flags = _classify_tracks([], [_ext("French")], PREFERRED)
     assert flags["foreign"] is True
@@ -328,6 +355,101 @@ def test_scans_map_rebuilds_flags_with_current_preferences(monkeypatch):
     assert sub._state["files"]["/x.mkv"]["flags"]["acceptable"] is False
 
 
+def test_load_state_marks_old_unknown_languages_for_one_reprobe(
+    tmp_path, monkeypatch
+):
+    import app.subtitles as sub
+
+    store = {
+        "version": 3,
+        "files": {
+            "/new-code.mkv": {
+                "scanned": True,
+                "internal": [{"lang": "Unknown", "code": "fil"}],
+                "audio": [],
+                "external": [],
+            },
+            "/old-no-code.mkv": {
+                "scanned": True,
+                "internal": [{"lang": "Unknown"}],
+                "audio": [],
+                "external": [],
+            },
+            "/genuinely-und.mkv": {
+                "scanned": True,
+                "internal": [{"lang": "Unknown", "code": "und"}],
+                "audio": [],
+                "external": [],
+            },
+            "/audio-fil.mkv": {
+                "scanned": True,
+                "internal": [],
+                "audio": [{"lang": "Unknown", "code": "fil"}],
+                "external": [],
+            },
+            "/already-good.mkv": {
+                "scanned": True,
+                "internal": [{"lang": "English", "code": "eng"}],
+                "audio": [],
+                "external": [],
+            },
+        },
+    }
+    scans = tmp_path / "scans.json"
+    scans.write_text(json.dumps(store), encoding="utf-8")
+    monkeypatch.setattr(sub, "_SCANS_FILE", scans)
+
+    state = sub._load_state()["files"]
+
+    assert state["/new-code.mkv"]["scanned"] is False
+    assert state["/old-no-code.mkv"]["scanned"] is False
+    assert state["/audio-fil.mkv"]["scanned"] is False
+    assert state["/genuinely-und.mkv"]["scanned"] is True
+    assert state["/already-good.mkv"]["scanned"] is True
+
+
+def test_load_state_does_not_reprobe_after_version_four(tmp_path, monkeypatch):
+    import app.subtitles as sub
+
+    scans = tmp_path / "scans.json"
+    scans.write_text(
+        json.dumps({
+            "version": 4,
+            "files": {
+                "/x.mkv": {
+                    "scanned": True,
+                    "internal": [{"lang": "Unknown", "code": "und"}],
+                    "audio": [],
+                    "external": [],
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sub, "_SCANS_FILE", scans)
+
+    assert sub._load_state()["files"]["/x.mkv"]["scanned"] is True
+
+
+def test_scans_map_hides_stale_lines_for_unscanned_entries(monkeypatch):
+    import app.subtitles as sub
+
+    monkeypatch.setitem(sub._state, "files", {
+        "/x.mkv": {
+            "scanned": False,
+            "internal": [{"lang": "Unknown", "name": "Unknown"}],
+            "external": [],
+            "subs": ["Unknown"],
+            "flags": {"unknown": True},
+        },
+    })
+
+    entry = sub.scans_map(["English"])["/x.mkv"]
+
+    assert entry["subs"] == []
+    assert entry["flags"] is None
+
+
 # ---- external subtitle detection -------------------------------------------
 
 
@@ -357,6 +479,21 @@ def test_external_subtitles(tmp_path):
     assert entries["Movie (2020).forced.srt"]["forced"] is True
     assert entries["Movie (2020).sv.srt"]["lang"] == "Swedish"
     assert entries["Movie (2020).tiny.srt"]["tiny"] is True
+
+
+def test_external_subtitles_ignore_codec_tokens(tmp_path):
+    movie = tmp_path / "Movie.mkv"
+    movie.write_bytes(b"")
+    (tmp_path / "Movie.English.DTS.srt").write_bytes(b"x" * 2000)
+    (tmp_path / "Movie.aac.srt").write_bytes(b"x" * 2000)
+
+    entries = {e["file"]: e for e in _external_subtitles(str(movie))}
+
+    # The last token is an audio codec, not the ISO 639-3 code for Toro So
+    # Dogon; keep looking and find the real language.
+    assert entries["Movie.English.DTS.srt"]["lang"] == "English"
+    # "aac" is the ISO 639-3 code for Ari, but in a filename it is a codec.
+    assert entries["Movie.aac.srt"]["lang"] == "Unknown"
 
 
 # ---- reconcile --------------------------------------------------------------

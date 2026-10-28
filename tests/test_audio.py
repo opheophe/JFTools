@@ -77,9 +77,43 @@ def test_probe_streams_collects_audio_and_subtitles_in_one_pass(monkeypatch):
     assert tracks[1]["code"] == "swe"
     assert subs == [{
         "index": 3, "lang": "English", "name": "English",
+        "code": "eng", "title": "",
         "forced": True, "default": False, "codec": "subrip",
         "disposition": {"forced": True},
     }]
+
+
+def test_probe_streams_labels_filipino_and_norwegian_variants(monkeypatch):
+    _fake_ffprobe(monkeypatch, {
+        "streams": [
+            {
+                "index": 1, "codec_type": "subtitle", "codec_name": "subrip",
+                "tags": {"language": "fil"}, "disposition": {},
+            },
+            {
+                "index": 2, "codec_type": "subtitle", "codec_name": "subrip",
+                "tags": {"language": "nob"}, "disposition": {},
+            },
+            {
+                "index": 3, "codec_type": "subtitle", "codec_name": "subrip",
+                "tags": {"language": "nno"}, "disposition": {},
+            },
+            {
+                "index": 4, "codec_type": "subtitle", "codec_name": "subrip",
+                "tags": {"language": "tl"}, "disposition": {},
+            },
+        ],
+    })
+
+    subs, _tracks, _duration, err = sub._probe_streams("ffprobe", "movie.mkv")
+
+    assert err is None
+    assert [(t["code"], t["lang"], t["name"]) for t in subs] == [
+        ("fil", "Filipino", "Filipino"),
+        ("nob", "Norwegian Bokmål", "Norwegian Bokmål"),
+        ("nno", "Norwegian Nynorsk", "Norwegian Nynorsk"),
+        ("tl", "Tagalog", "Tagalog"),
+    ]
 
 
 def test_probe_streams_reads_the_subtitle_default_flag(monkeypatch):
@@ -764,6 +798,7 @@ def test_probe_one_stores_subtitle_default_and_drops_dispositions(
 
     assert entry["internal"] == [{
         "index": 3, "lang": "English", "name": "English",
+        "code": "", "title": "",
         "forced": True, "default": True, "codec": "subrip",
     }]
     assert "disposition" not in entry["audio"][0]

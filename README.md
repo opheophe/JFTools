@@ -154,7 +154,7 @@ values.
 | `JFTOOLS_PATH_MAP` | Optional. Semicolon-separated `from=to` path mappings, e.g. `/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`. Maps Jellyfin's container paths to paths this machine can open. Also editable in-app (Settings → Media paths). |
 | `JFTOOLS_OPENSUBTITLES_API_KEY` | Optional. OpenSubtitles API key (opensubtitles.com → Consumers) used by subtitle search/download. Also editable in-app. |
 | `JFTOOLS_OPENSUBTITLES_USERNAME` / `JFTOOLS_OPENSUBTITLES_PASSWORD` | Optional. The first OpenSubtitles account — raises the daily download quota. More accounts can be added in-app (Settings → OpenSubtitles); accounts are used in order. |
-| `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Preferred subtitle languages, e.g. `en,sv` (default `en`). Used by OpenSubtitles searches and the Tracks dialog's Smart mark. |
+| `JFTOOLS_OPENSUBTITLES_LANGUAGES` | Preferred subtitle languages, e.g. `en,sv` or `English, Norwegian Bokmål` (default `en`). Used by OpenSubtitles searches and the Tracks dialog's Smart mark. |
 | `PUID` / `PGID` | Container user/group that owns the data files. Set in `docker-compose.yml`. |
 | `JFTOOLS_HOST` / `JFTOOLS_PORT` | Bind address/port for `run.bat` locally; the container always listens on `8099`. |
 
@@ -367,8 +367,10 @@ subtitle marks with every track or file outside your preferred languages
 label, so with English preferred, `English SDH`, `En SDH` and `En` all stay
 unmarked; French, `fr`, Czech and similar tracks are marked. A track whose
 language tag is missing is read from its title — `Unknown (Català)` is
-Catalan, `Unknown (Euskara)` Basque, `Unknown (Norsk Bokmål)` Norwegian, and
-the same for Galego, ಕನ್ನಡ, മലയാളം, Bahasa Melayu, தமிழ் and తెలుగు.
+Catalan, `Unknown (Euskara)` Basque, `Unknown (Norsk Bokmål)` Norwegian Bokmål,
+and the same for Galego, ಕನ್ನಡ, മലയാളം, Bahasa Melayu, தமிழ் and తెలుగు.
+Embedded tags use the full ISO 639 table, so `fil` is Filipino and `nob` is
+Norwegian Bokmål instead of Unknown.
 **Forced** tracks are marked too, including English forced, because a full
 subtitle track normally makes the forced one redundant. Tracks whose language
 is **Unknown** are left unmarked unless they are forced, and Smart mark never

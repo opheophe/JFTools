@@ -246,7 +246,7 @@ async def test_tracks_list_embedded_and_external(logged_in, media_root, monkeypa
     async def fake_tracks(path):
         return (
             [
-                {"index": 3, "lang": "Swedish", "name": "Swedish", "forced": False, "codec": "subrip"},
+                {"index": 3, "lang": "Swedish", "name": "Swedish", "forced": False, "codec": "subrip", "code": "swe"},
                 {"index": 4, "lang": "English", "name": "English", "forced": False, "codec": "hdmv_pgs_subtitle"},
             ],
             [{"file": "movie.en.srt", "lang": "English", "forced": False, "ai": False, "size": 40}],
@@ -266,6 +266,10 @@ async def test_tracks_list_embedded_and_external(logged_in, media_root, monkeypa
     assert data["tracks"][1]["playable"] is False
     assert data["tracks"][2]["playable"] is True
     assert data["tracks"][2]["label"] == "English — movie.en.srt"
+    # BCP 47 codes for <track srclang>, including the 639-2 -> 639-1 mapping.
+    assert data["tracks"][0]["code"] == "sv"
+    assert data["tracks"][1]["code"] == "en"
+    assert data["tracks"][2]["code"] == "en"
     # The English .srt is what should be showing when the window opens.
     assert data["tracks"][2].get("default") is True
     assert "default" not in data["tracks"][0]

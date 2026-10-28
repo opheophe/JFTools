@@ -212,7 +212,7 @@ function plBuildTrackSelect(list) {
     const track = plEl("track", {
       kind: "subtitles",
       label: t.label,
-      srclang: (t.lang && t.lang.length <= 3) ? t.lang.toLowerCase() : "und",
+      srclang: t.code || "und",
     });
     track.addEventListener("cuechange", plRenderCues);
     track.addEventListener("load", () => plNoteCues(i));

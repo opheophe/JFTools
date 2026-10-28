@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from .config import config
 from .files import _resolve, browser_roots
+from .languages import language_code
 from .logs import log
 from .subtitles import (
     _external_subtitles,
@@ -773,6 +774,8 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
             "kind": "internal",
             "label": label,
             "lang": t.get("lang") or "",
+            "code": language_code(t.get("code") or "")
+            or language_code(t.get("lang") or ""),
             "codec": codec,
             "forced": bool(t.get("forced")),
             "playable": playable,
@@ -802,6 +805,7 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
             "label": label,
             "file": e["file"],
             "lang": e.get("lang") or "",
+            "code": language_code(e.get("lang") or ""),
             "codec": codec,
             "forced": bool(e.get("forced")),
             "playable": playable,

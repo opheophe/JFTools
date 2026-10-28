@@ -16,7 +16,10 @@
 // their own data by assigning `window.subdlRefresh`.
 
 const SUBFIND_LANG_NAMES = {
-  en: "English", sv: "Swedish", no: "Norwegian", nb: "Norwegian", nn: "Norwegian",
+  en: "English", sv: "Swedish",
+  no: "Norwegian", nor: "Norwegian",
+  nb: "Norwegian Bokmål", nob: "Norwegian Bokmål",
+  nn: "Norwegian Nynorsk", nno: "Norwegian Nynorsk",
   da: "Danish", fi: "Finnish", de: "German", fr: "French", es: "Spanish",
   it: "Italian", nl: "Dutch", pt: "Portuguese", pl: "Polish", ru: "Russian",
   ja: "Japanese", zh: "Chinese", ko: "Korean", ar: "Arabic", hi: "Hindi",
@@ -24,6 +27,7 @@ const SUBFIND_LANG_NAMES = {
   bg: "Bulgarian", uk: "Ukrainian", th: "Thai", vi: "Vietnamese", id: "Indonesian",
   he: "Hebrew", fa: "Persian", is: "Icelandic", sk: "Slovak", hr: "Croatian",
   sr: "Serbian", sl: "Slovenian", et: "Estonian", lv: "Latvian", lt: "Lithuanian",
+  fil: "Filipino", tl: "Tagalog", tgl: "Tagalog",
   und: "Unknown",
 };
 
