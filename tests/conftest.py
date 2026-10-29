@@ -32,3 +32,12 @@ def _keep_test_writes_out_of_the_scan_store(tmp_path, monkeypatch):
     # The in-memory state came from the real store at import; never let an
     # unpatched save treat it as a migration and unlink anything.
     monkeypatch.setitem(subtitles._state, "legacy", False)
+
+
+@pytest.fixture(autouse=True)
+def _keep_test_notifications_out_of_the_app(tmp_path, monkeypatch):
+    """Point the durable notification store at a throwaway file."""
+    from app import notifications
+
+    monkeypatch.setattr(notifications, "_STORE_FILE", tmp_path / "notifications.json")
+    notifications._reset_for_tests()

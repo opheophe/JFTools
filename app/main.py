@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import backup
+from . import backup, notifications
 from .about import check_for_updates, router as about_router
 from .audio import router as audio_router
 from .auth import clear_failures, is_locked, is_local_ip, record_failure, verify_credentials
@@ -23,6 +23,7 @@ from .jellyfin_id import migrate_cached_series, router as jellyfin_id_router
 from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .media import router as media_router
+from .notifications import router as notifications_router
 from .paths import resolve_path
 from .player import prune_play_cache, router as player_router
 from .remotesync import run_import
@@ -132,6 +133,7 @@ app.include_router(jellyfin_id_router)
 app.include_router(libraries_router)
 app.include_router(logs_router)
 app.include_router(media_router)
+app.include_router(notifications_router)
 app.include_router(player_router)
 app.include_router(scheduler_router)
 app.include_router(subtitles_router)
@@ -732,18 +734,31 @@ async def remotesync_run(request: Request, user: str = Depends(require_login)):
         config.settings.remote_sync_url, config.settings.remote_sync_api_key
     )
     if result.get("ok"):
-        return JSONResponse({
-            "ok": True,
-            "message": (
-                f"Imported {result['rows']} media item(s) and "
-                f"{result['scanned']} scan entrie(s)."
-            ),
-            **result,
-        })
-    return JSONResponse(
-        {"ok": False, "error": result.get("error") or "Import failed."},
-        status_code=502,
+        message = (
+            f"Imported {result['rows']} media item(s) and "
+            f"{result['scanned']} scan entrie(s)."
+        )
+        notifications.publish(
+            "success",
+            "Remote sync complete",
+            message,
+            source="Remote sync",
+            user=user,
+            url="/settings",
+            link_label="Open Settings",
+        )
+        return JSONResponse({"ok": True, "message": message, **result})
+    error = result.get("error") or "Import failed."
+    notifications.publish(
+        "error",
+        "Remote sync failed",
+        error,
+        source="Remote sync",
+        user=user,
+        url="/logs",
+        link_label="View logs",
     )
+    return JSONResponse({"ok": False, "error": error}, status_code=502)
 
 
 @app.get("/settings/backup/download")
@@ -778,7 +793,25 @@ async def api_backup_now(user: str = Depends(require_login)):
     try:
         info = await asyncio.to_thread(backup.create_backup)
     except backup.BackupError as exc:
+        notifications.publish(
+            "error",
+            "Backup failed",
+            str(exc),
+            source="Backup",
+            user=user,
+            url="/logs",
+            link_label="View logs",
+        )
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    notifications.publish(
+        "success",
+        "Backup complete",
+        f"Created {info['name']}.",
+        source="Backup",
+        user=user,
+        url="/settings",
+        link_label="Open Settings",
+    )
     return JSONResponse(
         {
             "ok": True,

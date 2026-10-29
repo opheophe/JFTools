@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from . import notifications
 from .config import config
 from .logs import log
 from .paths import resolve_path
@@ -396,6 +397,46 @@ def _mutation_error(resp: dict) -> JSONResponse:
     return JSONResponse({"ok": False, "error": resp.get("error", "Failed.")}, status_code=400)
 
 
+def _publish_file_result(
+    action: str,
+    result: dict,
+    user: str,
+    *,
+    detail: str = "",
+) -> None:
+    """Report a file mutation result without making the mutation depend on it."""
+    labels = {
+        "rename": ("File renamed", "File rename failed"),
+        "move": ("File moved", "File move failed"),
+        "delete": ("File deleted", "File delete failed"),
+        "mkdir": ("Folder created", "Folder creation failed"),
+    }
+    success_title, failure_title = labels.get(action, ("File operation complete", "File operation failed"))
+    error = result.get("error") or "The operation failed."
+    if result.get("ok"):
+        notifications.publish(
+            "success",
+            success_title,
+            detail,
+            source="Files",
+            user=user,
+            url="/files",
+            link_label="Open Files",
+        )
+    else:
+        name = os.path.basename(detail or result.get("src") or "")
+        message = f"{name} — {error}" if name else error
+        notifications.publish(
+            "error",
+            failure_title,
+            message,
+            source="Files",
+            user=user,
+            url="/logs",
+            link_label="View logs",
+        )
+
+
 @router.post("/api/files/rename")
 def api_files_rename(
     path: str = Form(""),
@@ -412,8 +453,15 @@ def api_files_rename(
     result = rename_entry(path, name, roots)
     if result["ok"]:
         log("Files", "INFO", f"Renamed: {result['src']} -> {result['dst']}")
+        _publish_file_result(
+            "rename",
+            result,
+            user,
+            detail=f"{os.path.basename(result['src'])} → {os.path.basename(result['dst'])}",
+        )
         return JSONResponse({"ok": True, "message": "Renamed."})
     log("Files", "WARN", f"Rename refused ({result.get('error')}): {path}")
+    _publish_file_result("rename", result, user, detail=path)
     return _mutation_error(result)
 
 
@@ -433,8 +481,15 @@ def api_files_move(
     result = move_entry(path, target, roots)
     if result["ok"]:
         log("Files", "INFO", f"Moved: {result['src']} -> {result['dst']}")
+        _publish_file_result(
+            "move",
+            result,
+            user,
+            detail=f"{os.path.basename(result['src'])} → {result['dst']}",
+        )
         return JSONResponse({"ok": True, "message": "Moved."})
     log("Files", "WARN", f"Move refused ({result.get('error')}): {path}")
+    _publish_file_result("move", result, user, detail=path)
     return _mutation_error(result)
 
 
@@ -453,8 +508,15 @@ def api_files_delete(
     result = delete_entry(path, roots)
     if result["ok"]:
         log("Files", "WARN", f"Deleted: {result['src']}")
+        _publish_file_result(
+            "delete",
+            result,
+            user,
+            detail=f"Deleted {os.path.basename(result['src'])}.",
+        )
         return JSONResponse({"ok": True, "message": "Deleted."})
     log("Files", "WARN", f"Delete refused ({result.get('error')}): {path}")
+    _publish_file_result("delete", result, user, detail=path)
     return _mutation_error(result)
 
 
@@ -474,6 +536,13 @@ def api_files_mkdir(
     result = mkdir_entry(path, name, roots)
     if result["ok"]:
         log("Files", "INFO", f"Created folder: {result['src']}")
+        _publish_file_result(
+            "mkdir",
+            result,
+            user,
+            detail=f"Created {os.path.basename(result['src'])}.",
+        )
         return JSONResponse({"ok": True, "message": "Folder created."})
     log("Files", "WARN", f"Mkdir refused ({result.get('error')}): {path}")
+    _publish_file_result("mkdir", result, user, detail=path)
     return _mutation_error(result)

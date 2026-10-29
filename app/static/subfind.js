@@ -139,6 +139,16 @@ function subfindBackgroundError(msg) {
   console.warn(msg);
   const statusEl = document.getElementById("se-status");
   if (statusEl) statusEl.textContent = msg;
+  if (window.jfNotify) {
+    window.jfNotify({
+      kind: "warning",
+      title: "Subtitle rescan failed",
+      message: msg,
+      source: "Search",
+      url: "/logs",
+      link_label: "View logs",
+    });
+  }
 }
 
 // Write a message into the status line without disturbing the results list.
@@ -522,7 +532,11 @@ async function subfindPost(url, body) {
     window.location.href = "/login";
     throw new Error("Not authenticated");
   }
-  return resp.json();
+  const data = await resp.json();
+  // Subtitle download/delete/rename/sync publish a durable notification before
+  // replying. Pull it now so closing the dialog does not hide the result.
+  if (window.jfNotifications) window.jfNotifications.checkNow();
+  return data;
 }
 
 // The search-method buttons in the open dialog.

@@ -48,6 +48,48 @@ async def test_run_job_tracks_running(monkeypatch):
     assert sch._jobs["j1"]["last_status"] == "ok"
 
 
+async def test_run_job_publishes_and_self_reporting_ops_skip_it(monkeypatch):
+    events = []
+
+    async def handler():
+        return None
+
+    monkeypatch.setattr(sch, "_save_jobs", lambda: None)
+    monkeypatch.setattr(
+        sch.notifications,
+        "publish",
+        lambda kind, title, message="", **kwargs: events.append((kind, title, message, kwargs)),
+    )
+    monkeypatch.setitem(
+        sch._OP_BY_ID, "normal_op",
+        {"id": "normal_op", "label": "Normal", "tab": "Test", "handler": handler},
+    )
+    monkeypatch.setitem(
+        sch._OP_BY_ID, "self_op",
+        {"id": "self_op", "label": "Self", "tab": "Test", "handler": handler,
+         "notify": "self"},
+    )
+    monkeypatch.setitem(
+        sch._jobs, "j-normal",
+        {"id": "j-normal", "operation": "normal_op", "trigger": {}, "enabled": True},
+    )
+    monkeypatch.setitem(
+        sch._jobs, "j-self",
+        {"id": "j-self", "operation": "self_op", "trigger": {}, "enabled": True},
+    )
+    monkeypatch.setattr(sch, "_running", set())
+
+    await sch._run_job("j-normal")
+    await sch._run_job("j-self")
+
+    assert len(events) == 1
+    kind, title, message, kwargs = events[0]
+    assert kind == "success"
+    assert title == "Normal complete"
+    assert message.startswith("Finished in ")
+    assert kwargs["source"] == "Scheduler"
+
+
 async def test_run_job_blocks_reentry(monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()

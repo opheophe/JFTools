@@ -35,6 +35,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Header, Request
 from fastapi.responses import JSONResponse
 
+from . import notifications
 from .config import config
 from .languages import (
     language_code,
@@ -1035,6 +1036,14 @@ async def run_scan(mode: str) -> None:
                 "into a Tools/ folder next to the app, or set JFTOOLS_FFPROBE."
             )
             log("Search", "ERROR", _fetch["error"])
+            notifications.publish(
+                "error",
+                f"{label} failed",
+                _fetch["error"],
+                source="Search",
+                url="/logs",
+                link_label="View logs",
+            )
             return
 
         from .jellyfin_id import _state as id_state
@@ -1044,6 +1053,14 @@ async def run_scan(mode: str) -> None:
             _fetch["status"] = "error"
             _fetch["error"] = "No media items to scan — fetch Movie Match first."
             log("Search", "ERROR", _fetch["error"])
+            notifications.publish(
+                "error",
+                f"{label} failed",
+                _fetch["error"],
+                source="Search",
+                url="/jellyfin-id",
+                link_label="Open Movie Match",
+            )
             return
 
         current_paths = {r["path"] for r in rows}
@@ -1136,23 +1153,46 @@ async def run_scan(mode: str) -> None:
             _state["change_scan_at"] = time.time()
         _save_state()
         _fetch["status"] = "done"
-        log(
-            "Search",
-            "INFO",
-            f"{label} complete: {len(to_scan)} probed, {len(rows) - len(to_scan)} skipped"
+        summary = (
+            f"{len(to_scan)} probed, {len(rows) - len(to_scan)} skipped"
             + (f", {changed} subtitle change(s)" if changed else "")
             + (f", {folders} series folder(s)" if folders else "")
-            + (f", {failed} could not be probed (see warnings)" if failed else ""),
+            + (f", {failed} could not be probed (see warnings)" if failed else "")
+        )
+        log("Search", "INFO", f"{label} complete: {summary}")
+        notifications.publish(
+            "warning" if failed else "success",
+            f"{label} complete" + (" with warnings" if failed else ""),
+            summary,
+            source="Search",
+            url="/search",
+            link_label="Open Search",
         )
     except asyncio.CancelledError:
         _fetch["status"] = "cancelled"
         _fetch["error"] = None
         log("Search", "WARN", f"{label} aborted")
+        notifications.publish(
+            "warning",
+            f"{label} aborted",
+            "The scan was stopped before it finished.",
+            source="Search",
+            url="/search",
+            link_label="Open Search",
+        )
         raise
     except Exception as exc:  # noqa: BLE001
         _fetch["status"] = "error"
         _fetch["error"] = f"Unexpected error: {exc}"
         log("Search", "ERROR", f"{label} failed: {exc}")
+        notifications.publish(
+            "error",
+            f"{label} failed",
+            _fetch["error"],
+            source="Search",
+            url="/logs",
+            link_label="View logs",
+        )
 
 
 async def rescan_one(path: str) -> dict:
@@ -1696,6 +1736,15 @@ async def subtitles_download(
         data = await client.download(file_id_int, sub_format)
     except OpenSubtitlesError as exc:
         log("Search", "ERROR", f"Subtitle download failed: {exc}")
+        notifications.publish(
+            "error",
+            "Subtitle download failed",
+            f"{Path(path).name} — {exc}",
+            source="Search",
+            user=user,
+            url="/logs",
+            link_label="View logs",
+        )
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
 
     def _write(content: bytes) -> None:
@@ -1708,6 +1757,15 @@ async def subtitles_download(
         await asyncio.to_thread(_write, data["content"])
     except OSError as exc:
         log("Search", "ERROR", f"Subtitle write failed: {target}: {exc}")
+        notifications.publish(
+            "error",
+            "Subtitle download failed",
+            f"{os.path.basename(target)} — Could not save the subtitle: {exc}",
+            source="Search",
+            user=user,
+            url="/logs",
+            link_label="View logs",
+        )
         return JSONResponse(
             {"ok": False, "error": f"Could not save the subtitle: {exc}"},
             status_code=500,
@@ -1720,7 +1778,6 @@ async def subtitles_download(
         f"Downloaded subtitle: {os.path.basename(target)} "
         f"({remaining if remaining is not None else '?'} downloads remaining)",
     )
-
     # Mark the item for a fresh scan rather than probing now: closing the dialog
     # (or the Media scan button / scheduled job) does the actual ffprobe pass.
     # Until then the Search tab shows "Not scanned".
@@ -1735,6 +1792,19 @@ async def subtitles_download(
     except JellyfinError as exc:
         jellyfin = str(exc)
         log("Search", "WARN", f"Jellyfin rescan after download failed: {exc}")
+
+    detail = f"{Path(path).name} — Saved {os.path.basename(target)}."
+    if jellyfin:
+        detail += f" Jellyfin warning: {jellyfin}."
+    notifications.publish(
+        "warning" if jellyfin else "success",
+        "Subtitle download complete with warning" if jellyfin else "Subtitle download complete",
+        detail,
+        source="Search",
+        user=user,
+        url="/search",
+        link_label="Open Search",
+    )
 
     return JSONResponse(
         {
@@ -1791,11 +1861,18 @@ async def subtitles_delete(
 
     result = delete_entry(os.path.join(os.path.dirname(local), file), browser_roots())
     if not result.get("ok"):
-        log("Search", "WARN", f"Subtitle delete refused ({result.get('error')}): {file}")
-        return JSONResponse(
-            {"ok": False, "error": result.get("error") or "Delete failed."},
-            status_code=400,
+        error = result.get("error") or "Delete failed."
+        log("Search", "WARN", f"Subtitle delete refused ({error}): {file}")
+        notifications.publish(
+            "error",
+            "Subtitle delete failed",
+            f"{Path(path).name} — {file}: {error}",
+            source="Search",
+            user=user,
+            url="/logs",
+            link_label="View logs",
         )
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
 
     _mark_unscanned(path)
 
@@ -1810,6 +1887,18 @@ async def subtitles_delete(
         log("Search", "WARN", f"Jellyfin rescan after delete failed: {exc}")
 
     log("Search", "INFO", f"Deleted subtitle: {os.path.basename(result['src'])}")
+    detail = f"{Path(path).name} — Deleted {file}."
+    if jellyfin:
+        detail += f" Jellyfin warning: {jellyfin}."
+    notifications.publish(
+        "warning" if jellyfin else "success",
+        "Subtitle delete complete with warning" if jellyfin else "Subtitle delete complete",
+        detail,
+        source="Search",
+        user=user,
+        url="/search",
+        link_label="Open Search",
+    )
     return JSONResponse(
         {
             "ok": True,
@@ -1885,11 +1974,18 @@ async def subtitles_rename(
 
     result = rename_entry(os.path.join(folder, file), target_name, browser_roots())
     if not result.get("ok"):
-        log("Search", "WARN", f"Subtitle rename refused ({result.get('error')}): {file}")
-        return JSONResponse(
-            {"ok": False, "error": result.get("error") or "Rename failed."},
-            status_code=400,
+        error = result.get("error") or "Rename failed."
+        log("Search", "WARN", f"Subtitle rename refused ({error}): {file}")
+        notifications.publish(
+            "error",
+            "Subtitle rename failed",
+            f"{Path(path).name} — {file}: {error}",
+            source="Search",
+            user=user,
+            url="/logs",
+            link_label="View logs",
         )
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
 
     _mark_unscanned(path)
 
@@ -1904,6 +2000,18 @@ async def subtitles_rename(
         log("Search", "WARN", f"Jellyfin rescan after rename failed: {exc}")
 
     log("Search", "INFO", f"Renamed subtitle: {file} -> {target_name}")
+    detail = f"{Path(path).name} — Renamed {file} to {target_name}."
+    if jellyfin:
+        detail += f" Jellyfin warning: {jellyfin}."
+    notifications.publish(
+        "warning" if jellyfin else "success",
+        "Subtitle rename complete with warning" if jellyfin else "Subtitle rename complete",
+        detail,
+        source="Search",
+        user=user,
+        url="/search",
+        link_label="Open Search",
+    )
     return JSONResponse(
         {
             "ok": True,
@@ -1978,8 +2086,18 @@ async def subtitles_sync(
         _sync_subtitle_file, local, subtitle, offset_val
     )
     if not ok:
-        log("Search", "WARN", f"Subtitle sync failed ({err}): {file}")
-        return JSONResponse({"ok": False, "error": err or "Sync failed."}, status_code=502)
+        error = err or "Sync failed."
+        log("Search", "WARN", f"Subtitle sync failed ({error}): {file}")
+        notifications.publish(
+            "error",
+            "Subtitle sync failed",
+            f"{Path(path).name} — {file}: {error}",
+            source="Search",
+            user=user,
+            url="/logs",
+            link_label="View logs",
+        )
+        return JSONResponse({"ok": False, "error": error}, status_code=502)
 
     # The filename and language do not change, so there is nothing else to do:
     # Jellyfin reads the subtitle from disk, and the stored track data (name,
@@ -1989,6 +2107,15 @@ async def subtitles_sync(
     else:
         message = f"Synced {file}."
     log("Search", "INFO", f"{message} ({method})")
+    notifications.publish(
+        "success",
+        "Subtitle sync complete",
+        f"{Path(path).name} — {message}",
+        source="Search",
+        user=user,
+        url="/search",
+        link_label="Open Search",
+    )
     return JSONResponse(
         {
             "ok": True,

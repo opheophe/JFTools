@@ -21,11 +21,35 @@
       <a href="/logs">Logs</a>
       <a href="/settings">Settings</a>
       <a href="/about" id="nav-about">About<span class="update-dot" id="update-dot" hidden></span></a>
+      <button type="button" id="notif-bell" class="notif-bell" aria-label="Notifications"
+              aria-haspopup="dialog" aria-expanded="false" title="Notifications">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"
+                fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M13.7 21a2 2 0 0 1-3.4 0"
+                fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round"/>
+        </svg>
+        <span id="notif-badge" class="notif-badge" hidden>0</span>
+      </button>
       <form method="post" action="/logout" class="inline">
         <button type="submit" class="link">Log out</button>
       </form>
     </nav>
   </header>
+
+  <div class="notif-panel" id="notif-panel" role="dialog" aria-label="Notifications" hidden>
+    <div class="notif-panel-head">
+      <strong>Notifications</strong>
+      <button type="button" class="notif-panel-close" id="notif-panel-close"
+              aria-label="Close notifications" title="Close">×</button>
+    </div>
+    <div class="notif-list" id="notif-list"></div>
+  </div>
+  <div class="jf-toasts" id="jf-toasts" role="region" aria-label="Task notifications"
+       aria-live="polite"></div>
+
   <main>
     {% block content %}{% endblock %}
   </main>

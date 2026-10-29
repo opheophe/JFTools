@@ -623,6 +623,51 @@ async def test_internal_execute_deletes_multiple_and_sets_both_defaults(
     assert calls["subtitle_edits"] == [(0, "forced+default")]
     assert audio._state["files"][path] == entry
 
+    from app import notifications
+
+    items, _latest, _more = notifications.query(user="u")
+    assert items[-1]["kind"] == "warning"
+    assert items[-1]["title"] == "Track edit complete with warning"
+    assert "Movie (2020).mkv" in items[-1]["message"]
+    assert "offline" in items[-1]["message"]
+
+
+async def test_internal_execute_publishes_an_error_notification(
+    audio_env, monkeypatch
+):
+    _media, _video, path = audio_env
+    subtitles, tracks = _internal_streams()
+    entry = {
+        "path": path, "file": "Movie (2020).mkv", "scanned": True,
+        "audio": tracks[1:], "internal": subtitles[1:], "error": None,
+    }
+    error = "ffmpeg error: [Errno 13] Permission denied: movie.mkv"
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+    monkeypatch.setattr(audio, "_rewrite_tracks", lambda *args: (False, error))
+    monkeypatch.setattr(audio, "_probe_one", lambda ff, key, local, st: (key, entry))
+    monkeypatch.setattr(audio, "_stat_path", lambda local: None)
+    monkeypatch.setitem(audio._state, "files", {})
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path,
+        delete="1,4", default_audio="2", default_subtitle="5",
+    )
+    data = json.loads(resp.body)
+
+    assert resp.status_code == 502
+    assert data["ok"] is False
+    assert data["notification_id"]
+
+    from app import notifications
+
+    items, _latest, _more = notifications.query(user="u")
+    assert items[-1]["id"] == data["notification_id"]
+    assert items[-1]["kind"] == "error"
+    assert items[-1]["title"] == "Track edit failed"
+    assert error in items[-1]["message"]
+
 
 async def test_internal_execute_promotes_the_first_remaining_default(
     audio_env, monkeypatch

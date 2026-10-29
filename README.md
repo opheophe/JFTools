@@ -45,6 +45,11 @@ existing server over the API.
   default of each type, or let **Smart mark** pick every subtitle outside your
   preferred languages plus every forced track, then execute it in a single
   in-place rewrite.
+- Task notifications: scans, Movie Match fetches, track edits, subtitle/file
+  changes and scheduled jobs report success, warnings and errors in the top
+  right. Results are also kept in the bell menu, so closing a dialog,
+  navigating away or reloading the page does not lose them. Error toasts stay
+  until dismissed.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT). Files whose

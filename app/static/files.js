@@ -44,7 +44,10 @@ async function fbPost(url, body) {
     window.location.href = "/login";
     throw new Error("Not authenticated");
   }
-  return resp.json();
+  const data = await resp.json();
+  // File mutations publish a durable notification before replying.
+  if (window.jfNotifications) window.jfNotifications.checkNow();
+  return data;
 }
 
 // ---- modal ------------------------------------------------------------------

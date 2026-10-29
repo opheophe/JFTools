@@ -413,17 +413,37 @@ async function audioExecute() {
   if (defS !== null) body += "&default_subtitle=" + encodeURIComponent(defS);
   try {
     const data = await audioPost("/api/internal/execute", body);
+    audioBusy = false;
     if (!data || !data.ok) {
+      const message = (data && data.error) || "Track edit failed.";
       if (audioPath === path) {
-        audioBusy = false;
-        audioNotice((data && data.error) || "Track edit failed.", "error");
+        audioNotice(message, "error");
         audioRender();
+      }
+      // The server publishes a durable error before responding. Pull it now so
+      // the result survives the dialog being closed while ffmpeg was running.
+      if (window.jfNotifications) window.jfNotifications.checkNow();
+      // Validation errors do not produce a server event; keep them visible if
+      // the dialog was already closed.
+      if (!(data && data.notification_id) && window.jfNotify) {
+        window.jfNotify({
+          kind: "error",
+          title: "Track edit failed",
+          message: path.replace(/^.*[\\/]/, "") + " — " + message,
+          source: "Search",
+          sticky: true,
+          url: "/logs",
+          link_label: "View logs",
+        });
       }
       return;
     }
     if (path && window.audioRefresh && data.entry) window.audioRefresh(path, data.entry);
+    // This is intentionally outside the audioPath check: the chime and the
+    // server notification are how a closed dialog reports success.
+    audioPlayDone();
+    if (window.jfNotifications) window.jfNotifications.checkNow();
     if (audioPath !== path) return;
-    audioBusy = false;
     audioDeleteSet = new Set();
     audioDefault = null;
     audioDefaultSub = null;
@@ -438,14 +458,27 @@ async function audioExecute() {
     let msg = data.message || "Updated.";
     if (data.jellyfin) msg += " (Jellyfin warning: " + data.jellyfin + ")";
     audioNotice(msg, "ok");
-    audioPlayDone();
     audioRender();
   } catch (err) {
+    audioBusy = false;
     if (audioPath === path) {
-      audioBusy = false;
       audioNotice(String(err), "error");
       audioRender();
     }
+    // No HTTP response means the server may not have recorded the event (or
+    // the response was lost). This fallback is the only feedback left.
+    if (window.jfNotify) {
+      window.jfNotify({
+        kind: "error",
+        title: "Track edit failed",
+        message: path.replace(/^.*[\\/]/, "") + " — " + String(err),
+        source: "Search",
+        sticky: true,
+        url: "/logs",
+        link_label: "View logs",
+      });
+    }
+    if (window.jfNotifications) window.jfNotifications.checkNow();
   }
 }
 

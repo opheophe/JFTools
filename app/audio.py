@@ -22,6 +22,7 @@ import tempfile
 from fastapi import APIRouter, Depends, Form, Header
 from fastapi.responses import JSONResponse
 
+from . import notifications
 from .config import config
 from .logs import log
 from .paths import resolve_path
@@ -291,13 +292,28 @@ async def internal_execute(
                 subtitle_edits,
             )
             if not ok:
+                error = err or "ffmpeg failed."
                 log(
                     "Search",
                     "WARN",
-                    f"Track edit failed ({err}): {os.path.basename(local)}",
+                    f"Track edit failed ({error}): {os.path.basename(local)}",
+                )
+                notification_id = notifications.publish(
+                    "error",
+                    "Track edit failed",
+                    f"{os.path.basename(local)} — {error}",
+                    source="Search",
+                    user=user,
+                    url="/logs",
+                    link_label="View logs",
                 )
                 return JSONResponse(
-                    {"ok": False, "error": err or "ffmpeg failed."}, status_code=502
+                    {
+                        "ok": False,
+                        "error": error,
+                        "notification_id": notification_id,
+                    },
+                    status_code=502,
                 )
 
         # Delete the marked external subtitle files. Any rewrite above has
@@ -351,11 +367,24 @@ async def internal_execute(
             bits.append(f"Default subtitle: {name}.")
         message = " ".join(bits) or "Updated the tracks."
         log("Search", "INFO", f"{message} ({os.path.basename(local)})")
+        detail = f"{os.path.basename(local)} — {message}"
+        if jellyfin:
+            detail += f" Jellyfin warning: {jellyfin}."
+        notification_id = notifications.publish(
+            "warning" if (jellyfin or file_errors) else "success",
+            "Track edit complete with warning" if (jellyfin or file_errors) else "Track edit complete",
+            detail,
+            source="Search",
+            user=user,
+            url="/search",
+            link_label="Open Search",
+        )
         smart_mark, preferred = smart_subtitle_marks(entry.get("internal") or [])
         return JSONResponse(
             {
                 "ok": True,
                 "message": message,
+                "notification_id": notification_id,
                 "entry": entry,
                 "deleted": sorted(deleted_set),
                 "deleted_files": deleted_files,
@@ -459,9 +488,24 @@ async def audio_delete(
             _remove_track, ffmpeg, local, stream_index, set_default
         )
         if not ok:
-            log("Search", "WARN", f"Audio delete failed ({err}): {os.path.basename(local)}")
+            error = err or "ffmpeg failed."
+            log("Search", "WARN", f"Audio delete failed ({error}): {os.path.basename(local)}")
+            notification_id = notifications.publish(
+                "error",
+                "Audio delete failed",
+                f"{os.path.basename(local)} — {error}",
+                source="Search",
+                user=user,
+                url="/logs",
+                link_label="View logs",
+            )
             return JSONResponse(
-                {"ok": False, "error": err or "ffmpeg failed."}, status_code=502
+                {
+                    "ok": False,
+                    "error": error,
+                    "notification_id": notification_id,
+                },
+                status_code=502,
             )
 
         # Re-probe both halves: removing a stream shifts the absolute indices
@@ -483,10 +527,23 @@ async def audio_delete(
 
         label = track.get("name") or "audio track"
         log("Search", "INFO", f"Deleted {label} from {os.path.basename(local)}")
+        detail = f"{os.path.basename(local)} — Deleted {label}."
+        if jellyfin:
+            detail += f" Jellyfin warning: {jellyfin}."
+        notification_id = notifications.publish(
+            "warning" if jellyfin else "success",
+            "Audio delete complete with warning" if jellyfin else "Audio delete complete",
+            detail,
+            source="Search",
+            user=user,
+            url="/search",
+            link_label="Open Search",
+        )
         return JSONResponse(
             {
                 "ok": True,
                 "message": f"Deleted {label}.",
+                "notification_id": notification_id,
                 "entry": entry,
                 "jellyfin": jellyfin,
             }

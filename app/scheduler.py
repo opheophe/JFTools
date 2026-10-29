@@ -18,6 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from . import notifications
 from .config import config
 from .logs import log
 from .web import require_login, templates
@@ -113,28 +114,29 @@ def _jellyfin_id_progress() -> dict | None:
 OPERATIONS = [
     {"id": "jellyfin_id_fetch", "label": "Fetch Jellyfin movies", "tab": "Movie Match", "handler": _op_fetch_jellyfin_id,
      "description": "Fetch all media items, re-score their name/year match, and record each user's favorites.",
-     "progress": _jellyfin_id_progress},
+     "progress": _jellyfin_id_progress, "notify": "self"},
     {"id": "jellyfin_scan_all", "label": "Scan all libraries", "tab": "Jellyfin", "handler": _op_scan_all,
      "description": "Start a full library scan in Jellyfin."},
     {"id": "clear_logs", "label": "Clear logs", "tab": "Jellyfin", "handler": _op_clear_logs,
-     "description": "Delete all stored logs."},
+     "description": "Delete all stored logs.", "notify": "never"},
     {"id": "clear_cache", "label": "Clear local cache", "tab": "Movie Match", "handler": _op_clear_cache,
-     "description": "Reset Movie Match — removes saved Ok marks, fetched rows and last-sync time."},
+     "description": "Reset Movie Match — removes saved Ok marks, fetched rows and last-sync time.",
+     "notify": "never"},
     {"id": "refresh_libraries", "label": "Refresh libraries", "tab": "Jellyfin", "handler": _op_refresh_libraries,
-     "description": "Refresh the cached library list from Jellyfin."},
+     "description": "Refresh the cached library list from Jellyfin.", "notify": "error"},
     {"id": "check_updates", "label": "Check for updates", "tab": "System", "handler": _op_check_updates,
-     "description": "Query GitHub for the latest JFTools release."},
+     "description": "Query GitHub for the latest JFTools release.", "notify": "never"},
     {"id": "backup", "label": "Backup", "tab": "Settings", "handler": _op_backup,
      "description": "Write a ZIP of settings and runtime data to the backup folder."},
     {"id": "subtitle_scan_full", "label": "Media scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
      "description": "Re-probe every media file for subtitle and audio tracks with ffprobe.",
-     "progress": _scan_progress},
+     "progress": _scan_progress, "notify": "self"},
     {"id": "subtitle_scan", "label": "Media scan", "tab": "Search", "handler": _op_subtitle_scan,
      "description": "Sync the store with the library, check already-scanned files for new or changed external subtitles, then probe every file not yet scanned (subtitles and audio).",
-     "progress": _scan_progress},
+     "progress": _scan_progress, "notify": "self"},
     {"id": "users_watching", "label": "User watching", "tab": "Jellyfin", "handler": _op_users_watching,
      "description": "Check Jellyfin sessions for an actively-watching user (powers the Users nav dot).",
-     "quiet": True},
+     "quiet": True, "notify": "never"},
 ]
 _OP_BY_ID = {op["id"]: op for op in OPERATIONS}
 OPERATIONS_PUBLIC = [
@@ -325,6 +327,37 @@ def _describe_schedule(spec: dict) -> str:
     return "Unknown"
 
 
+def _notify_job_result(
+    op: dict,
+    status: str,
+    error: str | None,
+    duration: float,
+) -> None:
+    """Publish a scheduler result unless the operation reports itself."""
+    mode = op.get("notify", "always")
+    if op.get("quiet") or mode in ("never", "self"):
+        return
+    if mode == "error" and status == "ok":
+        return
+    seconds = f"{duration:.1f}".rstrip("0").rstrip(".")
+    if status == "ok":
+        kind, title, message = "success", f"{op['label']} complete", f"Finished in {seconds}s."
+    elif status == "cancelled":
+        kind, title, message = "warning", f"{op['label']} aborted", f"Stopped after {seconds}s."
+    else:
+        kind = "error"
+        title = f"{op['label']} failed"
+        message = error or "The operation failed."
+    notifications.publish(
+        kind,
+        title,
+        message,
+        source="Scheduler",
+        url="/scheduler",
+        link_label="Open Scheduler",
+    )
+
+
 async def _run_job(job_id: str) -> None:
     job = _jobs.get(job_id)
     op = _OP_BY_ID.get(job.get("operation")) if job else None
@@ -370,6 +403,12 @@ async def _run_job(job_id: str) -> None:
         _running.discard(job_id)
         _release_heavy(operation)
         _save_jobs()
+        _notify_job_result(
+            op,
+            str(job.get("last_status") or "error"),
+            job.get("last_error"),
+            float(job["last_duration"]),
+        )
 
 
 def _spawn(job_id: str) -> None:
@@ -598,10 +637,22 @@ async def _run_direct(op: dict) -> None:
     operation = op["id"]
     if not _claim_heavy(operation):
         return
+    started = time.monotonic()
+    status = "ok"
+    error: str | None = None
     try:
         await op["handler"]()
+    except asyncio.CancelledError:
+        status = "cancelled"
+        error = "Aborted by user"
+        raise
+    except Exception as exc:  # noqa: BLE001
+        status = "error"
+        error = str(exc)
+        log(op["tab"], "ERROR", f"{op['label']} failed: {exc}")
     finally:
         _release_heavy(operation)
+        _notify_job_result(op, status, error, time.monotonic() - started)
 
 
 @router.post("/api/scheduler/jobs/{job_id}/toggle")

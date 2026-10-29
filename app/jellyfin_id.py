@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from . import notifications
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError, get_client
 from .logs import log
@@ -527,21 +528,56 @@ async def _run_fetch() -> None:
         _save_state()
         _fetch["status"] = "done"
         log("Movie Match", "INFO", f"Fetch complete: {len(rows)} item(s)")
+        message = f"Fetched {len(rows)} media item(s)."
+        if not fav_ok:
+            message += " Favorites could not be refreshed; previous favorites were kept."
+        notifications.publish(
+            "success" if fav_ok else "warning",
+            "Movie Match fetch complete" if fav_ok else "Movie Match fetch complete with warning",
+            message,
+            source="Movie Match",
+            url="/jellyfin-id",
+            link_label="Open Movie Match",
+        )
     except asyncio.CancelledError:
         # Leave a truthful status: "running" here would block every later fetch
         # (the self-guard above) and make the Movie Match page poll forever.
         _fetch["status"] = "cancelled"
         _fetch["error"] = None
         log("Movie Match", "WARN", "Fetch aborted")
+        notifications.publish(
+            "warning",
+            "Movie Match fetch aborted",
+            "The fetch was stopped before it finished.",
+            source="Movie Match",
+            url="/jellyfin-id",
+            link_label="Open Movie Match",
+        )
         raise
     except JellyfinError as exc:
         _fetch["status"] = "error"
         _fetch["error"] = str(exc)
         log("Movie Match", "ERROR", f"Fetch failed: {exc}")
+        notifications.publish(
+            "error",
+            "Movie Match fetch failed",
+            str(exc),
+            source="Movie Match",
+            url="/logs",
+            link_label="View logs",
+        )
     except Exception as exc:  # noqa: BLE001
         _fetch["status"] = "error"
         _fetch["error"] = f"Unexpected error: {exc}"
         log("Movie Match", "ERROR", f"Fetch failed: {exc}")
+        notifications.publish(
+            "error",
+            "Movie Match fetch failed",
+            _fetch["error"],
+            source="Movie Match",
+            url="/logs",
+            link_label="View logs",
+        )
 
 
 # ---- routes -----------------------------------------------------------------
