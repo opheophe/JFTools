@@ -1,6 +1,9 @@
 """Tests for audio-track probing, the merged scan store and audio deletion."""
 
+import errno
 import json
+import os
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -378,8 +381,11 @@ async def test_delete_rewrites_and_refreshes_the_store(audio_env, monkeypatch):
         audio, "_probe_streams", lambda ff, local: ([], _tracks(), 1.0, None)
     )
 
-    def fake_remove(ffmpeg, local, index, set_default):
-        calls.update(ffmpeg=ffmpeg, local=local, index=index, set_default=set_default)
+    def fake_remove(ffmpeg, local, index, set_default, ffprobe):
+        calls.update(
+            ffmpeg=ffmpeg, local=local, index=index,
+            set_default=set_default, ffprobe=ffprobe,
+        )
         return True, ""
 
     monkeypatch.setattr(audio, "_remove_track", fake_remove)
@@ -396,7 +402,8 @@ async def test_delete_rewrites_and_refreshes_the_store(audio_env, monkeypatch):
     assert "English (E-AC-3 5.1)*" in data["message"]
     # The removed track was the default, so the first remaining one is promoted.
     assert calls == {
-        "ffmpeg": "ffmpeg", "local": str(video), "index": 1, "set_default": True,
+        "ffmpeg": "ffmpeg", "local": str(video), "index": 1,
+        "set_default": True, "ffprobe": "ffprobe",
     }
     assert audio._state["files"][path] == entry
     assert data["entry"] == entry
@@ -592,7 +599,7 @@ async def test_internal_execute_deletes_multiple_and_sets_both_defaults(
         audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
     )
 
-    def fake_rewrite(ffmpeg, local, deleted, audio_edits, subtitle_edits):
+    def fake_rewrite(ffmpeg, local, deleted, audio_edits, subtitle_edits, ffprobe):
         calls.update(
             ffmpeg=ffmpeg, local=local, deleted=deleted,
             audio_edits=audio_edits, subtitle_edits=subtitle_edits,
@@ -685,7 +692,7 @@ async def test_internal_execute_promotes_the_first_remaining_default(
         audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
     )
 
-    def fake_rewrite(ffmpeg, local, deleted, audio_edits, subtitle_edits):
+    def fake_rewrite(ffmpeg, local, deleted, audio_edits, subtitle_edits, ffprobe):
         calls.update(audio_edits=audio_edits, subtitle_edits=subtitle_edits)
         return True, ""
 
@@ -926,3 +933,199 @@ def test_internal_rewrite_leaves_the_video_alone_on_failure(tmp_path, monkeypatc
     assert "Invalid argument" in err
     assert video.read_bytes() == b"old"
     assert not any(p.name.startswith(".jftools-internal-") for p in tmp_path.iterdir())
+
+
+def _side_files(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.iterdir() if p.name.startswith(".jftools-"))
+
+
+def test_internal_rewrite_restores_the_original_when_the_swap_fails(
+    tmp_path, monkeypatch
+):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"old")
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"new")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+    real_rename = audio._retry_rename
+    calls = []
+
+    def flaky_rename(src, dst):
+        calls.append((src, dst))
+        if len(calls) == 2:
+            raise OSError(errno.EACCES, "Permission denied", src, dst)
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(audio, "_retry_rename", flaky_rename)
+
+    ok, err = audio._rewrite_tracks("ffmpeg", str(video), {1}, [], [])
+
+    assert ok is False
+    assert "original was restored" in err
+    assert video.read_bytes() == b"old"
+    assert _side_files(tmp_path) == []
+
+
+def test_internal_rewrite_keeps_a_backup_when_restore_also_fails(
+    tmp_path, monkeypatch
+):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"old")
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"new")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+    real_rename = audio._retry_rename
+    calls = []
+
+    def flaky_rename(src, dst):
+        calls.append((src, dst))
+        if len(calls) in (2, 3):
+            raise OSError(errno.EACCES, "Permission denied", src, dst)
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(audio, "_retry_rename", flaky_rename)
+
+    ok, err = audio._rewrite_tracks("ffmpeg", str(video), {1}, [], [])
+
+    backup = Path(audio._backup_path(str(video)))
+    assert ok is False
+    assert str(backup) in err
+    assert "Restoring it also failed" in err
+    assert not video.exists()
+    assert backup.read_bytes() == b"old"
+
+
+def test_internal_rewrite_rejects_invalid_output_before_the_swap(
+    tmp_path, monkeypatch
+):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"old")
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"new")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        audio, "_probe_streams",
+        lambda ff, path: ([], [], 0.0, "Invalid data found"),
+    )
+
+    ok, err = audio._rewrite_tracks(
+        "ffmpeg", str(video), {1}, [], [], "ffprobe"
+    )
+
+    assert ok is False
+    assert "not valid" in err
+    assert "Invalid data found" in err
+    assert video.read_bytes() == b"old"
+    assert _side_files(tmp_path) == []
+
+
+def test_internal_rewrite_preserves_mode_and_mtime(tmp_path, monkeypatch):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"old")
+    video.chmod(0o640)
+    before = video.stat()
+    os.utime(video, ns=(before.st_atime_ns, 1_600_000_000_000_000_000))
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"new")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    ok, err = audio._rewrite_tracks("ffmpeg", str(video), {1}, [], [])
+
+    after = video.stat()
+    assert ok and err == ""
+    assert video.read_bytes() == b"new"
+    assert stat.S_IMODE(after.st_mode) == stat.S_IMODE(before.st_mode)
+    assert after.st_mtime_ns == 1_600_000_000_000_000_000
+    assert _side_files(tmp_path) == []
+
+
+def test_retry_rename_retries_a_transient_lock(tmp_path, monkeypatch):
+    src = tmp_path / "source.mkv"
+    dst = tmp_path / "target.mkv"
+    src.write_bytes(b"x")
+    real_rename = os.rename
+    attempts = []
+
+    def flaky_rename(a, b):
+        attempts.append((a, b))
+        if len(attempts) == 1:
+            raise OSError(errno.EACCES, "Permission denied", a, b)
+        return real_rename(a, b)
+
+    monkeypatch.setattr(audio.os, "rename", flaky_rename)
+    monkeypatch.setattr(audio.time, "sleep", lambda _seconds: None)
+
+    audio._retry_rename(str(src), str(dst))
+
+    assert len(attempts) == 2
+    assert dst.read_bytes() == b"x"
+
+
+def test_recover_previous_swap_puts_the_original_back(tmp_path):
+    video = tmp_path / "movie.mkv"
+    backup = Path(audio._backup_path(str(video)))
+    backup.write_bytes(b"original")
+
+    error = audio._recover_previous_swap(str(video), None)
+
+    assert error is None
+    assert video.read_bytes() == b"original"
+    assert not backup.exists()
+
+
+def test_recover_previous_swap_discards_a_bad_replacement(tmp_path, monkeypatch):
+    video = tmp_path / "movie.mkv"
+    video.write_bytes(b"bad")
+    backup = Path(audio._backup_path(str(video)))
+    backup.write_bytes(b"original")
+    monkeypatch.setattr(
+        audio, "_validate_media",
+        lambda ffprobe, path: "bad" if path == str(video) else None,
+    )
+
+    error = audio._recover_previous_swap(str(video), "ffprobe")
+
+    assert error is None
+    assert video.read_bytes() == b"original"
+    assert not backup.exists()
+    assert _side_files(tmp_path) == []
+
+
+async def test_internal_execute_recovers_an_interrupted_swap(audio_env, monkeypatch):
+    _media, video, path = audio_env
+    video.unlink()
+    backup = Path(audio._backup_path(str(video)))
+    backup.write_bytes(b"original")
+    subtitles, tracks = _internal_streams()
+    entry = {
+        "path": path, "file": video.name, "scanned": True,
+        "audio": tracks, "internal": subtitles, "error": None,
+    }
+    monkeypatch.setattr(
+        audio, "_probe_streams", lambda ff, local: (subtitles, tracks, 1.0, None)
+    )
+    monkeypatch.setattr(audio, "_rewrite_tracks", lambda *args: (True, ""))
+    monkeypatch.setattr(audio, "_probe_one", lambda ff, key, local, st: (key, entry))
+    monkeypatch.setattr(audio, "_stat_path", lambda local: None)
+    monkeypatch.setitem(audio._state, "files", {})
+
+    resp = await audio.internal_execute(
+        user="u", x_jftools="1", path=path, default_audio="2",
+    )
+    data = json.loads(resp.body)
+
+    assert data["ok"] is True
+    assert video.read_bytes() == b"original"
+    assert not backup.exists()

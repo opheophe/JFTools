@@ -8,16 +8,22 @@ subtitle files, and set one default audio and one default subtitle in a single
 execute step.
 
 The rewrite copies every other stream into a temporary file next to the
-original with ``-c copy`` and replaces the original only after ffmpeg succeeds.
-A failure (unsupported container, full disk, ffmpeg missing) therefore leaves
-the video untouched. The approach mirrors ComTool's ``VTDelete``.
+original with ``-c copy`` and validates that copy before the original is moved
+aside. The original is restored if the swap or the post-swap probe fails, so a
+failed edit never leaves a damaged video behind. The approach mirrors ComTool's
+``VTDelete``.
 """
 from __future__ import annotations
 
 import asyncio
+import errno
+import hashlib
 import os
+import shutil
+import stat
 import subprocess
 import tempfile
+import time
 
 from fastapi import APIRouter, Depends, Form, Header
 from fastapi.responses import JSONResponse
@@ -171,7 +177,7 @@ async def internal_execute(
             {"ok": False, "error": "Not in the library list."}, status_code=404
         )
     local = resolve_path(path, config.settings.path_maps)
-    if not local or not os.path.isfile(local):
+    if not local:
         return JSONResponse(
             {"ok": False, "error": "The video file is not reachable."}, status_code=400
         )
@@ -179,6 +185,10 @@ async def internal_execute(
     if not ffprobe:
         return JSONResponse(
             {"ok": False, "error": "ffprobe is not available."}, status_code=400
+        )
+    if not os.path.isfile(local) and not os.path.lexists(_backup_path(local)):
+        return JSONResponse(
+            {"ok": False, "error": "The video file is not reachable."}, status_code=400
         )
     ffmpeg = resolve_ffmpeg()
     if not ffmpeg:
@@ -193,6 +203,15 @@ async def internal_execute(
             status_code=409,
         )
     async with lock:
+        recovered = _recover_previous_swap(local, ffprobe)
+        if recovered:
+            log("Search", "WARN", f"Could not recover an interrupted edit: {recovered}")
+            return JSONResponse({"ok": False, "error": recovered}, status_code=500)
+        if not os.path.isfile(local):
+            return JSONResponse(
+                {"ok": False, "error": "The video file is not reachable."},
+                status_code=400,
+            )
         subtitles, tracks, _duration, probe_error = await asyncio.to_thread(
             _probe_streams, ffprobe, local
         )
@@ -290,6 +309,7 @@ async def internal_execute(
                 deleted_set,
                 audio_edits,
                 subtitle_edits,
+                ffprobe,
             )
             if not ok:
                 error = err or "ffmpeg failed."
@@ -435,7 +455,7 @@ async def audio_delete(
             {"ok": False, "error": "Not in the library list."}, status_code=404
         )
     local = resolve_path(path, config.settings.path_maps)
-    if not local or not os.path.isfile(local):
+    if not local:
         return JSONResponse(
             {"ok": False, "error": "The video file is not reachable."}, status_code=400
         )
@@ -443,6 +463,10 @@ async def audio_delete(
     if not ffprobe:
         return JSONResponse(
             {"ok": False, "error": "ffprobe is not available."}, status_code=400
+        )
+    if not os.path.isfile(local) and not os.path.lexists(_backup_path(local)):
+        return JSONResponse(
+            {"ok": False, "error": "The video file is not reachable."}, status_code=400
         )
     ffmpeg = resolve_ffmpeg()
     if not ffmpeg:
@@ -457,6 +481,15 @@ async def audio_delete(
             status_code=409,
         )
     async with lock:
+        recovered = _recover_previous_swap(local, ffprobe)
+        if recovered:
+            log("Search", "WARN", f"Could not recover an interrupted edit: {recovered}")
+            return JSONResponse({"ok": False, "error": recovered}, status_code=500)
+        if not os.path.isfile(local):
+            return JSONResponse(
+                {"ok": False, "error": "The video file is not reachable."},
+                status_code=400,
+            )
         tracks, error = await _probe_audio(ffprobe, local)
         if error:
             return JSONResponse(
@@ -485,7 +518,7 @@ async def audio_delete(
         set_default = bool(track.get("default")) and not remaining_default
 
         ok, err = await asyncio.to_thread(
-            _remove_track, ffmpeg, local, stream_index, set_default
+            _remove_track, ffmpeg, local, stream_index, set_default, ffprobe
         )
         if not ok:
             error = err or "ffmpeg failed."
@@ -691,17 +724,312 @@ async def _probe_audio(ffprobe: str, local: str) -> tuple[list[dict], str | None
     return await asyncio.to_thread(run)
 
 
-def _remove_track(ffmpeg: str, local: str, index: int, set_default: bool) -> tuple[bool, str]:
+# ---- committing the rewritten file ------------------------------------------
+
+# Renaming over an existing file is the step that fails on shares when a
+# player, scanner or network client still has the old file open. Retry those
+# errors briefly, then give up without touching the original.
+_RENAME_RETRY_DELAYS = (0.3, 0.7, 1.5)
+
+
+def _is_transient_lock(exc: OSError) -> bool:
+    """True for errors that commonly mean "another process has the file"."""
+    if exc.errno in (
+        errno.EACCES,
+        errno.EPERM,
+        errno.EBUSY,
+        getattr(errno, "ETXTBSY", errno.EBUSY),
+    ):
+        return True
+    # Windows reports sharing violations as 32/33 rather than errno values.
+    return getattr(exc, "winerror", None) in (5, 32, 33)
+
+
+def _retry_rename(src: str, dst: str) -> None:
+    """``os.rename`` with a short retry window for transient file locks."""
+    last: OSError | None = None
+    for delay in (*_RENAME_RETRY_DELAYS, None):
+        try:
+            os.rename(src, dst)
+            return
+        except OSError as exc:
+            last = exc
+            if not _is_transient_lock(exc) or delay is None:
+                raise
+            time.sleep(delay)
+    if last is not None:  # pragma: no cover - the loop always returns or raises
+        raise last
+
+
+def _swap_error(
+    action: str,
+    exc: OSError,
+    *,
+    restored: bool = False,
+    backup: str | None = None,
+) -> str:
+    if _is_transient_lock(exc):
+        text = (
+            "The video is in use by another program or the network share is "
+            "blocking changes. Close the player, Jellyfin scan or network "
+            "folder showing it and retry."
+        )
+    else:
+        text = f"Could not {action}."
+    if restored:
+        text += " The original was restored."
+    elif backup:
+        text += f" The original is preserved at {backup}."
+    else:
+        text += " The original was left unchanged."
+    return f"{text} ({exc})"
+
+
+def _file_key(local: str) -> str:
+    """A short, stable key so a backup can be found after a crash."""
+    value = os.path.normcase(os.path.abspath(local)).encode("utf-8", "replace")
+    return hashlib.sha1(value).hexdigest()[:12]
+
+
+def _backup_path(local: str) -> str:
+    folder, name = os.path.split(local)
+    suffix = os.path.splitext(name)[1]
+    return os.path.join(folder, f".jftools-original-{_file_key(local)}{suffix}")
+
+
+def _failed_path(local: str) -> str:
+    folder, name = os.path.split(local)
+    suffix = os.path.splitext(name)[1]
+    stamp = time.time_ns()
+    return os.path.join(folder, f".jftools-failed-{_file_key(local)}-{stamp}{suffix}")
+
+
+def _validate_media(ffprobe: str | None, path: str) -> str | None:
+    """Return an error when ``path`` is missing, empty or unreadable."""
+    try:
+        info = os.stat(path)
+    except OSError as exc:
+        return f"the new file is missing ({exc})"
+    if not stat.S_ISREG(info.st_mode):
+        return "the new file is not a regular file."
+    if info.st_size <= 0:
+        return "the new file is empty."
+    if not ffprobe:
+        return None
+    subtitles, audio, duration, error = _probe_streams(ffprobe, path)
+    if error:
+        return f"ffprobe could not read it: {error}"
+    if not subtitles and not audio and duration <= 0:
+        return "ffprobe found no playable streams."
+    return None
+
+
+def _copy_media_metadata(src: str, dst: str) -> None:
+    """Keep the replacement's mode, owner and timestamps like the original."""
+    try:
+        info = os.stat(src)
+    except OSError:
+        return
+    if hasattr(os, "chown"):
+        try:
+            os.chown(dst, info.st_uid, info.st_gid)
+        except OSError as exc:
+            # A non-root process cannot change the owner, but it can often
+            # still keep the original group so Jellyfin can read the file.
+            try:
+                os.chown(dst, -1, info.st_gid)
+            except OSError:
+                if info.st_uid != os.geteuid():
+                    log(
+                        "Search",
+                        "WARN",
+                        f"Could not preserve the owner of {os.path.basename(dst)}: {exc}",
+                    )
+    try:
+        os.chmod(dst, stat.S_IMODE(info.st_mode))
+    except OSError:
+        pass
+    try:
+        os.utime(dst, ns=(info.st_atime_ns, info.st_mtime_ns))
+    except OSError:
+        pass
+    try:
+        shutil.copystat(src, dst)
+    except OSError:
+        pass
+
+
+def _restore_original(
+    backup: str, local: str, tmp: str | None = None
+) -> tuple[bool, str]:
+    """Put ``backup`` back at ``local``, moving any bad replacement aside."""
+    side = None
+    if os.path.lexists(local):
+        side = tmp if tmp and not os.path.lexists(tmp) else _failed_path(local)
+        try:
+            _retry_rename(local, side)
+        except OSError as exc:
+            return (
+                False,
+                f"could not move the failed replacement aside ({exc}); "
+                f"the original is at {backup}",
+            )
+    try:
+        _retry_rename(backup, local)
+    except OSError as exc:
+        return (
+            False,
+            f"could not restore the original ({exc}); it is still at {backup}",
+        )
+    if side:
+        try:
+            os.remove(side)
+        except OSError:
+            pass
+    return True, ""
+
+
+def _recover_previous_swap(local: str, ffprobe: str | None) -> str | None:
+    """Finish or undo a swap that was interrupted by a crash.
+
+    The backup only remains when the process died between the two renames, or
+    when the old file could not be deleted after a successful edit.
+    """
+    backup = _backup_path(local)
+    if not os.path.lexists(backup):
+        return None
+    if not os.path.exists(local):
+        try:
+            _retry_rename(backup, local)
+        except OSError as exc:
+            return (
+                f"A previous edit left the original at {backup}, and it could "
+                f"not be restored: {exc}"
+            )
+        log(
+            "Search",
+            "INFO",
+            f"Recovered the original after an interrupted edit: {os.path.basename(local)}",
+        )
+        return None
+
+    local_error = _validate_media(ffprobe, local)
+    if local_error:
+        backup_error = _validate_media(ffprobe, backup)
+        if backup_error:
+            return (
+                f"A previous edit left two copies of {os.path.basename(local)}, "
+                f"and neither could be validated. The original is at {backup}."
+            )
+        ok, error = _restore_original(backup, local)
+        if not ok:
+            return f"A previous edit could not be completed: {error}"
+        log(
+            "Search",
+            "INFO",
+            f"Restored the original after an interrupted edit: {os.path.basename(local)}",
+        )
+        return None
+
+    # Both files are valid: the swap finished, only the cleanup was interrupted.
+    if not ffprobe:
+        return (
+            f"A previous edit left a backup at {backup}, and ffprobe is "
+            "unavailable to verify the new file."
+        )
+    try:
+        os.remove(backup)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return (
+            f"A previous edit left a backup at {backup}, and it could not be "
+            f"removed: {exc}. Close anything using the old file and retry."
+        )
+    return None
+
+
+def _commit_media(
+    tmp: str, local: str, ffprobe: str | None
+) -> tuple[bool, str]:
+    """Validate ``tmp`` and swap it into place without losing the original."""
+    error = _validate_media(ffprobe, tmp)
+    if error:
+        return (
+            False,
+            f"The new file was not valid: {error}. The original was left unchanged.",
+        )
+
+    _copy_media_metadata(local, tmp)
+    backup = _backup_path(local)
+    try:
+        _retry_rename(local, backup)
+    except OSError as exc:
+        return False, _swap_error("move the original aside", exc)
+
+    try:
+        _retry_rename(tmp, local)
+    except OSError as exc:
+        ok, restore_error = _restore_original(backup, local, tmp)
+        if ok:
+            return False, _swap_error("replace the video", exc, restored=True)
+        return False, (
+            _swap_error("replace the video", exc, backup=backup)
+            + f" Restoring it also failed: {restore_error}"
+        )
+
+    error = _validate_media(ffprobe, local)
+    if error:
+        ok, restore_error = _restore_original(backup, local, tmp)
+        if ok:
+            return (
+                False,
+                f"The new file failed validation ({error}). "
+                "The original was restored.",
+            )
+        return False, (
+            f"The new file failed validation ({error}). The original is at "
+            f"{backup}; restoring it also failed: {restore_error}"
+        )
+
+    try:
+        os.remove(backup)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log(
+            "Search",
+            "WARN",
+            f"Could not remove the track-edit backup {backup}: {exc}",
+        )
+    return True, ""
+
+
+def _remove_track(
+    ffmpeg: str,
+    local: str,
+    index: int,
+    set_default: bool,
+    ffprobe: str | None = None,
+) -> tuple[bool, str]:
     """Rewrite ``local`` without stream ``index``; ``(ok, error)``.
 
-    The copy goes to a temporary file in the same folder (same volume, so the
-    final ``os.replace`` is atomic) and only replaces the video once ffmpeg
-    exits successfully.
+    The copy goes to a temporary file in the same folder and is validated
+    before the original is moved aside. A failed swap restores the original.
     """
+    recovered = _recover_previous_swap(local, ffprobe)
+    if recovered:
+        return False, recovered
+
     folder = os.path.dirname(local)
     suffix = os.path.splitext(local)[1]
-    fd, tmp = tempfile.mkstemp(prefix=".jftools-audio-", suffix=suffix, dir=folder)
-    os.close(fd)
+    try:
+        fd, tmp = tempfile.mkstemp(
+            prefix=".jftools-audio-", suffix=suffix, dir=folder
+        )
+        os.close(fd)
+    except OSError as exc:
+        return False, f"Could not create a temporary file next to the video: {exc}"
 
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -719,17 +1047,20 @@ def _remove_track(ffmpeg: str, local: str, index: int, set_default: bool) -> tup
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=7200, creationflags=creationflags,
-        )
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=7200, creationflags=creationflags,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return False, f"ffmpeg error: {exc}"
         if result.returncode != 0:
             lines = (result.stderr or "").strip().splitlines()
             return False, (lines[-1] if lines else f"ffmpeg exit {result.returncode}")
-        os.replace(tmp, local)
-        return True, ""
-    except Exception as exc:  # noqa: BLE001
-        return False, f"ffmpeg error: {exc}"
+        try:
+            return _commit_media(tmp, local, ffprobe)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"could not replace the video: {exc}"
     finally:
         try:
             if os.path.exists(tmp):
@@ -744,17 +1075,27 @@ def _rewrite_tracks(
     deleted: set[int],
     audio_edits: list[tuple[int, str]],
     subtitle_edits: list[tuple[int, str]],
+    ffprobe: str | None = None,
 ) -> tuple[bool, str]:
     """Rewrite ``local`` deleting streams and applying default dispositions.
 
     Every stream is mapped, then the deleted ones are subtracted. The copy goes
-    to a temporary file in the same folder so the final ``os.replace`` is
-    atomic, and the original is replaced only after ffmpeg succeeds.
+    to a temporary file in the same folder and is validated before the original
+    is moved aside. A failed swap restores the original.
     """
+    recovered = _recover_previous_swap(local, ffprobe)
+    if recovered:
+        return False, recovered
+
     folder = os.path.dirname(local)
     suffix = os.path.splitext(local)[1]
-    fd, tmp = tempfile.mkstemp(prefix=".jftools-internal-", suffix=suffix, dir=folder)
-    os.close(fd)
+    try:
+        fd, tmp = tempfile.mkstemp(
+            prefix=".jftools-internal-", suffix=suffix, dir=folder
+        )
+        os.close(fd)
+    except OSError as exc:
+        return False, f"Could not create a temporary file next to the video: {exc}"
 
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -776,17 +1117,20 @@ def _rewrite_tracks(
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=7200, creationflags=creationflags,
-        )
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=7200, creationflags=creationflags,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return False, f"ffmpeg error: {exc}"
         if result.returncode != 0:
             lines = (result.stderr or "").strip().splitlines()
             return False, (lines[-1] if lines else f"ffmpeg exit {result.returncode}")
-        os.replace(tmp, local)
-        return True, ""
-    except Exception as exc:  # noqa: BLE001
-        return False, f"ffmpeg error: {exc}"
+        try:
+            return _commit_media(tmp, local, ffprobe)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"could not replace the video: {exc}"
     finally:
         try:
             if os.path.exists(tmp):
