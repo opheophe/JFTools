@@ -126,7 +126,7 @@ OPERATIONS = [
      "description": "Refresh the cached library list from Jellyfin.", "notify": "error"},
     {"id": "check_updates", "label": "Check for updates", "tab": "System", "handler": _op_check_updates,
      "description": "Query GitHub for the latest JFTools release.", "notify": "never"},
-    {"id": "backup", "label": "Backup", "tab": "Settings", "handler": _op_backup,
+    {"id": "backup", "label": "Backup", "tab": "Settings", "log_tab": "Backup", "handler": _op_backup,
      "description": "Write a ZIP of settings and runtime data to the backup folder."},
     {"id": "subtitle_scan_full", "label": "Media scan (full)", "tab": "Search", "handler": _op_subtitle_scan_full,
      "description": "Re-probe every media file for subtitle and audio tracks with ffprobe.",
@@ -332,6 +332,7 @@ def _notify_job_result(
     status: str,
     error: str | None,
     duration: float,
+    started: float | None = None,
 ) -> None:
     """Publish a scheduler result unless the operation reports itself."""
     mode = op.get("notify", "always")
@@ -353,6 +354,9 @@ def _notify_job_result(
         title,
         message,
         source="Scheduler",
+        tab=op.get("log_tab") or op.get("tab", ""),
+        started=started,
+        duration=duration,
         url="/scheduler",
         link_label="Open Scheduler",
     )
@@ -408,6 +412,7 @@ async def _run_job(job_id: str) -> None:
             str(job.get("last_status") or "error"),
             job.get("last_error"),
             float(job["last_duration"]),
+            job.get("last_run"),
         )
 
 

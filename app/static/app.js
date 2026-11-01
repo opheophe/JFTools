@@ -103,6 +103,8 @@ const jfNotifState = {
   toastKeys: new Map(),
   shownIds: new Set(),
   panelOpen: false,
+  detailOpen: false,
+  detailFocus: null,
 };
 
 function jfNotifStored(key) {
@@ -137,6 +139,50 @@ function jfNotifIcon(kind) {
   if (kind === "error") return "!";
   if (kind === "warning") return "!";
   return "i";
+}
+
+function jfNotifKindLabel(kind) {
+  if (kind === "success") return "Success";
+  if (kind === "error") return "Error";
+  if (kind === "warning") return "Warning";
+  return "Info";
+}
+
+// Log lines carry an epoch timestamp; show wall-clock time in the reader's zone.
+function jfNotifClock(ts) {
+  const date = new Date(Number(ts) * 1000);
+  if (isNaN(date.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return p(date.getHours()) + ":" + p(date.getMinutes()) + ":" + p(date.getSeconds());
+}
+
+function jfNotifWhen(ts) {
+  const date = new Date(Number(ts) * 1000);
+  if (isNaN(date.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return date.getFullYear() + "-" + p(date.getMonth() + 1) + "-" + p(date.getDate()) +
+         " " + p(date.getHours()) + ":" + p(date.getMinutes()) + ":" + p(date.getSeconds());
+}
+
+function jfNotifCounts(event) {
+  const details = Array.isArray(event.details) ? event.details : null;
+  const warnings = Number(event.warning_count || 0);
+  const errors = Number(event.error_count || 0);
+  const lines = Number(
+    details ? details.length : (event.detail_count || 0),
+  );
+  return { lines: lines, warnings: warnings, errors: errors };
+}
+
+function jfNotifCountLabel(counts) {
+  if (counts.errors && counts.warnings > counts.errors) {
+    return counts.warnings + " warnings";
+  }
+  if (counts.errors) return counts.errors === 1 ? "1 error" : counts.errors + " errors";
+  if (counts.warnings) {
+    return counts.warnings === 1 ? "1 warning" : counts.warnings + " warnings";
+  }
+  return "";
 }
 
 function jfNotifHost() {
@@ -192,14 +238,11 @@ function jfNotify(options) {
   const meta = el("div", { class: "jf-toast-meta" });
   if (opts.source) meta.appendChild(el("span", { text: String(opts.source) }));
   if (opts.ts) meta.appendChild(el("span", { text: jfNotifAgo(opts.ts) }));
-  if (opts.url) {
-    meta.appendChild(el("a", {
-      class: "jf-toast-link",
-      href: String(opts.url),
-      text: String(opts.link_label || opts.linkLabel || "Open"),
-    }));
-  }
-  if (meta.childNodes.length) body.appendChild(meta);
+  const counts = jfNotifCounts(opts);
+  const countLabel = jfNotifCountLabel(counts);
+  if (countLabel) meta.appendChild(el("span", { class: "jf-notif-flag", text: countLabel }));
+  meta.appendChild(el("span", { class: "jf-notif-hint", text: "View details" }));
+  body.appendChild(meta);
   toast.appendChild(body);
 
   let remaining = Number.isFinite(timeout) ? Math.max(0, timeout) : 7000;
@@ -236,6 +279,23 @@ function jfNotify(options) {
   close.addEventListener("click", dismiss);
   toast.appendChild(close);
 
+  const openDetails = (event) => {
+    if (event) event.stopPropagation();
+    dismiss();
+    jfNotifOpenDetail(Object.assign({}, opts, { id: id }));
+  };
+  body.classList.add("jf-toast-open");
+  body.tabIndex = 0;
+  body.setAttribute("role", "button");
+  body.setAttribute("aria-label", "View details: " + String(opts.title || "task"));
+  body.addEventListener("click", openDetails);
+  body.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openDetails(event);
+    }
+  });
+
   if (key) jfNotifState.toastKeys.set(key, toast);
   if (id !== null) jfNotifState.shownIds.add(id);
   jfNotifHost().prepend(toast);
@@ -254,6 +314,9 @@ function jfNotifyEvent(event) {
     url: event.url,
     link_label: event.link_label,
     ts: event.ts,
+    detail_count: event.detail_count,
+    warning_count: event.warning_count,
+    error_count: event.error_count,
   });
 }
 
@@ -284,8 +347,12 @@ function jfNotifRenderHistory() {
     return;
   }
   [...jfNotifState.history].reverse().forEach((event) => {
+    const kind = jfNotifKind(event.kind);
     const item = el("div", {
-      class: "notif-item notif-item-" + jfNotifKind(event.kind),
+      class: "notif-item notif-item-" + kind + " notif-item-clickable",
+      tabindex: "0",
+      role: "button",
+      "aria-label": "View details: " + String(event.title || "Notification"),
     });
     item.appendChild(el("span", { class: "notif-item-dot", "aria-hidden": "true" }));
     const body = el("div", { class: "notif-item-body" });
@@ -299,16 +366,143 @@ function jfNotifRenderHistory() {
     const meta = el("div", { class: "notif-item-meta" });
     if (event.ts) meta.appendChild(el("span", { text: jfNotifAgo(event.ts) }));
     if (event.source) meta.appendChild(el("span", { text: String(event.source) }));
-    if (event.url) {
-      meta.appendChild(el("a", {
-        href: String(event.url),
-        text: String(event.link_label || "Open"),
-      }));
-    }
+    const countLabel = jfNotifCountLabel(jfNotifCounts(event));
+    if (countLabel) meta.appendChild(el("span", { class: "jf-notif-flag", text: countLabel }));
+    meta.appendChild(el("span", { class: "jf-notif-hint", text: "View details" }));
     if (meta.childNodes.length) body.appendChild(meta);
     item.appendChild(body);
+    item.addEventListener("click", () => jfNotifOpenDetail(event));
+    item.addEventListener("keydown", (keyEvent) => {
+      if (keyEvent.key === "Enter" || keyEvent.key === " ") {
+        keyEvent.preventDefault();
+        jfNotifOpenDetail(event);
+      }
+    });
     list.appendChild(item);
   });
+}
+
+function jfNotifCloseDetail() {
+  const dialog = document.getElementById("notif-detail");
+  if (!dialog || dialog.hidden) return;
+  dialog.hidden = true;
+  jfNotifState.detailOpen = false;
+  const previous = jfNotifState.detailFocus;
+  jfNotifState.detailFocus = null;
+  if (previous && typeof previous.focus === "function") previous.focus();
+}
+
+function jfNotifRenderDetail(event) {
+  const dialog = document.getElementById("notif-detail");
+  if (!dialog) return;
+  const kind = jfNotifKind(event.kind);
+  dialog.dataset.kind = kind;
+
+  const title = document.getElementById("notif-detail-title");
+  if (title) title.textContent = String(event.title || "Notification");
+
+  const dot = document.getElementById("notif-detail-dot");
+  if (dot) dot.className = "notif-detail-dot notif-detail-dot-" + kind;
+
+  const meta = document.getElementById("notif-detail-meta");
+  if (meta) {
+    meta.innerHTML = "";
+    meta.appendChild(el("span", {
+      class: "jf-notif-flag notif-kind-" + kind,
+      text: jfNotifKindLabel(kind),
+    }));
+    if (event.source) meta.appendChild(el("span", { text: String(event.source) }));
+    if (event.ts) meta.appendChild(el("span", { text: jfNotifWhen(event.ts) }));
+    if (event.ts) meta.appendChild(el("span", { text: jfNotifAgo(event.ts) }));
+    if (typeof event.duration === "number" && event.duration >= 0) {
+      meta.appendChild(el("span", { text: "Took " + event.duration.toFixed(1) + "s" }));
+    }
+  }
+
+  const message = document.getElementById("notif-detail-message");
+  if (message) {
+    message.textContent = String(event.message || "");
+    message.hidden = !event.message;
+  }
+
+  const details = Array.isArray(event.details) ? event.details : [];
+  const section = document.getElementById("notif-detail-section");
+  const log = document.getElementById("notif-detail-log");
+  const countEl = document.getElementById("notif-detail-count");
+  if (section) section.hidden = false;
+  if (countEl) {
+    countEl.textContent = details.length
+      ? details.length + (details.length === 1 ? " line" : " lines")
+      : "";
+  }
+  if (log) {
+    log.innerHTML = "";
+    if (!details.length) {
+      log.appendChild(el("div", {
+        class: "notif-detail-empty muted",
+        text: "No log lines were recorded for this task.",
+      }));
+    } else {
+      details.forEach((line) => {
+        const level = String(line.level || "INFO").toUpperCase();
+        const row = el("div", {
+          class: "notif-log-line notif-log-" + level.toLowerCase(),
+        });
+        row.appendChild(el("span", {
+          class: "notif-log-time",
+          text: jfNotifClock(line.ts),
+        }));
+        row.appendChild(el("span", { class: "notif-log-level", text: level }));
+        row.appendChild(el("span", {
+          class: "notif-log-message",
+          text: String(line.message || ""),
+        }));
+        log.appendChild(row);
+      });
+    }
+  }
+
+  const actions = document.getElementById("notif-detail-actions");
+  if (actions) {
+    actions.innerHTML = "";
+    if (event.url && event.link_label) {
+      actions.appendChild(el("a", {
+        class: "notif-detail-link",
+        href: String(event.url),
+        text: String(event.link_label),
+      }));
+    }
+    const close = el("button", {
+      type: "button",
+      class: "notif-detail-close",
+      text: "Close",
+    });
+    close.addEventListener("click", jfNotifCloseDetail);
+    actions.appendChild(close);
+  }
+}
+
+async function jfNotifOpenDetail(input) {
+  let event = input && typeof input === "object" ? input : null;
+  const id = event ? event.id : input;
+  if (id !== undefined && id !== null && (!event || !Array.isArray(event.details))) {
+    try {
+      const data = await getJSON("/api/notifications/" + encodeURIComponent(id));
+      if (data && data.ok && data.item) event = data.item;
+    } catch (_) {
+      /* the local copy below still shows what we already know */
+    }
+  }
+  if (!event) return;
+  const dialog = document.getElementById("notif-detail");
+  if (!dialog) return;
+  jfNotifSetPanel(false);
+  jfNotifState.detailFocus = document.activeElement;
+  jfNotifRenderDetail(event);
+  dialog.hidden = false;
+  jfNotifState.detailOpen = true;
+  const close = document.getElementById("notif-detail-close");
+  if (close) close.focus();
 }
 
 async function jfNotifFetchHistory(markRead) {
@@ -423,11 +617,26 @@ function jfNotifInit() {
   if (panel) panel.addEventListener("click", (event) => event.stopPropagation());
   const panelClose = document.getElementById("notif-panel-close");
   if (panelClose) panelClose.addEventListener("click", () => jfNotifSetPanel(false));
+
+  const dialog = document.getElementById("notif-detail");
+  if (dialog) {
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) jfNotifCloseDetail();
+    });
+  }
+  const detailClose = document.getElementById("notif-detail-close");
+  if (detailClose) detailClose.addEventListener("click", jfNotifCloseDetail);
+
   document.addEventListener("click", () => {
     if (jfNotifState.panelOpen) jfNotifSetPanel(false);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && jfNotifState.panelOpen) jfNotifSetPanel(false);
+    if (event.key !== "Escape") return;
+    if (jfNotifState.detailOpen) {
+      jfNotifCloseDetail();
+    } else if (jfNotifState.panelOpen) {
+      jfNotifSetPanel(false);
+    }
   });
   document.addEventListener("visibilitychange", () => {
     document.querySelectorAll(".jf-toast").forEach((toast) => {
@@ -463,6 +672,7 @@ window.jfNotifications = {
   checkNow: jfNotifCheck,
   refresh: () => jfNotifFetchHistory(false),
   open: () => jfNotifSetPanel(true),
+  detail: jfNotifOpenDetail,
 };
 
 function fmtDate(iso) {

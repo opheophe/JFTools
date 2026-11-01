@@ -96,3 +96,105 @@ async def test_api_returns_items_and_head():
     assert data["latest"] == event_id
     assert data["more"] is False
     assert data["items"][-1]["title"] == "Done"
+
+
+def test_publish_captures_the_tabs_log_lines_for_the_details():
+    from app import logs
+
+    started = 1000.0
+    logs.log("Search", "INFO", "scan started")
+    logs.log("Search", "WARN", "movie.mkv: ffprobe timed out")
+    notifications.publish(
+        "warning",
+        "Media scan complete with warnings",
+        "1 probed, 1 could not be probed",
+        tab="Search",
+        started=started,
+    )
+
+    event = notifications.get(notifications.latest_id())
+    assert event is not None
+    assert event["tab"] == "Search"
+    assert [line["message"] for line in event["details"]] == [
+        "scan started",
+        "movie.mkv: ffprobe timed out",
+    ]
+    assert [line["level"] for line in event["details"]] == ["INFO", "WARN"]
+
+
+def test_list_events_omit_details_but_report_what_they_contain(monkeypatch):
+    from app import logs
+
+    monkeypatch.setattr(notifications, "DETAIL_WINDOW_SECONDS", 10**9)
+    logs.log("Search", "INFO", "started")
+    logs.log("Search", "WARN", "one subtitle missing")
+    logs.log("Search", "ERROR", "one file failed")
+    event_id = notifications.publish("warning", "Scan done", tab="Search")
+
+    items, _latest, _more = notifications.query()
+    item = next(e for e in items if e["id"] == event_id)
+
+    assert "details" not in item
+    assert item["detail_count"] == 3
+    assert item["warning_count"] == 2
+    assert item["error_count"] == 1
+
+    full = notifications.get(event_id)
+    assert [line["message"] for line in full["details"]] == [
+        "started",
+        "one subtitle missing",
+        "one file failed",
+    ]
+
+
+def test_details_are_persisted_with_the_event():
+    from app import logs
+
+    logs.log("Backup", "INFO", "Backup created: nightly.zip (1024 bytes)")
+    event_id = notifications.publish("success", "Backup complete", tab="Backup")
+
+    notifications._reset_for_tests()
+
+    event = notifications.get(event_id)
+    assert event is not None
+    assert event["details"][0]["message"].startswith("Backup created")
+
+
+def test_get_respects_the_event_owner():
+    event_id = notifications.publish("success", "Private", user="alice")
+    assert notifications.get(event_id, "alice") is not None
+    assert notifications.get(event_id, "bob") is None
+    assert notifications.get("not-a-number") is None
+
+
+def test_captured_details_keep_warnings_and_the_summary_within_the_limit():
+    from app import logs
+
+    for index in range(20):
+        logs.log("Search", "INFO", f"file {index}")
+        if index == 5:
+            logs.log("Search", "WARN", "file 5 failed")
+
+    lines = logs.recent("Search", limit=5)
+
+    messages = [line["message"] for line in lines]
+    assert len(lines) == 5
+    assert "file 5 failed" in messages
+    assert messages[-1] == "file 19"
+
+
+async def test_detail_endpoint_returns_log_lines_and_404s():
+    from app import logs
+
+    logs.log("Search", "WARN", "movie.mkv: ffprobe timed out")
+    event_id = notifications.publish("warning", "Scan complete with warnings", tab="Search")
+
+    response = await notifications.api_notification(str(event_id), user="alice")
+    data = json.loads(response.body)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert data["item"]["details"][0]["message"] == "movie.mkv: ffprobe timed out"
+
+    missing = await notifications.api_notification("999999", user="alice")
+    assert missing.status_code == 404

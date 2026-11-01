@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import datetime
 import re
+import threading
+import time
+from collections import deque
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -20,9 +23,18 @@ from .web import require_login, templates
 LOG_DIR = config.data_dir / "logs"
 MAX_FILES_PER_TAB = 10
 
+# The last few log lines per tab are kept in memory so a finished task can
+# attach its own activity to the notification it publishes. This is deliberately
+# a ring buffer instead of tying a notification to a log file: the file is
+# pruned/cleared, while the notification has to stay useful in the bell menu.
+RECENT_LINES = 600
+
 router = APIRouter()
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9 _-]")
+
+_recent: dict[str, deque[dict]] = {}
+_recent_lock = threading.Lock()
 
 
 def _safe_tab(tab: str) -> str:
@@ -42,6 +54,16 @@ def _local_now() -> datetime.datetime:
 
 def log(tab: str, level: str, message: str) -> None:
     """Append one line to today's log file for the tab, then prune old files."""
+    entry = {
+        "ts": time.time(),
+        "level": str(level).upper(),
+        "message": str(message),
+    }
+    with _recent_lock:
+        buffer = _recent.get(tab)
+        if buffer is None:
+            buffer = _recent[tab] = deque(maxlen=RECENT_LINES)
+        buffer.append(entry)
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         now = _local_now()
@@ -53,6 +75,53 @@ def log(tab: str, level: str, message: str) -> None:
         _prune(tab)
     except OSError:
         pass
+
+
+def recent(tab: str, since: float | None = None, limit: int = 200) -> list[dict]:
+    """Return recent log lines for a tab, oldest first.
+
+    ``since`` is an epoch timestamp (usually when the task started) so a long
+    scan does not drag in older activity from the same tab. When a task has
+    produced more lines than ``limit``, warning and error lines are kept first —
+    they are the reason a result says "with warnings" — the rest of the space
+    goes to the newest lines, and the final line (the task summary) is always
+    kept.
+    """
+    try:
+        limit = max(1, int(limit))
+    except (TypeError, ValueError):
+        limit = 200
+    with _recent_lock:
+        buffer = list(_recent.get(tab) or ())
+    if since is not None:
+        try:
+            cutoff = float(since)
+        except (TypeError, ValueError):
+            cutoff = 0.0
+        buffer = [e for e in buffer if float(e.get("ts") or 0) >= cutoff]
+    if len(buffer) <= limit:
+        return [dict(e) for e in buffer]
+
+    tail = [buffer[-1]]
+    if limit == 1:
+        return [dict(tail[0])]
+    important = [
+        e for e in buffer[:-1] if e.get("level") in ("WARN", "WARNING", "ERROR")
+    ]
+    if len(important) >= limit - 1:
+        picked = important[-(limit - 1):] + tail
+    else:
+        chosen = {id(e) for e in important}
+        rest = [e for e in reversed(buffer[:-1]) if id(e) not in chosen]
+        room = max(0, limit - 1 - len(important))
+        picked = important + list(reversed(rest[:room])) + tail
+    picked.sort(key=lambda e: float(e.get("ts") or 0))
+    return [dict(e) for e in picked]
+
+
+def _reset_recent_for_tests() -> None:
+    with _recent_lock:
+        _recent.clear()
 
 
 def _prune(tab: str) -> None:

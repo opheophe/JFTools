@@ -48,8 +48,10 @@ existing server over the API.
 - Task notifications: scans, Movie Match fetches, track edits, subtitle/file
   changes and scheduled jobs report success, warnings and errors in the top
   right. Results are also kept in the bell menu, so closing a dialog,
-  navigating away or reloading the page does not lose them. Error toasts stay
-  until dismissed.
+  navigating away or reloading the page does not lose them. Clicking a
+  notification opens the task's own log lines (warnings and errors included),
+  so "complete with warnings" tells you what warned instead of sending you to
+  the search page. Error toasts stay until dismissed.
 - Player: the **Play** action on a row streams a library file in a small popup
   window — seek, speed, jump to a time — with any subtitle track attached
   (embedded streams extracted, external files converted to WebVTT). Files whose

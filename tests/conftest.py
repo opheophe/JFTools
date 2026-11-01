@@ -37,7 +37,11 @@ def _keep_test_writes_out_of_the_scan_store(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _keep_test_notifications_out_of_the_app(tmp_path, monkeypatch):
     """Point the durable notification store at a throwaway file."""
-    from app import notifications
+    from app import logs, notifications
 
     monkeypatch.setattr(notifications, "_STORE_FILE", tmp_path / "notifications.json")
     notifications._reset_for_tests()
+    logs._reset_recent_for_tests()
+    yield
+    logs._reset_recent_for_tests()
+

@@ -1025,6 +1025,7 @@ async def run_scan(mode: str) -> None:
     if _fetch["status"] == "running":
         return
     label = "Media scan" + (" (full)" if mode == "full" else "")
+    started = time.time()
     _fetch.update({"status": "running", "phase": None, "scanned": 0, "total": 0, "error": None})
     log("Search", "INFO", f"{label} started")
     try:
@@ -1041,6 +1042,8 @@ async def run_scan(mode: str) -> None:
                 f"{label} failed",
                 _fetch["error"],
                 source="Search",
+                tab="Search",
+                started=started,
                 url="/logs",
                 link_label="View logs",
             )
@@ -1058,6 +1061,8 @@ async def run_scan(mode: str) -> None:
                 f"{label} failed",
                 _fetch["error"],
                 source="Search",
+                tab="Search",
+                started=started,
                 url="/jellyfin-id",
                 link_label="Open Movie Match",
             )
@@ -1165,6 +1170,9 @@ async def run_scan(mode: str) -> None:
             f"{label} complete" + (" with warnings" if failed else ""),
             summary,
             source="Search",
+            tab="Search",
+            started=started,
+            duration=time.time() - started,
             url="/search",
             link_label="Open Search",
         )
@@ -1177,6 +1185,9 @@ async def run_scan(mode: str) -> None:
             f"{label} aborted",
             "The scan was stopped before it finished.",
             source="Search",
+            tab="Search",
+            started=started,
+            duration=time.time() - started,
             url="/search",
             link_label="Open Search",
         )
@@ -1190,6 +1201,9 @@ async def run_scan(mode: str) -> None:
             f"{label} failed",
             _fetch["error"],
             source="Search",
+            tab="Search",
+            started=started,
+            duration=time.time() - started,
             url="/logs",
             link_label="View logs",
         )
@@ -1741,6 +1755,7 @@ async def subtitles_download(
             "Subtitle download failed",
             f"{Path(path).name} — {exc}",
             source="Search",
+            tab="Search",
             user=user,
             url="/logs",
             link_label="View logs",
@@ -1762,6 +1777,7 @@ async def subtitles_download(
             "Subtitle download failed",
             f"{os.path.basename(target)} — Could not save the subtitle: {exc}",
             source="Search",
+            tab="Search",
             user=user,
             url="/logs",
             link_label="View logs",
@@ -1801,6 +1817,7 @@ async def subtitles_download(
         "Subtitle download complete with warning" if jellyfin else "Subtitle download complete",
         detail,
         source="Search",
+        tab="Search",
         user=user,
         url="/search",
         link_label="Open Search",
@@ -1868,6 +1885,7 @@ async def subtitles_delete(
             "Subtitle delete failed",
             f"{Path(path).name} — {file}: {error}",
             source="Search",
+            tab="Search",
             user=user,
             url="/logs",
             link_label="View logs",
@@ -1895,6 +1913,7 @@ async def subtitles_delete(
         "Subtitle delete complete with warning" if jellyfin else "Subtitle delete complete",
         detail,
         source="Search",
+        tab="Search",
         user=user,
         url="/search",
         link_label="Open Search",
@@ -1981,6 +2000,7 @@ async def subtitles_rename(
             "Subtitle rename failed",
             f"{Path(path).name} — {file}: {error}",
             source="Search",
+            tab="Search",
             user=user,
             url="/logs",
             link_label="View logs",
@@ -2008,6 +2028,7 @@ async def subtitles_rename(
         "Subtitle rename complete with warning" if jellyfin else "Subtitle rename complete",
         detail,
         source="Search",
+        tab="Search",
         user=user,
         url="/search",
         link_label="Open Search",
@@ -2093,6 +2114,7 @@ async def subtitles_sync(
             "Subtitle sync failed",
             f"{Path(path).name} — {file}: {error}",
             source="Search",
+            tab="Search",
             user=user,
             url="/logs",
             link_label="View logs",
@@ -2112,6 +2134,7 @@ async def subtitles_sync(
         "Subtitle sync complete",
         f"{Path(path).name} — {message}",
         source="Search",
+        tab="Search",
         user=user,
         url="/search",
         link_label="Open Search",

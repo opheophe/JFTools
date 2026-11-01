@@ -47,6 +47,27 @@
     </div>
     <div class="notif-list" id="notif-list"></div>
   </div>
+  <div class="notif-detail" id="notif-detail" role="dialog" aria-modal="true"
+       aria-labelledby="notif-detail-title" hidden>
+    <div class="notif-detail-card">
+      <div class="notif-detail-head">
+        <span class="notif-detail-dot" id="notif-detail-dot" aria-hidden="true"></span>
+        <h2 class="notif-detail-title" id="notif-detail-title"></h2>
+        <button type="button" class="notif-panel-close" id="notif-detail-close"
+                aria-label="Close notification details" title="Close">×</button>
+      </div>
+      <div class="notif-detail-meta" id="notif-detail-meta"></div>
+      <div class="notif-detail-message" id="notif-detail-message"></div>
+      <div class="notif-detail-section" id="notif-detail-section" hidden>
+        <div class="notif-detail-section-head">
+          <span>Task log</span>
+          <span id="notif-detail-count"></span>
+        </div>
+        <div class="notif-detail-log" id="notif-detail-log"></div>
+      </div>
+      <div class="notif-detail-actions" id="notif-detail-actions"></div>
+    </div>
+  </div>
   <div class="jf-toasts" id="jf-toasts" role="region" aria-label="Task notifications"
        aria-live="polite"></div>
 

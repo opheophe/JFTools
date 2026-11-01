@@ -476,6 +476,7 @@ def _favorited_by(row: dict, fav_by_id: dict) -> list[str]:
 async def _run_fetch() -> None:
     if _fetch["status"] == "running":
         return
+    started = time.time()
     _fetch.update({"status": "running", "fetched": 0, "total": 0, "error": None})
     log("Movie Match", "INFO", "Fetch started")
     try:
@@ -536,6 +537,9 @@ async def _run_fetch() -> None:
             "Movie Match fetch complete" if fav_ok else "Movie Match fetch complete with warning",
             message,
             source="Movie Match",
+            tab="Movie Match",
+            started=started,
+            duration=time.time() - started,
             url="/jellyfin-id",
             link_label="Open Movie Match",
         )
@@ -550,6 +554,9 @@ async def _run_fetch() -> None:
             "Movie Match fetch aborted",
             "The fetch was stopped before it finished.",
             source="Movie Match",
+            tab="Movie Match",
+            started=started,
+            duration=time.time() - started,
             url="/jellyfin-id",
             link_label="Open Movie Match",
         )
@@ -563,6 +570,9 @@ async def _run_fetch() -> None:
             "Movie Match fetch failed",
             str(exc),
             source="Movie Match",
+            tab="Movie Match",
+            started=started,
+            duration=time.time() - started,
             url="/logs",
             link_label="View logs",
         )
@@ -575,6 +585,9 @@ async def _run_fetch() -> None:
             "Movie Match fetch failed",
             _fetch["error"],
             source="Movie Match",
+            tab="Movie Match",
+            started=started,
+            duration=time.time() - started,
             url="/logs",
             link_label="View logs",
         )
