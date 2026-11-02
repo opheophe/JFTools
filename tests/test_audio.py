@@ -177,6 +177,23 @@ def test_probe_streams_reports_ffprobe_failure(monkeypatch):
     assert err and "bad file" in err
 
 
+def test_probe_streams_keeps_the_end_of_a_long_ffprobe_error(monkeypatch):
+    stderr = (
+        "[matroska,webm @ 0x1] 0x00 at pos 0 (0x0) invalid as first byte of an EBML number\n"
+        "[matroska,webm @ 0x1] EBML header parsing failed\n"
+        "/media/Serier/" + "x" * 400 + ".mkv: Invalid data found when processing input"
+    )
+    monkeypatch.setattr(
+        sub.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr=stderr),
+    )
+
+    _subs, _tracks, _duration, err = sub._probe_streams("ffprobe", "movie.mkv")
+
+    assert err.endswith("Invalid data found when processing input")
+    assert "EBML header parsing failed" in err
+
+
 # ---- worklists and the merged store ----------------------------------------
 
 

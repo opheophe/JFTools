@@ -798,7 +798,7 @@ def _probe_streams(
     except Exception as exc:  # noqa: BLE001
         return [], [], 0.0, f"ffprobe error: {exc}"
     if result.returncode != 0:
-        return [], [], 0.0, f"ffprobe exit {result.returncode}: {(result.stderr or '').strip()[:200]}"
+        return [], [], 0.0, f"ffprobe exit {result.returncode}: {(result.stderr or '').strip()}"
     try:
         data = json.loads(result.stdout)
     except Exception as exc:  # noqa: BLE001

@@ -33,7 +33,10 @@ MAX_EVENTS = 200
 MAX_AGE_SECONDS = 14 * 24 * 60 * 60
 MAX_MESSAGE_CHARS = 4000
 MAX_DETAIL_LINES = 200
-MAX_DETAIL_CHARS = 400
+# Log lines can be long (ffprobe prints the whole path and its reason on the
+# last line); a low cap here would cut the log entry mid-path in the details
+# view even though the log file has the full text.
+MAX_DETAIL_CHARS = MAX_MESSAGE_CHARS
 # Quick actions do not announce a start time; their own log lines arrive within
 # seconds of publishing, so a short window keeps unrelated activity out.
 DETAIL_WINDOW_SECONDS = 180
