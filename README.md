@@ -44,7 +44,7 @@ existing server over the API.
   deletion with row buttons, choose one
   default of each type, or let **Smart mark** pick every subtitle outside your
   preferred languages plus every forced track, then execute it in a single
-  in-place rewrite.
+  in-place rewrite. Hovering the **Tracks** pill also offers **Remux**.
 - Task notifications: scans, Movie Match fetches, track edits, subtitle/file
   changes and scheduled jobs report success, warnings and errors in the top
   right. Results are also kept in the bell menu, so closing a dialog,
@@ -397,6 +397,16 @@ afterwards.
 The dialog needs **File management** enabled in the settings, and free space
 equal to the file size when a rewrite is needed. The dialog also flags
 commentary audio tracks.
+
+Hover the **Tracks** pill for **Remux**: it rewrites the container with ffmpeg,
+copying every stream unchanged (like ComTool's Remux). Files that are not
+already Matroska are saved as `<name>.mkv` and the old file is removed only
+after the new one validates. The copy is written to a hidden temporary file in
+the same folder, probed and compared with the original (stream count/types and
+duration) before anything is swapped, so a failed, short or stream-dropping
+copy leaves the original untouched — a failed swap restores it. It needs free
+space equal to the file size and the same **File management** setting, and
+asks Jellyfin to rescan the result.
 
 ## Subtitles
 

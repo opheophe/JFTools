@@ -1412,7 +1412,7 @@ def _write_gate(x_jftools: str):
                 "file_mgmt": False,
                 "error": (
                     "File management is disabled. Enable it on the Settings "
-                    "page to change subtitle files."
+                    "page to change media or subtitle files."
                 ),
             },
             status_code=403,

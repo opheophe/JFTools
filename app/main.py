@@ -27,6 +27,7 @@ from .notifications import router as notifications_router
 from .paths import resolve_path
 from .player import prune_play_cache, router as player_router
 from .remotesync import run_import
+from .remux import router as remux_router
 from .scheduler import router as scheduler_router, set_timezone, shutdown_scheduler, start_scheduler
 from .subtitles import router as subtitles_router
 from .users import router as users_router
@@ -135,6 +136,7 @@ app.include_router(logs_router)
 app.include_router(media_router)
 app.include_router(notifications_router)
 app.include_router(player_router)
+app.include_router(remux_router)
 app.include_router(scheduler_router)
 app.include_router(subtitles_router)
 app.include_router(users_router)

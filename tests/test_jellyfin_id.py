@@ -286,3 +286,23 @@ async def test_run_fetch_cancelled_leaves_non_running_status(monkeypatch):
         pass
 
     assert jid._fetch["status"] == "cancelled"
+
+def test_rename_cached_path_updates_the_cached_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(jid, "_ID_FILE", tmp_path / "jellyfin_id.json")
+    monkeypatch.setattr(jid, "_state", {
+        "rows": [
+            {"path": "/Serier/Show/e1.mp4", "file": "e1.mp4", "name": "E1"},
+            {"path": "/Serier/Show/e2.mkv", "file": "e2.mkv", "name": "E2"},
+        ],
+        "marks": set(),
+        "favorites": {},
+        "last_sync": None,
+    })
+
+    assert jid.rename_cached_path("/Serier/Show/e1.mp4", "/Serier/Show/e1.mkv") is True
+
+    row = jid._state["rows"][0]
+    assert row["path"] == "/Serier/Show/e1.mkv"
+    assert row["file"] == "e1.mkv"
+    assert jid._state["rows"][1]["path"] == "/Serier/Show/e2.mkv"
+    assert jid.rename_cached_path("/Serier/Show/missing.mp4", "/x.mkv") is False

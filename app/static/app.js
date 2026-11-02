@@ -1037,12 +1037,83 @@ function hoverMenuAction(text, onClick) {
   return item;
 }
 
+// Remux a row's video into a fresh MKV. The server copies every stream into a
+// temporary file, probes the copy and only then swaps it in (app/remux.py), so
+// a failed copy leaves the original alone. Non-MKV files are renamed to .mkv.
+async function remuxOne(path, node) {
+  const name = String(path || "").replace(/^.*[\\/]/, "");
+  if (!path || !name) return;
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot).toLowerCase() : "";
+  const target = ext === ".mkv"
+    ? name
+    : name.slice(0, dot > 0 ? dot : name.length) + ".mkv";
+  const detail = ext === ".mkv"
+    ? "The container is rewritten in place; every stream is copied unchanged."
+    : "The container is rewritten as " + target + "; every stream is copied unchanged.";
+  if (!window.confirm(
+    "Remux " + name + "?\n\n" + detail + "\n\n" +
+    "It needs free space equal to the file size. The original is kept if anything fails."
+  )) return;
+
+  if (node) {
+    node.disabled = true;
+    node.textContent = "Remuxing…";
+  }
+  if (window.jfNotify) {
+    window.jfNotify({
+      kind: "info", title: "Remux started", message: name,
+      source: "Search", timeout: 8000,
+    });
+  }
+  let data;
+  try {
+    data = await requestJSON("/api/internal/remux", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-JFTools": "1",
+      },
+      body: "path=" + encodeURIComponent(path),
+    });
+  } catch (err) {
+    data = { ok: false, error: String(err) };
+  } finally {
+    if (node) {
+      node.disabled = false;
+      node.textContent = "Remux";
+    }
+  }
+  if (window.jfNotifications) window.jfNotifications.checkNow();
+  if (data && data.ok) {
+    // Jellyfin learns the new path on its scan; refresh/rerender right away so
+    // the row points at the remuxed file instead of the deleted one.
+    if (data.renamed) {
+      if (window.subdlRefresh) window.subdlRefresh();
+      else window.setTimeout(() => window.location.reload(), 1200);
+    } else if (window.audioRefresh && data.entry) {
+      window.audioRefresh(path, data.entry);
+    }
+    return;
+  }
+  const message = (data && data.error) || "Remux failed.";
+  // The server publishes a durable error before responding; only validation
+  // errors (no notification id) need a toast of their own.
+  if (!(data && data.notification_id) && window.jfNotify) {
+    window.jfNotify({
+      kind: "error", title: "Remux failed",
+      message: name + " — " + message,
+      source: "Search", sticky: true, url: "/logs", link_label: "View logs",
+    });
+  }
+}
+
 // ---- row actions -----------------------------------------------------------
 //
 // The action pills a row carries: Open ▾ · Sync ▾ · Play · Subfind ·
-// Tracks and, where asked for, Google ▾. One builder so the
-// Search, Movie Match and Libraries tables cannot drift apart; ``cfg.urls``
-// supplies the base URLs (Jellyfin/Radarr/Sonarr, empty when unconfigured) and
+// Tracks ▾ and, where asked for, Google ▾. One builder so the Search,
+// Movie Match and Libraries tables cannot drift apart; ``cfg.urls`` supplies
+// the base URLs (Jellyfin/Radarr/Sonarr, empty when unconfigured) and
 // ``cfg.google`` adds the trailing Google menu.
 
 function rowActions(r, cfg) {
@@ -1083,7 +1154,17 @@ function rowActions(r, cfg) {
   const playable = r.path && r.type !== "Series";
   td.appendChild(pillButton("Play", "play", playable ? () => playVideo(r.path) : null));
   td.appendChild(pillButton("Subfind", "sfind", playable ? () => subfindOpen(r.path) : null));
-  td.appendChild(pillButton("Tracks", "audio", playable ? () => audioOpen(r.path) : null));
+  // Clicking Tracks still opens the dialog; hovering it offers Remux.
+  const remuxItem = playable
+    ? hoverMenuAction("Remux", (node) => remuxOne(r.path, node))
+    : null;
+  if (remuxItem) {
+    remuxItem.title = "Rewrite the container as MKV with every stream copied unchanged";
+  }
+  td.appendChild(hoverMenuButton(
+    "Tracks", remuxItem ? [remuxItem] : [], "audio",
+    playable ? () => audioOpen(r.path) : null
+  ));
 
   if (cfg.google) td.appendChild(rowGoogleMenu(r));
   return td;

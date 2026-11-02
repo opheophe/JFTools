@@ -78,6 +78,24 @@ def clear_cache() -> None:
     _save_state()
 
 
+def rename_cached_path(old_path: str, new_path: str) -> bool:
+    """Point a cached row at a file that was renamed on disk.
+
+    A remux can turn ``.mp4`` into ``.mkv``. Jellyfin learns the new path on
+    its next scan; updating the cached row now keeps the tables (and the
+    Tracks/Sync actions on them) working until that scan finishes.
+    """
+    changed = False
+    for row in _state["rows"]:
+        if row.get("path") == old_path:
+            row["path"] = new_path
+            row["file"] = Path(new_path).name
+            changed = True
+    if changed:
+        _save_state()
+    return changed
+
+
 def migrate_cached_series() -> int:
     """Persist the removal of Series rows left by older versions.
 
