@@ -102,13 +102,19 @@ class JellyfinClient:
         # Unreachable — the loop above always returns or raises.
         raise JellyfinError(f"Jellyfin returned HTTP 500 for {path}.")
 
-    async def _post(self, path: str, json: dict | None = None) -> dict | None:
+    async def _post(
+        self,
+        path: str,
+        json: dict | None = None,
+        params: dict | None = None,
+    ) -> dict | None:
         self._check()
         client, close = self._use()
         try:
             resp = await client.post(
                 self.base_url + path,
                 headers=self._headers(),
+                params=params,
                 json=json,
             )
         except httpx.HTTPError as exc:
@@ -123,6 +129,36 @@ class JellyfinClient:
         if resp.status_code == 204 or not resp.content:
             return None
         return resp.json()
+
+    async def _delete(self, path: str, params: dict | None = None) -> None:
+        self._check()
+        client, close = self._use()
+        try:
+            resp = await client.delete(
+                self.base_url + path,
+                headers=self._headers(),
+                params=params,
+            )
+        except httpx.HTTPError as exc:
+            raise self._transport_error(exc)
+        finally:
+            if close:
+                await client.aclose()
+        if resp.status_code == 401:
+            raise JellyfinError("Unauthorized — check the Jellyfin API key.")
+        if resp.status_code >= 400 and resp.status_code != 404:
+            raise JellyfinError(f"Jellyfin returned HTTP {resp.status_code} for {path}.")
+
+    @property
+    def api_root(self) -> str:
+        """The configured Jellyfin API root, for streaming/proxy URLs."""
+        return self.base_url
+
+    def auth_headers(self) -> dict[str, str]:
+        """Headers that authenticate a media stream request (no JSON Accept)."""
+        headers = self._headers()
+        headers.pop("Accept", None)
+        return headers
 
     async def get_system_info(self) -> dict:
         return await self._get("/System/Info")
@@ -243,6 +279,76 @@ class JellyfinClient:
             raise JellyfinError(f"Jellyfin returned HTTP {resp.status_code} for image.")
         return resp.content, resp.headers.get("content-type", "image/jpeg")
 
+    async def get_playback_info(
+        self,
+        item_id: str,
+        user_id: str,
+        device_profile: dict,
+        start_ticks: int = 0,
+    ) -> dict:
+        """Ask Jellyfin how it would play an item for this client profile.
+
+        The response's ``MediaSources[0].TranscodingUrl`` is the HLS stream the
+        web client itself would use; ``PlaySessionId`` names the transcode job
+        that should be stopped when playback ends.
+        """
+        body = {
+            "UserId": user_id,
+            "StartTimeTicks": max(0, int(start_ticks)),
+            "IsPlayback": True,
+            "AutoOpenLiveStream": True,
+            "AllowVideoStreamCopy": True,
+            "AllowAudioStreamCopy": True,
+            "DeviceProfile": device_profile,
+        }
+        return await self._post(
+            f"/Items/{item_id}/PlaybackInfo",
+            json=body,
+            params={"UserId": user_id},
+        ) or {}
+
+    async def report_playback(
+        self,
+        item_id: str,
+        media_source_id: str,
+        play_session_id: str,
+        position_ticks: int = 0,
+        event: str = "progress",
+        paused: bool = False,
+    ) -> None:
+        """Tell Jellyfin where playback is, so its transcoder throttles properly.
+
+        ``event`` is ``"start"``, ``"progress"`` or ``"stopped"``.
+        """
+        paths = {
+            "start": "/Sessions/Playing",
+            "progress": "/Sessions/Playing/Progress",
+            "stopped": "/Sessions/Playing/Stopped",
+        }
+        path = paths.get(event)
+        if not path:
+            return
+        body = {
+            "ItemId": item_id,
+            "MediaSourceId": media_source_id,
+            "PlaySessionId": play_session_id,
+            "PositionTicks": max(0, int(position_ticks)),
+            "IsPaused": bool(paused),
+            "IsMuted": False,
+            "PlayMethod": "Transcode",
+            "CanSeek": True,
+        }
+        await self._post(path, json=body)
+
+    async def stop_transcode(self, play_session_id: str) -> None:
+        """Stop the ffmpeg job behind an HLS play session (best effort)."""
+        if not play_session_id:
+            return
+        await self._delete(
+            "/Videos/ActiveEncodings",
+            params={"deviceId": "jftools", "playSessionId": play_session_id},
+        )
+
     async def scan_all(self) -> None:
         """Start a full library scan (all libraries)."""
         await self._post("/Library/Refresh")
@@ -271,15 +377,28 @@ _shared_client: "JellyfinClient | None" = None
 _shared_key: tuple[str, str] | None = None
 
 
+def get_stream_client() -> httpx.AsyncClient:
+    """The shared HTTP client, also used to proxy Jellyfin's HLS streams.
+
+    The long read timeout matters: a media segment may take a while while
+    Jellyfin's transcoder is still writing it.
+    """
+    global _shared_http
+    if _shared_http is None:
+        _shared_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0, read=300.0),
+            follow_redirects=True,
+        )
+    return _shared_http
+
+
 def get_client() -> "JellyfinClient":
     global _shared_http, _shared_client, _shared_key
     from ..config import config
 
     key = (config.settings.jellyfin_url, config.settings.jellyfin_api_key)
     if _shared_client is None or _shared_key != key:
-        if _shared_http is None:
-            _shared_http = httpx.AsyncClient(timeout=15.0)
-        _shared_client = JellyfinClient(key[0], key[1], http=_shared_http)
+        _shared_client = JellyfinClient(key[0], key[1], http=get_stream_client())
         _shared_key = key
     return _shared_client
 

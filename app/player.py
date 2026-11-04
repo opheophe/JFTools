@@ -15,26 +15,31 @@ browsable media roots, exactly like the file browser.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
 import time
+import urllib.parse
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from .config import config
 from .files import _resolve, browser_roots
+from .jellyfin.client import JellyfinError, get_client, get_stream_client
 from .languages import language_code
 from .logs import log
 from .subtitles import (
     _external_subtitles,
+    _library_row,
     _probe_subtitles,
     _subtitle_lang_name,
     resolve_ffmpeg,
@@ -104,6 +109,42 @@ _EXT_CODEC_CACHE_MAX = 64
 # One remux job at a time, polled by the player page.
 _prepare: dict = {"status": "idle", "path": "", "percent": 0, "error": None}
 _prepare_task: asyncio.Task | None = None
+
+# First-video-stream probe, keyed like the audio probe.
+_VIDEO_CACHE: dict[tuple[str, int, int], dict] = {}
+_VIDEO_CACHE_MAX = 64
+
+# HLS sessions proxied from Jellyfin: a random token keeps the browser from
+# choosing an arbitrary upstream URL, and the TTL drops sessions whose page was
+# closed without telling us.
+HLS_SESSION_TTL = 6 * 3600
+_hls_sessions: dict[str, dict] = {}
+
+# The Jellyfin device profile used when the browser cannot play a file itself.
+# Only HLS H.264/AAC is offered, so Jellyfin remuxes (or transcodes when the
+# video is HEVC) instead of handing back the original container.
+HLS_DEVICE_PROFILE = {
+    "Name": "JFTools browser player",
+    "MaxStreamingBitrate": 120_000_000,
+    "MaxStaticBitrate": 120_000_000,
+    "DirectPlayProfiles": [],
+    "TranscodingProfiles": [
+        {
+            "Container": "ts",
+            "Type": "Video",
+            "VideoCodec": "h264",
+            "AudioCodec": "aac",
+            "Protocol": "hls",
+            "Context": "Streaming",
+            "MaxAudioChannels": "2",
+            "MinSegments": 2,
+            "BreakOnNonKeyFrames": True,
+            "EnableSubtitlesInManifest": False,
+        }
+    ],
+    "CodecProfiles": [],
+    "SubtitleProfiles": [],
+}
 
 
 class SubError(Exception):
@@ -434,6 +475,67 @@ def audio_copy_reason(audio: dict | None) -> str:
     return f"{names.get(codec, codec.upper())} audio"
 
 
+# ---- video probe -------------------------------------------------------------
+
+
+def _video_key(local: str) -> tuple[str, int, int]:
+    """Cache key for a video probe: it changes when the file does."""
+    try:
+        st = os.stat(local)
+        return (os.path.normcase(os.path.abspath(local)), st.st_size, int(st.st_mtime))
+    except OSError:
+        return (os.path.normcase(os.path.abspath(local)), 0, 0)
+
+
+def _probe_video(ffprobe: str, local: str) -> dict | None:
+    """First video stream plus the container of ``local``; None when unprobed."""
+    try:
+        result = subprocess.run(
+            [
+                ffprobe, "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name,width,height:format=format_name",
+                "-of", "json", local,
+            ],
+            capture_output=True, text=True, timeout=60,
+            encoding="utf-8", errors="replace", creationflags=_no_window(),
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (TypeError, ValueError):
+        return None
+    streams = data.get("streams") or []
+    if not streams:
+        return {}
+    stream = streams[0] or {}
+    container = ((data.get("format") or {}).get("format_name") or "").lower()
+    return {
+        "codec": (stream.get("codec_name") or "").lower(),
+        "width": stream.get("width") or 0,
+        "height": stream.get("height") or 0,
+        "container": container,
+    }
+
+
+def _video_info(local: str) -> dict | None:
+    """First video stream of a library file: None unprobed, {} when it has none."""
+    key = _video_key(local)
+    if key in _VIDEO_CACHE:
+        return _VIDEO_CACHE[key]
+    ffprobe = resolve_ffprobe()
+    info = _probe_video(ffprobe, local) if ffprobe else None
+    if info is None:
+        return None  # don't remember a failed probe
+    if len(_VIDEO_CACHE) >= _VIDEO_CACHE_MAX:
+        _VIDEO_CACHE.clear()
+    _VIDEO_CACHE[key] = info
+    return info
+
+
 # ---- browser copies (remux) --------------------------------------------------
 
 
@@ -649,6 +751,211 @@ async def _run_prepare(ffmpeg: str, path: str, local: str, kind: str) -> None:
             pass
 
 
+# ---- Jellyfin HLS ------------------------------------------------------------
+
+
+def _jellyfin_item(path: str) -> dict | None:
+    """The Movie Match row with a Jellyfin item id for this path, if any."""
+    row = _library_row(path)
+    if not row or not row.get("id"):
+        return None
+    return row
+
+
+def _hls_available(path: str) -> bool:
+    return bool(config.jellyfin_configured and _jellyfin_item(path))
+
+
+def _jellyfin_parts() -> urllib.parse.SplitResult:
+    return urllib.parse.urlsplit(get_client().api_root or "")
+
+
+def _normalize_jellyfin(url: str) -> str:
+    """Make a URL absolute against the configured Jellyfin API root.
+
+    Jellyfin sometimes generates URLs with its own host name (a Docker service
+    name, for example) that the browser cannot reach. The proxy always talks to
+    the configured API root instead, keeping any base path it has.
+    """
+    base = _jellyfin_parts()
+    prefix = base.path.rstrip("/")
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path if parts.path.startswith("/") else "/" + parts.path
+    if prefix and not (path == prefix or path.startswith(prefix + "/")):
+        path = prefix + path
+    return urllib.parse.urlunsplit(
+        (base.scheme, base.netloc, path, parts.query, parts.fragment)
+    )
+
+
+def _absolute_jellyfin(url: str) -> str:
+    """Make a URL returned by the Jellyfin API absolute against our base URL."""
+    return _normalize_jellyfin(url)
+
+
+def _strip_api_key(url: str) -> str:
+    """Drop the API key from an upstream URL; the proxy authenticates instead."""
+    parts = urllib.parse.urlsplit(url)
+    query = [
+        (k, v)
+        for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        if k.lower().replace("_", "") != "apikey"
+    ]
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(query), parts.fragment)
+    )
+
+
+def _encode_asset(url: str) -> str:
+    raw = base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii")
+    return raw.rstrip("=")
+
+
+def _decode_asset(value: str) -> str:
+    padded = value + "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+
+
+def _safe_upstream(url: str) -> str:
+    """Only allow URLs on the configured Jellyfin origin (no open proxy)."""
+    base = _jellyfin_parts()
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise JellyfinError("Invalid Jellyfin stream URL.")
+    if parts.netloc != base.netloc:
+        raise JellyfinError("Jellyfin stream URL points at another host.")
+    return url
+
+
+def _asset_url(token: str, url: str) -> str:
+    url = _normalize_jellyfin(url)
+    return f"/api/player/hls/{token}/a/{_encode_asset(_strip_api_key(url))}"
+
+
+_HLS_URI_ATTR = re.compile(r'(URI=")([^"]+)(")')
+
+
+def _rewrite_playlist(text: str, base_url: str, token: str) -> str:
+    """Point every URI in an HLS playlist back at our proxy."""
+    lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            lines.append(line)
+            continue
+        if stripped.startswith("#"):
+            if "URI=" in stripped:
+                line = _HLS_URI_ATTR.sub(
+                    lambda m: m.group(1)
+                    + _asset_url(token, urllib.parse.urljoin(base_url, m.group(2)))
+                    + m.group(3),
+                    line,
+                )
+            lines.append(line)
+            continue
+        absolute = urllib.parse.urljoin(base_url, stripped)
+        lines.append(_asset_url(token, absolute))
+    return "\n".join(lines) + "\n"
+
+
+def _prune_hls_sessions() -> None:
+    now = time.time()
+    for token, session in list(_hls_sessions.items()):
+        if now - float(session.get("created") or 0) > HLS_SESSION_TTL:
+            _hls_sessions.pop(token, None)
+
+
+async def _start_hls_session(path: str, start_seconds: float = 0.0) -> dict:
+    """Ask Jellyfin for an HLS stream of this file and remember the session."""
+    row = _jellyfin_item(path)
+    if not row:
+        raise JellyfinError("This file is not in Jellyfin's Movie Match list.")
+    if not config.jellyfin_configured:
+        raise JellyfinError("Jellyfin is not configured.")
+
+    from .media import _any_user
+
+    client = get_client()
+    user_id = await _any_user(client)
+    if not user_id:
+        raise JellyfinError("Jellyfin has no user to play this item as.")
+
+    start_ticks = max(0, int(float(start_seconds or 0) * 10_000_000))
+    data = await client.get_playback_info(
+        row["id"], user_id, HLS_DEVICE_PROFILE, start_ticks=start_ticks
+    )
+    sources = data.get("MediaSources") or []
+    source = next(
+        (s for s in sources if s.get("TranscodingUrl")),
+        sources[0] if sources else {},
+    )
+    url = source.get("TranscodingUrl") or ""
+    play_session = source.get("PlaySessionId") or data.get("PlaySessionId") or ""
+    media_source = source.get("Id") or row["id"]
+
+    if not url or ".m3u8" not in url:
+        # Older Jellyfin versions may omit TranscodingUrl from PlaybackInfo,
+        # and some may hand back a progressive stream: the master playlist
+        # endpoint takes the same parameters and always returns HLS.
+        params = {
+            "MediaSourceId": media_source,
+            "PlaySessionId": play_session,
+            "VideoCodec": "h264",
+            "AudioCodec": "aac",
+            "TranscodingContainer": "ts",
+            "TranscodingProtocol": "hls",
+            "SegmentContainer": "ts",
+            "MinSegments": "2",
+            "BreakOnNonKeyFrames": "true",
+            "RequireAvc": "true",
+            "Context": "Streaming",
+            "MaxAudioChannels": "2",
+            "StartTimeTicks": str(start_ticks),
+        }
+        url = f"/Videos/{row['id']}/master.m3u8?{urllib.parse.urlencode(params)}"
+
+    absolute = _absolute_jellyfin(url)
+    token = secrets.token_urlsafe(24)
+    _prune_hls_sessions()
+    _hls_sessions[token] = {
+        "created": time.time(),
+        "path": path,
+        "item_id": row["id"],
+        "media_source_id": media_source,
+        "play_session_id": play_session,
+        "url": absolute,
+    }
+
+    try:
+        await client.report_playback(
+            row["id"], media_source, play_session,
+            position_ticks=start_ticks, event="start",
+        )
+    except JellyfinError:
+        pass  # playback can still work without the "now playing" report
+
+    return {
+        "token": token,
+        "playlist": f"/api/player/hls/{token}/master.m3u8",
+        "play_session_id": play_session,
+    }
+
+
+async def _fetch_hls_text(url: str) -> tuple[str, str]:
+    """Fetch an HLS playlist; return its text and the final upstream URL."""
+    client = get_client()
+    http = get_stream_client()
+    resp = await http.get(url, headers=client.auth_headers())
+    try:
+        if resp.status_code >= 400:
+            raise JellyfinError(
+                f"Jellyfin returned HTTP {resp.status_code} for the HLS playlist."
+            )
+        return resp.text, str(resp.url)
+    finally:
+        await resp.aclose()
+
+
 # ---- routes ------------------------------------------------------------------
 
 
@@ -713,35 +1020,6 @@ def _pick_default(tracks: list[dict]) -> int:
         if found >= 0:
             return found
     return -1
-
-
-def _jellyfin_transcode_url(path: str) -> str:
-    """A Jellyfin on-the-fly H.264/AAC stream for this library item, or "".
-
-    Used when the browser cannot decode the original video codec (HEVC/x265
-    and friends): Jellyfin transcodes the item to H.264 while the video
-    element keeps its subtitle <track> elements. Needs Jellyfin configured
-    and the item's id known (a file browsed outside the library has none).
-    """
-    import urllib.parse
-
-    from .subtitles import _library_row
-
-    row = _library_row(path)
-    if not row or not row.get("id"):
-        return ""
-    base = (config.settings.jellyfin_url or "").strip().rstrip("/")
-    key = (config.settings.jellyfin_api_key or "").strip()
-    if not base or not key:
-        return ""
-    params = urllib.parse.urlencode({
-        "static": "true",
-        "api_key": key,
-        "VideoCodec": "h264",
-        "AudioCodec": "aac",
-        "AudioSampleRate": "48000",
-    })
-    return f"{base}/Videos/{row['id']}/stream.mp4?{params}"
 
 
 @router.get("/api/player/tracks")
@@ -819,18 +1097,219 @@ async def player_tracks(user: str = Depends(require_login), path: str = Query(""
     # before it starts: an undecodable track plays silently without any error.
     audio = await asyncio.to_thread(_audio_info, local)
     reason = audio_copy_reason(audio)
+    video = await asyncio.to_thread(_video_info, local)
+    duration = await _duration_for(path, local)
 
     return JSONResponse({
         "ok": True,
         "file": os.path.basename(path.replace("\\", "/")),
         "tracks": tracks,
         "audio": audio,
+        "video": video,
+        "container": (video or {}).get("container", ""),
+        "duration": float(duration or 0),
         "needs_copy": bool(reason),
         "copy_reason": reason,
         "copy_ready": _prepared_file(path) is not None,
         "audio_ready": _prepared_audio(path) is not None,
-        "transcode_url": _jellyfin_transcode_url(path),
+        "hls_available": _hls_available(path),
     })
+
+
+@router.get("/api/player/hls/start")
+async def player_hls_start(
+    user: str = Depends(require_login),
+    path: str = Query(""),
+    start: float = Query(0.0),
+):
+    """Start a Jellyfin HLS transcode for a file the browser cannot play."""
+    path = (path or "").strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "No file path."}, status_code=400)
+    if not _local_video(path):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "The video file is not reachable. Set the Media paths "
+                         "on the Settings page.",
+            },
+            status_code=404,
+        )
+    try:
+        data = await _start_hls_session(path, max(0.0, float(start or 0.0)))
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    except Exception as exc:  # noqa: BLE001
+        log("Player", "WARN", f"Jellyfin HLS start failed: {exc}")
+        return JSONResponse(
+            {"ok": False, "error": f"Jellyfin could not start the stream: {exc}"},
+            status_code=502,
+        )
+    return JSONResponse({"ok": True, **data})
+
+
+@router.get("/api/player/hls/{token}/master.m3u8")
+async def player_hls_master(token: str, user: str = Depends(require_login)):
+    """Proxy Jellyfin's HLS playlist with every URI pointed back at us."""
+    session = _hls_sessions.get(token)
+    if not session:
+        return Response("Unknown play session.", status_code=404, media_type="text/plain")
+    try:
+        text, final_url = await _fetch_hls_text(session["url"])
+    except JellyfinError as exc:
+        return Response(str(exc), status_code=502, media_type="text/plain")
+    except Exception as exc:  # noqa: BLE001
+        return Response(
+            f"Could not load the Jellyfin stream: {exc}",
+            status_code=502, media_type="text/plain",
+        )
+    return Response(
+        _rewrite_playlist(text, final_url, token),
+        media_type="application/vnd.apple.mpegurl",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.api_route("/api/player/hls/{token}/a/{asset}", methods=["GET", "HEAD"])
+async def player_hls_asset(
+    request: Request,
+    token: str,
+    asset: str,
+    user: str = Depends(require_login),
+):
+    """Proxy one HLS playlist, segment or key from Jellyfin."""
+    session = _hls_sessions.get(token)
+    if not session:
+        return Response("Unknown play session.", status_code=404, media_type="text/plain")
+    try:
+        url = _safe_upstream(_decode_asset(asset))
+    except (JellyfinError, ValueError, UnicodeDecodeError):
+        return Response("Invalid stream URL.", status_code=400, media_type="text/plain")
+
+    client = get_client()
+    http = get_stream_client()
+    headers = client.auth_headers()
+    range_header = request.headers.get("range")
+    if range_header:
+        headers["Range"] = range_header
+
+    try:
+        if request.method == "HEAD":
+            resp = await http.head(url, headers=headers)
+            try:
+                return Response(
+                    status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/octet-stream"),
+                    headers={"Cache-Control": "no-store"},
+                )
+            finally:
+                await resp.aclose()
+
+        req = http.build_request("GET", url, headers=headers)
+        resp = await http.send(req, stream=True)
+    except Exception as exc:  # noqa: BLE001
+        return Response(
+            f"Could not reach Jellyfin: {exc}", status_code=502, media_type="text/plain"
+        )
+
+    content_type = resp.headers.get("content-type", "application/octet-stream")
+    is_playlist = url.split("?", 1)[0].lower().endswith(".m3u8") or (
+        "mpegurl" in content_type.lower()
+    )
+    if is_playlist:
+        try:
+            body = (await resp.aread()).decode("utf-8", "replace")
+            return Response(
+                _rewrite_playlist(body, str(resp.url), token),
+                media_type="application/vnd.apple.mpegurl",
+                headers={"Cache-Control": "no-store"},
+            )
+        finally:
+            await resp.aclose()
+
+    if resp.status_code >= 400:
+        try:
+            body = await resp.aread()
+            return Response(
+                body,
+                status_code=resp.status_code,
+                media_type=content_type,
+            )
+        finally:
+            await resp.aclose()
+
+    forward = {
+        key: resp.headers[key]
+        for key in ("content-length", "content-range", "accept-ranges")
+        if key in resp.headers
+    }
+
+    async def body_iter():
+        try:
+            async for chunk in resp.aiter_raw():
+                yield chunk
+        finally:
+            await resp.aclose()
+
+    return StreamingResponse(
+        body_iter(),
+        status_code=resp.status_code,
+        media_type=content_type,
+        headers={**forward, "Cache-Control": "no-store"},
+    )
+
+
+@router.post("/api/player/hls/{token}/progress")
+async def player_hls_progress(
+    token: str,
+    user: str = Depends(require_login),
+    position: float = Query(0.0),
+    paused: bool = Query(False),
+):
+    """Forward the browser's playback position so Jellyfin throttles correctly."""
+    session = _hls_sessions.get(token)
+    if not session:
+        return JSONResponse({"ok": False, "error": "Unknown play session."}, status_code=404)
+    try:
+        await get_client().report_playback(
+            session["item_id"],
+            session["media_source_id"],
+            session["play_session_id"],
+            position_ticks=int(max(0.0, float(position or 0.0)) * 10_000_000),
+            event="progress",
+            paused=bool(paused),
+        )
+    except JellyfinError:
+        pass  # progress is best-effort; playback must not stop over it
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/player/hls/{token}/stop")
+async def player_hls_stop(
+    token: str,
+    user: str = Depends(require_login),
+    position: float = Query(0.0),
+):
+    """Stop a Jellyfin transcode when the player window closes."""
+    session = _hls_sessions.pop(token, None)
+    if session:
+        client = get_client()
+        ticks = int(max(0.0, float(position or 0.0)) * 10_000_000)
+        try:
+            await client.report_playback(
+                session["item_id"],
+                session["media_source_id"],
+                session["play_session_id"],
+                position_ticks=ticks,
+                event="stopped",
+            )
+        except JellyfinError:
+            pass
+        try:
+            await client.stop_transcode(session["play_session_id"])
+        except JellyfinError:
+            pass
+    return JSONResponse({"ok": True})
 
 
 @router.get("/api/player/sub")

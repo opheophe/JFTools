@@ -39,8 +39,14 @@ let plStatusHold = false; // the status line is explaining something, not noting
 let plPlayTries = 0;    // rejected play() attempts, for the retry ladder
 let plCaptionText = null;
 let plSyncTimer = null; // drift correction while the companion audio plays
-let plTranscodeUrl = ""; // a Jellyfin H.264 stream for files this browser can't decode
-let plTranscoded = false; // already switched to that stream?
+let plHls = null;       // hls.js instance when playing Jellyfin's HLS stream
+let plHlsToken = "";    // server-side HLS session token, "" when not using HLS
+let plHlsAvailable = false; // Jellyfin can stream this item
+let plHlsRetries = 0;
+let plHlsProgress = null;
+let plKnownDuration = 0; // runtime from the scan store, for HLS playlists
+let plSourceStarting = false;
+let plHlsStarting = false;
 
 function plEl(tag, props) {
   const node = document.createElement(tag);
@@ -83,6 +89,7 @@ function plIdleStatus() {
   if (plStatusHeld()) return;
   if (plPrepared) plSetStatus(plPlayingCopy(), plCopyWhy ? "warn" : "");
   else if (plCompanion) plSetStatus(plPlayingCompanion(), plCopyWhy ? "warn" : "");
+  else if (plHlsToken) plSetStatus("Playing the Jellyfin stream.");
   else plSetStatus("");
 }
 
@@ -125,6 +132,191 @@ function plSubUrl(track) {
   return "/api/player/sub?path=" + plEnc(PL.path) + "&track=" + plEnc(track.spec);
 }
 
+// ---- Jellyfin HLS ------------------------------------------------------------
+
+// Ask the server to stop the Jellyfin transcode behind this page. Called when
+// switching sources and when the window goes away.
+function plStopHls() {
+  clearInterval(plHlsProgress);
+  plHlsProgress = null;
+  if (plHls) {
+    try { plHls.destroy(); } catch (err) { /* ignore */ }
+    plHls = null;
+  }
+  const token = plHlsToken;
+  plHlsToken = "";
+  if (!token) return;
+  const position = Math.max(0, plVideo.currentTime || 0);
+  const url = "/api/player/hls/" + token + "/stop" +
+    "?position=" + encodeURIComponent(position);
+  try {
+    if (navigator.sendBeacon) navigator.sendBeacon(url);
+    else fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+  } catch (err) {
+    fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+  }
+}
+
+function plHlsProgressPing() {
+  if (!plHlsToken || plDead) return;
+  const url = "/api/player/hls/" + plHlsToken + "/progress" +
+    "?position=" + encodeURIComponent(plVideo.currentTime || 0) +
+    "&paused=" + (plVideo.paused ? "true" : "false");
+  fetch(url, { method: "POST", keepalive: true }).catch(() => { /* best effort */ });
+}
+
+function plHlsFatal(message) {
+  plStopHls();
+  plDead = true;
+  plSetOverlay(false);
+  plSuggestCopy(message + " Make a browser copy to remux it with ffmpeg.");
+}
+
+function plOnHlsError(data) {
+  if (!data || !data.fatal) return;
+  if (data.type === Hls.ErrorTypes.NETWORK_ERROR && plHlsRetries < 2) {
+    plHlsRetries += 1;
+    plSetStatus("The Jellyfin stream stalled — retrying…", "warn");
+    try { plHls.startLoad(); } catch (err) { /* fall through below */ }
+    return;
+  }
+  if (data.type === Hls.ErrorTypes.MEDIA_ERROR && plHlsRetries < 2) {
+    plHlsRetries += 1;
+    plSetStatus("The Jellyfin stream hit a media error — recovering…", "warn");
+    try { plHls.recoverMediaError(); } catch (err) { /* fall through below */ }
+    return;
+  }
+  plHlsFatal("This browser could not play the Jellyfin stream.");
+}
+
+async function plStartHls(startSeconds) {
+  if (plDead || plHlsStarting) return false;
+  plHlsStarting = true;
+  plStopHls();
+  plStopCompanion();
+  clearInterval(plPreparePoll);
+  plPreparePoll = null;
+  plPrepare.hidden = true;
+  plPrepare.disabled = false;
+  plDead = false;
+  plSetStatus("Starting the Jellyfin stream…", "warn");
+  try {
+    const res = await fetch(
+      "/api/player/hls/start?path=" + plEnc(PL.path) +
+      "&start=" + encodeURIComponent(startSeconds || 0)
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      plSetStatus(data.error || "Jellyfin could not start this stream.", "warn");
+      return false;
+    }
+    plHlsToken = data.token;
+    plHlsRetries = 0;
+    const url = data.playlist;
+
+    if (window.Hls && Hls.isSupported()) {
+      plHls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 120,
+        maxBufferLength: 60,
+        manifestLoadingTimeOut: 20000,
+        levelLoadingTimeOut: 20000,
+        fragLoadingTimeOut: 60000,
+      });
+      plHls.attachMedia(plVideo);
+      plHls.on(Hls.Events.MEDIA_ATTACHED, () => plHls.loadSource(url));
+      plHls.on(Hls.Events.MANIFEST_PARSED, () => {
+        plPlayTries = 0;
+        plSetOverlay(false);
+        plApplyModes(plCurrent);
+        plTryPlay();
+      });
+      plHls.on(Hls.Events.FRAG_LOADED, () => {
+        // Clear a "retrying…" note once data is flowing again, without
+        // talking over a subtitle warning.
+        if (plStatus.textContent.indexOf("The Jellyfin stream") === 0) {
+          plSetStatus("Playing the Jellyfin stream.");
+        }
+      });
+      plHls.on(Hls.Events.ERROR, (evt, detail) => plOnHlsError(detail));
+    } else if (plVideo.canPlayType("application/vnd.apple.mpegurl")) {
+      // Safari and iOS play HLS natively.
+      const restore = () => {
+        plVideo.removeEventListener("loadedmetadata", restore);
+        plApplyModes(plCurrent);
+        plTryPlay();
+      };
+      plVideo.addEventListener("loadedmetadata", restore);
+      plVideo.src = url;
+      plVideo.load();
+    } else {
+      plSetStatus("This browser cannot play HLS streams.", "warn");
+      plStopHls();
+      return false;
+    }
+
+    clearInterval(plHlsProgress);
+    plHlsProgress = setInterval(plHlsProgressPing, 10000);
+    plSetStatus("Playing the Jellyfin stream.");
+    return true;
+  } catch (err) {
+    plSetStatus("Could not start the Jellyfin stream: " + err, "warn");
+    plStopHls();
+    return false;
+  } finally {
+    plHlsStarting = false;
+  }
+}
+
+// Can this browser open the original file without Jellyfin? Containers are
+// checked by extension first: Chrome and Firefox cannot demux Matroska, and
+// HEVC/AC-3 support is platform-dependent even inside MP4.
+function plDirectPlayable(data) {
+  const name = (PL.file || "").toLowerCase();
+  const ext = name.includes(".") ? name.split(".").pop() : "";
+  const codec = ((data && data.video) || {}).codec || "";
+  const probe = document.createElement("video");
+
+  if (["mp4", "m4v", "mov"].includes(ext)) {
+    if (codec === "hevc") {
+      return !!probe.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') ||
+        !!probe.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"');
+    }
+    if (codec === "av1") return !!probe.canPlayType('video/mp4; codecs="av01.0.05M.08"');
+    if (codec === "vp9") return !!probe.canPlayType('video/mp4; codecs="vp09.00.10.08"');
+    return true; // h264 and friends
+  }
+  if (ext === "webm") return true;
+  if (ext === "ogv" || ext === "ogg") return true;
+  // Unknown extension: trust a non-Matroska container the probe found.
+  const container = ((data && data.container) || "").toLowerCase();
+  return !!container && !container.includes("matroska");
+}
+
+async function plStartSource(data) {
+  if (plSourceStarting || plDead || plPrepared || plCompanion) return;
+  plSourceStarting = true;
+  try {
+    if (data.copy_ready) {
+      plSwitchToPrepared();
+      return;
+    }
+    const wantsHls = data.hls_available && (!plDirectPlayable(data) || !!data.copy_reason);
+    if (wantsHls) {
+      const ok = await plStartHls(0);
+      if (ok) return;
+    }
+    plPlayTries = 0;
+    plVideo.src = plStreamUrl(false);
+    plVideo.load();
+    plTryPlay();
+    plHandleAudio(data);
+  } finally {
+    plSourceStarting = false;
+  }
+}
+
 // ---- timeline ----------------------------------------------------------------
 
 function plFmt(seconds) {
@@ -136,8 +328,13 @@ function plFmt(seconds) {
   return (h ? h + ":" : "") + mm + ":" + String(s).padStart(2, "0");
 }
 
+function plDuration() {
+  if (isFinite(plVideo.duration) && plVideo.duration > 0) return plVideo.duration;
+  return plKnownDuration || 0;
+}
+
 function plUpdateTime() {
-  plTime.textContent = plFmt(plVideo.currentTime) + " / " + plFmt(plVideo.duration);
+  plTime.textContent = plFmt(plVideo.currentTime) + " / " + plFmt(plDuration());
 }
 
 function plParseTime(text) {
@@ -328,14 +525,16 @@ async function plLoadTracks() {
     if (!data || !data.ok) {
       plBuildTrackSelect([]);
       plSetStatus((data && data.error) || "Could not list the subtitle tracks.", "error");
-      return;
+      return null;
     }
     plBuildTrackSelect(data.tracks || []);
-    plTranscodeUrl = data.transcode_url || "";
-    plHandleAudio(data);
+    plHlsAvailable = !!data.hls_available;
+    plKnownDuration = Number(data.duration) || 0;
+    return data;
   } catch (err) {
     plBuildTrackSelect([]);
     plSetStatus("Could not list the subtitle tracks: " + err, "error");
+    return null;
   }
 }
 
@@ -362,7 +561,8 @@ function plUnsupportedAc3(audio) {
 }
 
 function plHandleAudio(data) {
-  if (plDead || plPrepared || plCompanion) return;
+  // HLS carries its own AAC audio, and a prepared copy is already complete.
+  if (plDead || plPrepared || plCompanion || plHlsToken) return;
   if (data.audio) plHasAudio = Boolean(data.audio.codec);
   if (data.audio && !data.audio.codec) {
     plSetStatus("This file has no audio track.", "warn");
@@ -422,12 +622,22 @@ function plCopyProgress(message) {
 // plays next to it; play/pause, seek, speed and drift correction keep the two
 // aligned. This avoids the slow full remux (and its movie-sized copy).
 
+function plStopCompanion() {
+  if (!plCompanion) return;
+  plCompanion = false;
+  clearInterval(plSyncTimer);
+  plSyncTimer = null;
+  plVideo.muted = false;
+  try { plAudio.pause(); } catch (err) { /* ignore */ }
+  plAudio.removeAttribute("src");
+}
+
 function plAudioUrl() {
   return "/api/player/audio?path=" + plEnc(PL.path) + "&prepared=1";
 }
 
 function plStartCompanion() {
-  if (plCompanion || !plAudio) return;
+  if (plCompanion || plHlsToken || !plAudio) return;
   plCompanion = true;
   plPrepare.hidden = true;
   plPrepare.disabled = false;
@@ -476,17 +686,12 @@ function plStartCompanion() {
 
 function plSwitchToPrepared() {
   const at = plVideo.currentTime || 0;
+  plStopHls();
   plPrepared = true;
   plDead = false;
   plPrepare.hidden = true;
-  if (plCompanion) {
-    // The full copy carries its own audio; drop the companion track.
-    plCompanion = false;
-    clearInterval(plSyncTimer);
-    plVideo.muted = false;
-    try { plAudio.pause(); } catch (err) { /* ignore */ }
-    plAudio.removeAttribute("src");
-  }
+  // The full copy carries its own audio; drop the companion track.
+  plStopCompanion();
   plSetStatus(plPlayingCopy(), plCopyWhy ? "warn" : "");
   const restore = () => {
     plVideo.removeEventListener("loadedmetadata", restore);
@@ -585,32 +790,6 @@ function plSuggestCopy(message) {
   plPrepare.disabled = false;
 }
 
-// The original file's video codec (e.g. HEVC/x265) is not decodable here.
-// Ask Jellyfin for an on-the-fly H.264/AAC stream of the same item instead.
-// The subtitle <track> elements are children of the video element, so they
-// keep working across the switch, and the position is preserved.
-function plSwitchToTranscode() {
-  if (!plTranscodeUrl || plTranscoded) return false;
-  plTranscoded = true;
-  plDead = false;
-  const at = plVideo.currentTime || 0;
-  plSetStatus(
-    "This browser can't play the file's video codec — streaming a converted copy from Jellyfin…",
-    "warn",
-  );
-  const restore = () => {
-    plVideo.removeEventListener("loadedmetadata", restore);
-    if (at > 0) {
-      try { plVideo.currentTime = at; } catch (err) { /* ignore */ }
-    }
-    plApplyModes(plCurrent);
-    plTryPlay();
-  };
-  plVideo.addEventListener("loadedmetadata", restore);
-  plVideo.src = plTranscodeUrl;
-  plVideo.load();
-  return true;
-}
 // Ask the server why the video element gave up. A file that is not reachable
 // (bad Media paths, or gone from disk) is not something a remux can fix, so
 // report the server's own message instead of suggesting a browser copy.
@@ -653,18 +832,24 @@ async function plOnVideoError() {
     );
     return;
   }
-  if (plTranscoded) {
-    // The Jellyfin stream failed as well: don't loop back to the direct file.
-    plSetStatus(
-      "The converted Jellyfin stream could not be played either — transcoding " +
-        "may be disabled on the Jellyfin server.",
-      "error"
-    );
+  if (plHlsToken) {
+    // hls.js reports its own fatal errors and can recover from some of them;
+    // only a native HLS element (Safari) leaves the error to us.
+    if (!plHls) plHlsFatal("The Jellyfin stream could not be played.");
     return;
+  }
+  // A stream is being started; an error from the previous source is expected.
+  if (plHlsStarting) return;
+  const at = plVideo.currentTime || 0;
+  if (plHlsAvailable) {
+    plSetStatus(
+      "This browser can't play the file directly — switching to the Jellyfin stream…",
+      "warn"
+    );
+    if (await plStartHls(at)) return;
   }
   plDead = true;
   plSetOverlay(false);
-  if (plSwitchToTranscode()) return;
   await plExplainFailure(
     "This browser can't play the file as it is (usually the container, video " +
       "or audio codec). Make a browser copy to remux it with ffmpeg."
@@ -681,9 +866,7 @@ function plInit() {
     return;
   }
 
-  plVideo.src = plStreamUrl(false);
-  plVideo.load();
-  plTryPlay();
+  plSetStatus("Preparing playback…");
 
   plVideo.addEventListener("timeupdate", plUpdateTime);
   plVideo.addEventListener("loadedmetadata", plUpdateTime);
@@ -708,7 +891,7 @@ function plInit() {
   // no browser can handle (DTS, TrueHD); this catches the rest — AC-3 and
   // E-AC-3 play on some platforms and are silent on others.
   plVideo.addEventListener("timeupdate", () => {
-    if (plDead || plPrepared || plCompanion || plAudioChecked || plCopyWhy) return;
+    if (plDead || plPrepared || plCompanion || plHlsToken || plAudioChecked || plCopyWhy) return;
     if (plHasAudio === false) return;
     if (plVideo.currentTime < 4) return;
     if (typeof plVideo.webkitAudioDecodedByteCount !== "number") return;
@@ -724,7 +907,7 @@ function plInit() {
   });
 
   plVideo.addEventListener("stalled", () => {
-    if (!plVideo.duration && !plTranscoded) {
+    if (!plVideo.duration && !plHlsToken && !plSourceStarting) {
       plSuggestCopy("The browser stopped loading this file. Make a browser copy if it won't play.");
     }
   });
@@ -732,15 +915,19 @@ function plInit() {
   // A file the browser silently refuses to decode never fires "error" on every
   // platform, so offer the copy after a while too.
   setTimeout(() => {
-    if (!plDead && !plVideo.duration) {
+    if (!plDead && !plVideo.duration && !plHlsToken && !plSourceStarting) {
       plExplainFailure("Still loading… if this file won't play, make a browser copy.");
     }
   }, 12000);
 
+  // Stop the Jellyfin transcode when the window closes or navigates elsewhere.
+  window.addEventListener("pagehide", plStopHls);
+  window.addEventListener("beforeunload", plStopHls);
+
   document.querySelectorAll("[data-skip]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const delta = Number(btn.dataset.skip) || 0;
-      const duration = plVideo.duration || 0;
+      const duration = plDuration();
       let next = plVideo.currentTime + delta;
       if (duration) next = Math.min(next, duration);
       plVideo.currentTime = Math.max(0, next);
@@ -792,7 +979,18 @@ function plInit() {
   });
 
   plUpdateTime();
-  plLoadTracks().then(() => {
+  plLoadTracks().then((data) => {
+    if (!data) {
+      // The track list failed, but the file may still play: fall back to the
+      // direct stream rather than leaving the player empty.
+      plVideo.src = plStreamUrl(false);
+      plVideo.load();
+      plTryPlay();
+      return;
+    }
+    // Pick direct play or Jellyfin HLS before touching the video element, so an
+    // MKV never reaches a browser that would only download it.
+    plStartSource(data);
     // A track named in the link wins; otherwise show the best one so subtitles
     // are visible without hunting through the selector.
     let index = PL.track ? plTracks.findIndex((t) => t.spec === PL.track) : -1;
@@ -807,7 +1005,7 @@ function plJump() {
     plSetStatus("Enter a time like 1:23 or 0:12:45.", "error");
     return;
   }
-  const duration = plVideo.duration || 0;
+  const duration = plDuration();
   plVideo.currentTime = duration ? Math.min(seconds, duration) : seconds;
   plIdleStatus();
 }

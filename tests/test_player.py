@@ -16,7 +16,6 @@ from app import player
 from app.config import config
 from app.main import app
 from app.web import require_login
-import app.subtitles as sub
 
 
 def _client() -> httpx.AsyncClient:
@@ -36,6 +35,17 @@ def media_root(tmp_path, monkeypatch):
     monkeypatch.setattr(player, "browser_roots", lambda: [str(tmp_path)])
     monkeypatch.setattr(config.settings, "path_maps", [])
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _stub_video_probe(monkeypatch):
+    """The tracks route probes the video and reads its runtime.
+
+    Tests write fake files, so keep ffprobe out of them; individual tests
+    override these when they care about the values.
+    """
+    monkeypatch.setattr(player, "_video_info", lambda local: {})
+    monkeypatch.setattr(player, "_duration_for", _fixed_duration(0.0))
 
 
 def _video(root, name="movie.mp4", data=b"RIFF....WAVEfmt "):
@@ -412,7 +422,7 @@ async def test_tracks_route_reports_converted_audio_that_already_exists(
     assert data["copy_ready"] is False
 
 
-async def test_tracks_route_includes_the_jellyfin_transcode_url(
+async def test_tracks_route_reports_whether_jellyfin_can_stream(
     logged_in, media_root, monkeypatch
 ):
     video = _video(media_root, name="movie.mkv")
@@ -424,39 +434,390 @@ async def test_tracks_route_includes_the_jellyfin_transcode_url(
     monkeypatch.setattr(
         player, "_audio_info", lambda local: {"codec": "aac", "channels": 2, "layout": "stereo"}
     )
-    monkeypatch.setattr(sub, "_library_row", lambda p: {"id": "abc123"})
+    monkeypatch.setattr(
+        player, "_video_info",
+        lambda local: {"codec": "h264", "width": 1280, "height": 720, "container": "matroska"},
+    )
+    monkeypatch.setattr(player, "_duration_for", _fixed_duration(3600.0))
+    monkeypatch.setattr(player, "_library_row", lambda p: {"id": "abc123"})
     monkeypatch.setattr(config._settings, "jellyfin_url", "http://jf:8096/")
     monkeypatch.setattr(config._settings, "jellyfin_api_key", "sekret")
 
     async with _client() as client:
         resp = await client.get("/api/player/tracks", params={"path": str(video)})
     data = resp.json()
-    assert data["transcode_url"].startswith("http://jf:8096/Videos/abc123/stream.mp4?")
-    assert "static=true" in data["transcode_url"]
-    assert "VideoCodec=h264" in data["transcode_url"]
+    assert data["hls_available"] is True
+    assert data["video"]["codec"] == "h264"
+    assert data["container"] == "matroska"
+    assert data["duration"] == 3600.0
+    assert "transcode_url" not in data
 
 
-def test_jellyfin_transcode_url_needs_a_row_and_jellyfin(monkeypatch):
-    monkeypatch.setattr(sub, "_library_row", lambda p: {"id": "abc123"})
+async def test_tracks_route_has_no_hls_without_a_jellyfin_item(
+    logged_in, media_root, monkeypatch
+):
+    video = _video(media_root, name="movie.mkv")
+
+    async def no_tracks(path):
+        return ([], [])
+
+    monkeypatch.setattr(player, "subtitle_tracks_for", no_tracks)
+    monkeypatch.setattr(
+        player, "_audio_info", lambda local: {"codec": "aac", "channels": 2, "layout": "stereo"}
+    )
+    monkeypatch.setattr(player, "_video_info", lambda local: {})
+    monkeypatch.setattr(player, "_duration_for", _fixed_duration(0.0))
+    monkeypatch.setattr(player, "_library_row", lambda p: None)
     monkeypatch.setattr(config._settings, "jellyfin_url", "http://jf:8096/")
     monkeypatch.setattr(config._settings, "jellyfin_api_key", "sekret")
 
-    url = player._jellyfin_transcode_url("/Media/Movie (2020).mkv")
-    assert url.startswith("http://jf:8096/Videos/abc123/stream.mp4?")
-    assert "static=true" in url
-    assert "api_key=sekret" in url
-    assert "VideoCodec=h264" in url
-    assert "AudioCodec=aac" in url
+    async with _client() as client:
+        resp = await client.get("/api/player/tracks", params={"path": str(video)})
+    assert resp.json()["hls_available"] is False
 
-    # No library row -> no stream.
-    monkeypatch.setattr(sub, "_library_row", lambda p: None)
-    assert player._jellyfin_transcode_url("/Media/Movie (2020).mkv") == ""
 
-    # Jellyfin unconfigured -> no stream.
-    monkeypatch.setattr(sub, "_library_row", lambda p: {"id": "abc123"})
+def test_hls_available_needs_a_row_and_jellyfin(monkeypatch):
+    monkeypatch.setattr(player, "_library_row", lambda p: {"id": "abc123"})
+    monkeypatch.setattr(config._settings, "jellyfin_url", "http://jf:8096/")
+    monkeypatch.setattr(config._settings, "jellyfin_api_key", "sekret")
+    assert player._hls_available("/Media/Movie (2020).mkv") is True
+
+    # No library row -> no HLS.
+    monkeypatch.setattr(player, "_library_row", lambda p: None)
+    assert player._hls_available("/Media/Movie (2020).mkv") is False
+
+    # Jellyfin unconfigured -> no HLS, even with a row.
+    monkeypatch.setattr(player, "_library_row", lambda p: {"id": "abc123"})
     monkeypatch.setattr(config._settings, "jellyfin_url", "")
     monkeypatch.setattr(config._settings, "jellyfin_api_key", "")
-    assert player._jellyfin_transcode_url("/Media/Movie (2020).mkv") == ""
+    assert player._hls_available("/Media/Movie (2020).mkv") is False
+
+
+# ---- Jellyfin HLS playlist rewriting ----------------------------------------
+
+
+def _fixed_duration(seconds):
+    async def duration_for(path, local):
+        return seconds
+
+    return duration_for
+
+
+def test_asset_urls_round_trip_through_base64():
+    url = "http://jf:8096/Videos/abc/main.m3u8?MediaSourceId=abc&api_key=sekret"
+    encoded = player._encode_asset(url)
+    assert "=" not in encoded
+    assert player._decode_asset(encoded) == url
+
+
+def test_asset_url_drops_the_api_key_and_uses_the_configured_origin(monkeypatch):
+    monkeypatch.setattr(player, "_jellyfin_parts", lambda: player.urllib.parse.urlsplit("http://jf:8096/"))
+    url = player._asset_url(
+        "tok", "http://docker-jellyfin:8096/Videos/abc/seg0.ts?api_key=sekret&x=1"
+    )
+    assert url.startswith("/api/player/hls/tok/a/")
+    upstream = player._decode_asset(url.rsplit("/", 1)[-1])
+    assert upstream.startswith("http://jf:8096/Videos/abc/seg0.ts?")
+    assert "api_key" not in upstream
+    assert "x=1" in upstream
+
+    # Jellyfin's own URLs use capital ApiKey, which must go too.
+    url = player._asset_url(
+        "tok", "http://jf:8096/Videos/abc/seg1.ts?ApiKey=sekret&PlaySessionId=p1"
+    )
+    upstream = player._decode_asset(url.rsplit("/", 1)[-1])
+    assert "sekret" not in upstream
+    assert "PlaySessionId=p1" in upstream
+
+
+def test_rewrite_playlist_points_every_uri_at_the_proxy(monkeypatch):
+    monkeypatch.setattr(player, "_jellyfin_parts", lambda: player.urllib.parse.urlsplit("http://jf:8096/"))
+    text = (
+        "#EXTM3U\n"
+        "#EXT-X-VERSION:3\n"
+        "#EXT-X-TARGETDURATION:6\n"
+        "#EXTINF:6.0,\n"
+        "main0.ts\n"
+        "#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n"
+        "#EXTINF:6.0,\n"
+        "http://docker-jellyfin:8096/Videos/abc/main1.ts?ApiKey=sekret\n"
+        "#EXT-X-ENDLIST\n"
+    )
+    out = player._rewrite_playlist(text, "http://jf:8096/Videos/abc/main.m3u8", "tok")
+
+    lines = out.splitlines()
+    assert lines[0] == "#EXTM3U"
+    # Plain segment lines become proxy URLs.
+    assert lines[4].startswith("/api/player/hls/tok/a/")
+    assert lines[7].startswith("/api/player/hls/tok/a/")
+    # Tag URIs are rewritten too.
+    key_line = next(line for line in lines if line.startswith("#EXT-X-KEY"))
+    assert 'URI="/api/player/hls/tok/a/' in key_line
+    assert "docker-jellyfin" not in out
+    assert "api_key" not in out
+    assert "ApiKey" not in out
+
+    relative = player._decode_asset(lines[4].rsplit("/", 1)[-1])
+    assert relative == "http://jf:8096/Videos/abc/main0.ts"
+    absolute = player._decode_asset(lines[7].rsplit("/", 1)[-1])
+    assert absolute == "http://jf:8096/Videos/abc/main1.ts"
+
+
+def test_safe_upstream_rejects_other_hosts(monkeypatch):
+    monkeypatch.setattr(player, "_jellyfin_parts", lambda: player.urllib.parse.urlsplit("http://jf:8096/"))
+    assert player._safe_upstream("http://jf:8096/Videos/abc/seg.ts") == (
+        "http://jf:8096/Videos/abc/seg.ts"
+    )
+    with pytest.raises(player.JellyfinError):
+        player._safe_upstream("http://evil.example/Videos/abc/seg.ts")
+    with pytest.raises(player.JellyfinError):
+        player._safe_upstream("file:///etc/passwd")
+
+
+def test_absolute_jellyfin_keeps_a_configured_path_prefix(monkeypatch):
+    monkeypatch.setattr(
+        player, "_jellyfin_parts",
+        lambda: player.urllib.parse.urlsplit("http://host:8096/jellyfin"),
+    )
+    assert player._absolute_jellyfin("/Videos/abc/master.m3u8") == (
+        "http://host:8096/jellyfin/Videos/abc/master.m3u8"
+    )
+    # A URL that already carries the prefix is not doubled.
+    assert player._absolute_jellyfin("/jellyfin/Videos/abc/master.m3u8") == (
+        "http://host:8096/jellyfin/Videos/abc/master.m3u8"
+    )
+    # Any foreign host is replaced by the configured one.
+    assert player._absolute_jellyfin("http://docker-jf:8096/Videos/abc/master.m3u8") == (
+        "http://host:8096/jellyfin/Videos/abc/master.m3u8"
+    )
+
+
+# ---- Jellyfin HLS sessions ---------------------------------------------------
+
+
+class _FakeJellyfin:
+    def __init__(self, playback):
+        self.playback = playback
+        self.api_root = "http://jf:8096"
+        self.profile_request = None
+        self.reports = []
+        self.stopped = []
+
+    def auth_headers(self):
+        return {"X-Emby-Token": "sekret"}
+
+    async def get_playback_info(self, item_id, user_id, device_profile, start_ticks=0):
+        self.profile_request = (item_id, user_id, device_profile, start_ticks)
+        return self.playback
+
+    async def report_playback(
+        self, item_id, media_source_id, play_session_id,
+        position_ticks=0, event="progress", paused=False,
+    ):
+        self.reports.append((event, position_ticks, play_session_id))
+
+    async def stop_transcode(self, play_session_id):
+        self.stopped.append(play_session_id)
+
+
+def _hls_prereqs(monkeypatch, playback):
+    import app.media as media
+
+    fake = _FakeJellyfin(playback)
+    monkeypatch.setattr(player, "get_client", lambda: fake)
+    monkeypatch.setattr(player, "_library_row", lambda p: {"id": "abc123"})
+    monkeypatch.setattr(config._settings, "jellyfin_url", "http://jf:8096/")
+    monkeypatch.setattr(config._settings, "jellyfin_api_key", "sekret")
+    monkeypatch.setattr(media, "_any_user", _any_user("user1"))
+    return fake
+
+
+def _any_user(user_id):
+    async def any_user(client):
+        return user_id
+
+    return any_user
+
+
+async def test_start_hls_session_uses_the_transcoding_url(monkeypatch):
+    fake = _hls_prereqs(
+        monkeypatch,
+        {
+            "MediaSources": [
+                {
+                    "Id": "source1",
+                    "PlaySessionId": "play1",
+                    "TranscodingUrl": (
+                        "http://docker-jf:8096/Videos/abc123/master.m3u8"
+                        "?PlaySessionId=play1&api_key=sekret"
+                    ),
+                }
+            ]
+        },
+    )
+    try:
+        data = await player._start_hls_session("/Media/Movie.mkv", start_seconds=12.5)
+        token = data["token"]
+        assert data["playlist"] == f"/api/player/hls/{token}/master.m3u8"
+        assert data["play_session_id"] == "play1"
+
+        session = player._hls_sessions[token]
+        assert session["url"].startswith("http://jf:8096/Videos/abc123/master.m3u8?")
+        assert session["item_id"] == "abc123"
+        assert session["media_source_id"] == "source1"
+
+        # The device profile asks for HLS H.264/AAC, not the original file.
+        item_id, user_id, profile, ticks = fake.profile_request
+        assert (item_id, user_id) == ("abc123", "user1")
+        assert ticks == 125_000_000
+        assert profile["TranscodingProfiles"][0]["Protocol"] == "hls"
+        assert profile["DirectPlayProfiles"] == []
+
+        # A "now playing" start report was sent.
+        assert fake.reports[0][0] == "start"
+    finally:
+        player._hls_sessions.pop(token, None)
+
+
+async def test_start_hls_session_falls_back_to_the_master_playlist(monkeypatch):
+    _hls_prereqs(monkeypatch, {"MediaSources": [{"Id": "source1"}]})
+    try:
+        data = await player._start_hls_session("/Media/Movie.mkv")
+        token = data["token"]
+        url = player._hls_sessions[token]["url"]
+        assert "/Videos/abc123/master.m3u8?" in url
+        assert "VideoCodec=h264" in url
+        assert "AudioCodec=aac" in url
+        assert "PlaySessionId=" in url
+    finally:
+        player._hls_sessions.pop(token, None)
+
+
+async def test_start_hls_session_needs_a_library_item(monkeypatch):
+    _hls_prereqs(monkeypatch, {"MediaSources": []})
+    monkeypatch.setattr(player, "_library_row", lambda p: None)
+    with pytest.raises(player.JellyfinError):
+        await player._start_hls_session("/Media/Movie.mkv")
+
+
+async def test_stop_hls_session_reports_and_stops_the_transcode(monkeypatch):
+    fake = _hls_prereqs(monkeypatch, {})
+    token = "tok123"
+    player._hls_sessions[token] = {
+        "created": time.time(),
+        "path": "/Media/Movie.mkv",
+        "item_id": "abc123",
+        "media_source_id": "source1",
+        "play_session_id": "play1",
+        "url": "http://jf:8096/Videos/abc123/master.m3u8",
+    }
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with _client() as client:
+            resp = await client.post(f"/api/player/hls/{token}/stop?position=42.5")
+        assert resp.json()["ok"] is True
+        assert token not in player._hls_sessions
+        assert ("stopped", 425_000_000, "play1") in fake.reports
+        assert fake.stopped == ["play1"]
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+        player._hls_sessions.pop(token, None)
+
+
+async def test_hls_asset_route_rejects_another_host(logged_in, monkeypatch):
+    _hls_prereqs(monkeypatch, {})
+    token = "tok123"
+    player._hls_sessions[token] = {
+        "created": time.time(),
+        "path": "/Media/Movie.mkv",
+        "item_id": "abc123",
+        "media_source_id": "source1",
+        "play_session_id": "play1",
+        "url": "http://jf:8096/Videos/abc123/master.m3u8",
+    }
+    bad = player._encode_asset("http://evil.example/seg.ts")
+    try:
+        async with _client() as client:
+            resp = await client.get(f"/api/player/hls/{token}/a/{bad}")
+        assert resp.status_code == 400
+    finally:
+        player._hls_sessions.pop(token, None)
+
+
+def _add_hls_session(token: str) -> None:
+    player._hls_sessions[token] = {
+        "created": time.time(),
+        "path": "/Media/Movie.mkv",
+        "item_id": "abc123",
+        "media_source_id": "source1",
+        "play_session_id": "play1",
+        "url": "http://jf:8096/Videos/abc123/master.m3u8",
+    }
+
+
+async def test_hls_master_route_rewrites_the_playlist(logged_in, monkeypatch):
+    _hls_prereqs(monkeypatch, {})
+    token = "tok123"
+    _add_hls_session(token)
+
+    async def fake_fetch(url):
+        assert url == "http://jf:8096/Videos/abc123/master.m3u8"
+        return (
+            "#EXTM3U\n#EXTINF:6.0,\nmain0.ts\n#EXT-X-ENDLIST\n",
+            "http://jf:8096/Videos/abc123/main.m3u8?PlaySessionId=play1",
+        )
+
+    monkeypatch.setattr(player, "_fetch_hls_text", fake_fetch)
+    try:
+        async with _client() as client:
+            resp = await client.get(f"/api/player/hls/{token}/master.m3u8")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "main0.ts" not in body
+        assert f"/api/player/hls/{token}/a/" in body
+        assert body.rstrip().endswith("#EXT-X-ENDLIST")
+    finally:
+        player._hls_sessions.pop(token, None)
+
+
+async def test_hls_asset_route_streams_a_segment(logged_in, monkeypatch):
+    seen = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("authorization", "")
+        seen["accept"] = request.headers.get("accept", "")
+        return httpx.Response(
+            200,
+            stream=httpx.ByteStream(b"TSDATA"),
+            headers={"content-type": "video/mp2t"},
+        )
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    class _Client:
+        api_root = "http://jf:8096"
+
+        def auth_headers(self):
+            return {"Authorization": 'MediaBrowser Token="sekret"'}
+
+    monkeypatch.setattr(player, "get_client", lambda: _Client())
+    monkeypatch.setattr(player, "get_stream_client", lambda: http)
+    token = "tok123"
+    _add_hls_session(token)
+    asset = player._encode_asset("http://jf:8096/Videos/abc123/main0.ts")
+    try:
+        async with _client() as client:
+            resp = await client.get(f"/api/player/hls/{token}/a/{asset}")
+        assert resp.status_code == 200
+        assert resp.content == b"TSDATA"
+        assert resp.headers["content-type"] == "video/mp2t"
+        assert seen["url"] == "http://jf:8096/Videos/abc123/main0.ts"
+        assert "sekret" in seen["auth"]
+        assert "application/json" not in seen["accept"]  # no JSON Accept on media
+    finally:
+        player._hls_sessions.pop(token, None)
+        await http.aclose()
 
 
 def test_pick_default_prefers_the_configured_languages(monkeypatch):

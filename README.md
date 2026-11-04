@@ -474,10 +474,13 @@ not the legacy XML-RPC API that VLSub used (that one is being shut down).
 ## Player
 
 The **Play** action on a row (Movie Match, Search and Libraries tabs) opens the
-file in a small player window. It streams the original video straight from disk — the
-server supports HTTP range requests, so the native timeline seeks normally — and
-the row of controls adds a time readout, −30/−5/+5/+30 second jumps, a **Go to**
-box (`mm:ss` or `hh:mm:ss`), a speed selector and a **Subtitles** selector.
+file in a small player window. Files the browser can open itself (MP4/WebM with
+a supported codec) stream straight from disk — the server supports HTTP range
+requests, so the native timeline seeks normally. Everything else (Matroska
+`.mkv`, HEVC/x265, DTS audio) plays through **Jellyfin's HLS transcoder** instead,
+so it starts immediately without a manual remux. The row of controls adds a time
+readout, −30/−5/+5/+30 second jumps, a **Go to** box (`mm:ss` or `hh:mm:ss`), a
+speed selector and a **Subtitles** selector.
 
 Every subtitle track the scanner knows about is in that selector: embedded
 streams are extracted with ffmpeg, external `.srt`/`.vtt`/`.ass`/`.ssa`/`.sub`
@@ -543,14 +546,18 @@ the container or video codec is something the browser cannot open. Then the
 keeping the position. This is the slow path, and it is no longer used for audio
 problems.
 
-Before that, for a video codec the browser cannot decode (x265/HEVC rips,
-which no browser plays without OS codec support), the player asks
-**Jellyfin to stream a converted H.264/AAC copy** of the item instead — it
-needs Jellyfin configured with transcoding, and the item must be in the Movie
-Match list (it is whenever the row was opened from there). Subtitle tracks
-keep working because they are attached to the video element, not the stream,
-and the position is preserved. If Jellyfin is unavailable or refuses, the
-**Make browser copy** fallback remains.
+Before that, for a container or video codec the browser cannot decode (almost
+every Matroska `.mkv`, and x265/HEVC rips that no browser plays without OS codec
+support), the player asks **Jellyfin for an H.264/AAC HLS stream** of the item.
+It requests the rendition through Jellyfin's `PlaybackInfo` endpoint and plays it
+with the bundled hls.js; JFTools proxies the playlists and segments under a random
+per-session token, so the API key and Jellyfin's internal host names never reach
+the browser. This needs Jellyfin configured with transcoding, and the item must
+be in the Movie Match list (it is whenever the row was opened from there).
+Subtitle tracks keep working because they are attached to the video element, not
+the stream, and the position is preserved. Jellyfin's transcode is stopped when
+the player window closes or switches sources. If Jellyfin is unavailable or
+refuses, the **Make browser copy** fallback remains.
 
 **Requirements:** ffmpeg (bundled in the Docker image, or in `Tools/` next to
 the app) for embedded subtitle extraction, audio conversion and browser
@@ -682,3 +689,6 @@ docker-entrypoint.sh PUID/PGID handling
 ## License
 
 [MIT](LICENSE)
+
+Bundles [hls.js](https://github.com/video-dev/hls.js) v1.6.15
+(`app/static/hls.min.js`) for HLS playback, licensed under Apache-2.0.
