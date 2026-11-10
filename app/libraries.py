@@ -18,6 +18,7 @@ from .config import config
 from .jellyfin.client import JellyfinError, get_client
 from .jellyfin_id import library_for_path
 from .logs import log
+from .paths import resolve_local_path
 from .web import require_login, templates
 
 router = APIRouter()
@@ -185,11 +186,18 @@ async def api_libraries(request: Request, user: str = Depends(require_login)):
         from .scheduler import trigger_operation
 
         trigger_operation("refresh_libraries")
+    # Resolve each row's Subber path at read time, so a change on Settings →
+    # Media paths applies without a library refresh.
+    maps = config.settings.path_maps
+    recent = [
+        {**r, "local_path": resolve_local_path(r.get("path") or "", maps)}
+        for r in _state["recent"]
+    ]
     return JSONResponse(
         {
             "ok": True,
             "libraries": _state["libraries"],
-            "recent": _state["recent"],
+            "recent": recent,
             "last_sync": _state["last_sync"],
             "fetching": _fetch["status"] == "running",
             "fetch_error": _fetch.get("error"),

@@ -4,6 +4,7 @@ import json
 import httpx
 
 import app.jellyfin_id as jid
+from app.config import config
 from app.jellyfin.client import JellyfinClient
 from app.main import app
 from app.web import require_login
@@ -251,6 +252,12 @@ async def test_items_payload_reports_preferred_languages_and_fresh_flags(monkeyp
             },
         })
         monkeypatch.setattr(sub, "preferred_language_names", lambda: ["Swedish"])
+        monkeypatch.setattr(
+            config._settings,
+            "path_maps",
+            [{"from": "/Filmer", "to": "Z:\\Filmer", "local": "\\\\NAS\\Media\\Filmer"}],
+        )
+        monkeypatch.setattr("app.paths._is_windows", lambda: True)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -260,6 +267,8 @@ async def test_items_payload_reports_preferred_languages_and_fresh_flags(monkeyp
         data = response.json()
         assert data["preferred_languages"] == ["Swedish"]
         assert data["scans"]["/x.mkv"]["flags"]["acceptable"] is True
+        # No mapping covers /x.mkv, so Subber is not offered for it.
+        assert data["rows"][0]["local_path"] == ""
     finally:
         app.dependency_overrides.pop(require_login, None)
 

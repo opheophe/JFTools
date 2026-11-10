@@ -1154,12 +1154,14 @@ function rowActions(r, cfg) {
   const playable = r.path && r.type !== "Series";
   td.appendChild(pillButton("Play", "play", playable ? () => playVideo(r.path) : null));
   // Clicking Subfind opens the dialog; hovering it offers Subber. The link is a
-  // plain anchor (no target) so subber:// reaches the OS handler.
+  // plain anchor (no target) so subber:// reaches the OS handler. Subber can
+  // only open the path from its own view of the share, so the item appears only
+  // when Media paths supplies a local path for this file.
   const subfindItems = [];
-  if (playable) {
+  if (playable && r.local_path) {
     subfindItems.push(el("a", {
       class: "id-google-item",
-      href: "subber://add?path=" + enc(r.path),
+      href: "subber://add?path=" + enc(r.local_path),
       text: "Queue in Subber",
       title: "Queue this file in Subber",
     }));
@@ -1749,6 +1751,12 @@ function bindPathMaps() {
     const div = el("div", { class: "paths-row" });
     const fromInput = el("input", { type: "text", placeholder: "/Filmer", value: (m && m.from) || "" });
     const toInput = el("input", { type: "text", placeholder: "\\\\NAS\\Filmer", value: (m && m.to) || "" });
+    const localInput = el("input", {
+      type: "text",
+      placeholder: "\\\\NAS\\Media\\Filmer",
+      value: (m && m.local) || "",
+      title: "Optional: the same folder as other apps on this machine (Subber) see it",
+    });
     const testBtn = el("button", { type: "button", text: "Test" });
     const testOut = el("span", { class: "path-test" });
     const rmBtn = el("button", { type: "button", class: "btn-danger", text: "Remove" });
@@ -1784,6 +1792,8 @@ function bindPathMaps() {
     div.appendChild(fromInput);
     div.appendChild(el("span", { class: "path-arrow", text: "→" }));
     div.appendChild(toInput);
+    div.appendChild(el("span", { class: "path-arrow", text: "→" }));
+    div.appendChild(localInput);
     div.appendChild(testBtn);
     div.appendChild(testOut);
     div.appendChild(rmBtn);
@@ -1799,13 +1809,17 @@ function bindPathMaps() {
     const out = [];
     rowsEl.querySelectorAll(".paths-row").forEach((row) => {
       const inputs = row.querySelectorAll("input");
-      out.push({ from: inputs[0].value.trim(), to: inputs[1].value.trim() });
+      out.push({
+        from: inputs[0].value.trim(),
+        to: inputs[1].value.trim(),
+        local: inputs[2].value.trim(),
+      });
     });
     return out;
   }
 
   addBtn.addEventListener("click", () => {
-    maps.push({ from: "", to: "" });
+    maps.push({ from: "", to: "", local: "" });
     render();
   });
 
@@ -1833,9 +1847,9 @@ function bindPathMaps() {
           showMessage(resultEl, { ok: false, error: "No library folders found." });
           return;
         }
-        // Keep whatever is typed already (drop fully empty rows), then fill both
-        // sides from the library so the rows are complete and saveable.
-        maps = readRows().filter((m) => m.from || m.to);
+        // Keep whatever is typed already (drop fully empty rows), then fill the
+        // Jellyfin and machine paths from the library so the rows are saveable.
+        maps = readRows().filter((m) => m.from || m.to || m.local);
         const index = new Map(maps.map((m, i) => [m.from, i]));
         let added = 0;
         let filled = 0;
@@ -1844,7 +1858,7 @@ function bindPathMaps() {
             const row = maps[index.get(loc)];
             if (!row.to) { row.to = loc; filled += 1; }
           } else {
-            maps.push({ from: loc, to: loc });
+            maps.push({ from: loc, to: loc, local: "" });
             index.set(loc, maps.length - 1);
             added += 1;
           }
@@ -1874,7 +1888,8 @@ function bindPathMaps() {
       const inputs = row.querySelectorAll("input");
       const from = inputs[0].value.trim();
       const to = inputs[1].value.trim();
-      if (from && to) collected.push({ from: from, to: to });
+      const local = inputs[2].value.trim();
+      if (from && to) collected.push({ from: from, to: to, local: local });
     });
     showSpinner(resultEl);
     try {

@@ -252,17 +252,19 @@ services:
 ```
 
 **2. JFTools runs elsewhere (e.g. Windows, or with different mounts).** Add a
-mapping per library on the **Settings → Media paths** page: the **Jellyfin path**
-on the left, and the **path on this machine** on the right.
+mapping per library on the **Settings → Media paths** page: the **Jellyfin path**,
+the **path on this machine**, and optionally the **local path** that other apps
+on this machine see (used by **Queue in Subber**).
 
 ```
-/Filmer  →  \\NAS\Filmer     (or Z:\Filmer)
+/Filmer  →  Z:\Filmer  →  \\Nasse\Media\-{( Filmer
 ```
 
-Click **Fill with library paths** to add your libraries (both sides pre-filled
-with the Jellyfin path); then edit the right-hand path where it differs and
-**Save**. The same mappings can be supplied headless via `JFTOOLS_PATH_MAP`
-(`/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`).
+Click **Fill with library paths** to add your libraries (the Jellyfin and machine
+paths start as the library path); then adjust the machine path and add the local
+path where needed, and **Save**. The same machine mappings can be supplied
+headless via `JFTOOLS_PATH_MAP` (`/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`); the local
+path is configured in-app only.
 
 Notes:
 - **Permissions:** the app runs as `PUID:PGID` in Docker (or your user when run

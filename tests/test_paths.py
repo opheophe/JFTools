@@ -1,6 +1,6 @@
 import pytest
 
-from app.paths import resolve_path
+from app.paths import resolve_local_path, resolve_path
 
 
 @pytest.fixture
@@ -52,6 +52,43 @@ def test_skips_invalid_entries(posix):
         {"from": "/Filmer", "to": "/media/Filmer"},
     ]
     assert resolve_path("/Filmer/a.mkv", maps) == "/media/Filmer/a.mkv"
+
+
+def test_local_path_requires_a_local_mapping(posix):
+    maps = [{"from": "/Filmer", "to": "/media/Filmer"}]
+    assert resolve_local_path("/Filmer/Movie/a.mkv", maps) == ""
+    assert resolve_local_path("/Filmer/Movie/a.mkv", None) == ""
+
+
+def test_local_path_uses_the_local_prefix(posix):
+    maps = [{"from": "/Filmer", "to": "/media/Filmer", "local": "//NAS/Media/Filmer"}]
+    assert (
+        resolve_local_path("/Filmer/Movie/a.mkv", maps)
+        == "//NAS/Media/Filmer/Movie/a.mkv"
+    )
+
+
+def test_local_path_longest_prefix_with_a_local(posix):
+    maps = [
+        {"from": "/Filmer", "to": "/media/all", "local": "//NAS/Media/Filmer"},
+        {"from": "/Filmer/Sub", "to": "/media/sub"},
+    ]
+    # The more specific mapping has no local path, so the broader one maps it.
+    assert (
+        resolve_local_path("/Filmer/Sub/x.mkv", maps)
+        == "//NAS/Media/Filmer/Sub/x.mkv"
+    )
+
+
+def test_local_path_windows_separators(monkeypatch):
+    monkeypatch.setattr("app.paths._is_windows", lambda: True)
+    maps = [
+        {"from": "/Filmer", "to": "Z:\\Filmer", "local": "\\\\NAS\\Media\\Filmer"}
+    ]
+    assert (
+        resolve_local_path("/Filmer/Movie/a.mkv", maps)
+        == "\\\\NAS\\Media\\Filmer\\Movie\\a.mkv"
+    )
 
 
 def test_windows_output_separators(monkeypatch):

@@ -30,7 +30,12 @@ def _env(name: str, default: str = "") -> str:
 
 
 def _sanitize_path_maps(value) -> list[dict]:
-    """Normalise raw path-map input into a list of {"from", "to"} pairs."""
+    """Normalise raw path-map input into {"from", "to", "local"?} entries.
+
+    ``local`` is optional: the path other apps on this machine (Subber) use for
+    the same folder. It is omitted when blank so old settings files keep their
+    shape.
+    """
     out: list[dict] = []
     if not isinstance(value, list):
         return out
@@ -40,7 +45,11 @@ def _sanitize_path_maps(value) -> list[dict]:
         src = str(m.get("from") or "").strip()
         dst = str(m.get("to") or "").strip()
         if src and dst:
-            out.append({"from": src, "to": dst})
+            entry = {"from": src, "to": dst}
+            local = str(m.get("local") or "").strip()
+            if local:
+                entry["local"] = local
+            out.append(entry)
     return out
 
 

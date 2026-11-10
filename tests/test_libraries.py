@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 import app.libraries as libraries_mod
+from app.config import config
 from app.libraries import _build_recent, _library_locations
 from app.main import app
 from app.web import require_login, templates
@@ -155,7 +156,29 @@ async def test_recent_cache_with_paths_is_not_refilled(monkeypatch, logged_in):
 
     assert resp.status_code == 200
     assert triggered == []
-    assert resp.json()["recent"] == [row]
+    assert resp.json()["recent"] == [{**row, "local_path": ""}]
+
+
+async def test_recent_rows_carry_the_local_path_for_subber(monkeypatch, logged_in):
+    _stub_scheduler(monkeypatch, [])
+    row = {"id": "m1", "name": "Dune", "path": "/Filmer/Dune.mkv"}
+    monkeypatch.setattr(
+        libraries_mod, "_state",
+        {"libraries": [], "recent": [row], "last_sync": 1.0},
+    )
+    monkeypatch.setattr(libraries_mod, "_fetch", {"status": "idle", "error": None})
+    monkeypatch.setattr(
+        config._settings,
+        "path_maps",
+        [{"from": "/Filmer", "to": "Z:\\Filmer", "local": "\\\\NAS\\Media\\Filmer"}],
+    )
+    monkeypatch.setattr("app.paths._is_windows", lambda: True)
+
+    async with _client() as client:
+        resp = await client.get("/api/libraries")
+
+    assert resp.status_code == 200
+    assert resp.json()["recent"][0]["local_path"] == "\\\\NAS\\Media\\Filmer\\Dune.mkv"
 
 async def test_run_fetch_cancelled_leaves_non_running_status(monkeypatch):
     started = asyncio.Event()

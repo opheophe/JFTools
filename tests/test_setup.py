@@ -303,6 +303,24 @@ def test_path_map_env_parsing(tmp_path, monkeypatch):
     ]
 
 
+def test_path_maps_keep_the_optional_local_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("JFTOOLS_PATH_MAP", raising=False)
+    monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))
+
+    cfg = Config()
+    cfg.save_path_maps(
+        [
+            {"from": "/Filmer", "to": "Z:\\Filmer", "local": "\\\\NAS\\Media\\Filmer"},
+            # A blank local path is omitted, so old settings keep their shape.
+            {"from": "/Ero", "to": "Z:\\Ero", "local": "  "},
+        ]
+    )
+    assert cfg.settings.path_maps == [
+        {"from": "/Filmer", "to": "Z:\\Filmer", "local": "\\\\NAS\\Media\\Filmer"},
+        {"from": "/Ero", "to": "Z:\\Ero"},
+    ]
+
+
 def test_path_maps_sanitized_on_save(tmp_path, monkeypatch):
     monkeypatch.delenv("JFTOOLS_PATH_MAP", raising=False)
     monkeypatch.setenv("JFTOOLS_DATA_DIR", str(tmp_path))

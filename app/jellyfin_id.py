@@ -21,6 +21,7 @@ from . import notifications
 from .config import config
 from .jellyfin.client import JellyfinClient, JellyfinError, get_client
 from .logs import log
+from .paths import resolve_local_path
 from .web import require_login, templates
 
 router = APIRouter()
@@ -629,11 +630,18 @@ async def jellyfin_id_items(request: Request, user: str = Depends(require_login)
     from .subtitles import preferred_language_names, scans_map, subtitles_ok
 
     preferred = preferred_language_names()
+    # Resolve each row's Subber path at read time, so a change on Settings →
+    # Media paths applies without refetching from Jellyfin.
+    maps = config.settings.path_maps
+    rows = [
+        {**r, "local_path": resolve_local_path(r.get("path") or "", maps)}
+        for r in _state["rows"]
+    ]
     return JSONResponse(
         {
             "ok": True,
             "fetched": bool(_state["rows"]),
-            "rows": _state["rows"],
+            "rows": rows,
             "marks": sorted(_state["marks"]),
             "last_sync": _state["last_sync"],
             "jellyfin_url": config.settings.jellyfin_url,
