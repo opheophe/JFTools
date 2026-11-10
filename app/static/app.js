@@ -1110,7 +1110,7 @@ async function remuxOne(path, node) {
 
 // ---- row actions -----------------------------------------------------------
 //
-// The action pills a row carries: Open ▾ · Sync ▾ · Play · Subfind ·
+// The action pills a row carries: Open ▾ · Sync ▾ · Play · Subfind ▾ ·
 // Tracks ▾ and, where asked for, Google ▾. One builder so the Search,
 // Movie Match and Libraries tables cannot drift apart; ``cfg.urls`` supplies
 // the base URLs (Jellyfin/Radarr/Sonarr, empty when unconfigured) and
@@ -1153,7 +1153,20 @@ function rowActions(r, cfg) {
   // A series row's path is a folder: there is no file to play or probe.
   const playable = r.path && r.type !== "Series";
   td.appendChild(pillButton("Play", "play", playable ? () => playVideo(r.path) : null));
-  td.appendChild(pillButton("Subfind", "sfind", playable ? () => subfindOpen(r.path) : null));
+  // Clicking Subfind opens the dialog; hovering it offers Subber. The link is a
+  // plain anchor (no target) so subber:// reaches the OS handler.
+  const subfindItems = [];
+  if (playable) {
+    subfindItems.push(el("a", {
+      class: "id-google-item",
+      href: "subber://add?path=" + enc(r.path),
+      text: "Queue in Subber",
+      title: "Queue this file in Subber",
+    }));
+  }
+  td.appendChild(hoverMenuButton(
+    "Subfind", subfindItems, "sfind", playable ? () => subfindOpen(r.path) : null
+  ));
   // Clicking Tracks still opens the dialog; hovering it offers Remux.
   const remuxItem = playable
     ? hoverMenuAction("Remux", (node) => remuxOne(r.path, node))
