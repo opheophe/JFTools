@@ -24,7 +24,7 @@ from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .media import router as media_router
 from .notifications import router as notifications_router
-from .paths import resolve_path
+from .paths import resolve_local_path, resolve_path
 from .player import prune_play_cache, router as player_router
 from .remotesync import run_import
 from .remux import router as remux_router
@@ -568,6 +568,26 @@ async def settings_opensubtitles_account_remove(
     )
 
 
+def _probe_path(target: str) -> dict:
+    """Existence and access flags for one path, for the Settings Test button."""
+    probe = {
+        "resolved": target,
+        "exists": False,
+        "is_dir": False,
+        "readable": False,
+        "writable": False,
+    }
+    try:
+        os.stat(target)
+    except OSError:
+        return probe
+    probe["exists"] = True
+    probe["is_dir"] = os.path.isdir(target)
+    probe["readable"] = os.access(target, os.R_OK)
+    probe["writable"] = os.access(target, os.W_OK)
+    return probe
+
+
 @app.post("/api/paths/test")
 async def paths_test(request: Request, user: str = Depends(require_login)):
     try:
@@ -576,25 +596,21 @@ async def paths_test(request: Request, user: str = Depends(require_login)):
         data = {}
     path = str((data or {}).get("path") or "").strip()
     to = str((data or {}).get("to") or "").strip()
-    if not path and not to:
+    local = str((data or {}).get("local") or "").strip()
+    if not path and not to and not local:
         return JSONResponse({"ok": False, "error": "No path supplied."}, status_code=400)
 
-    # If the row already has a local path, test that directly (it's what the
-    # user is trying to reach). Otherwise resolve the Jellyfin path through the
-    # saved mappings.
+    # If the row already has a path, test that directly (it's what the user is
+    # trying to reach). Otherwise resolve the Jellyfin path through the saved
+    # mappings. The optional local path is probed too, so a Subber-only path can
+    # be checked from the same button.
     target = to if to else resolve_path(path, config.settings.path_maps)
-    result = {"ok": True, "path": path or to, "resolved": target}
-    try:
-        os.stat(target)
-        result["exists"] = True
-        result["is_dir"] = os.path.isdir(target)
-        result["readable"] = os.access(target, os.R_OK)
-        result["writable"] = os.access(target, os.W_OK)
-    except OSError:
-        result["exists"] = False
-        result["is_dir"] = False
-        result["readable"] = False
-        result["writable"] = False
+    result = {"ok": True, "path": path or to or local, **_probe_path(target)}
+    local_target = local if local else resolve_local_path(
+        path, config.settings.path_maps
+    )
+    if local_target:
+        result["local"] = _probe_path(local_target)
     return JSONResponse(result)
 
 

@@ -1761,27 +1761,34 @@ function bindPathMaps() {
     const testOut = el("span", { class: "path-test" });
     const rmBtn = el("button", { type: "button", class: "btn-danger", text: "Remove" });
 
+    const describeProbe = (d) => {
+      const bits = [d.exists ? "exists" : "missing"];
+      if (d.exists) {
+        bits.push(d.is_dir ? "directory" : "file");
+        bits.push(d.readable ? "readable" : "not readable");
+        bits.push(d.writable ? "writable" : "not writable");
+      }
+      return "→ " + (d.resolved || "") + "  (" + bits.join(", ") + ")";
+    };
+
     testBtn.addEventListener("click", async () => {
       const path = fromInput.value.trim();
       const to = toInput.value.trim();
-      if (!path && !to) { testOut.textContent = "Fill in a path first."; return; }
+      const local = localInput.value.trim();
+      if (!path && !to && !local) { testOut.textContent = "Fill in a path first."; return; }
       testOut.textContent = "…";
       try {
         const resp = await fetch("/api/paths/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: path, to: to }),
+          body: JSON.stringify({ path: path, to: to, local: local }),
         });
         if (resp.status === 401) { window.location.href = "/login"; return; }
         const d = await resp.json();
         if (d.error) { testOut.textContent = d.error; return; }
-        const bits = [d.exists ? "exists" : "missing"];
-        if (d.exists) {
-          bits.push(d.is_dir ? "directory" : "file");
-          bits.push(d.readable ? "readable" : "not readable");
-          bits.push(d.writable ? "writable" : "not writable");
-        }
-        testOut.textContent = "→ " + (d.resolved || "") + "  (" + bits.join(", ") + ")";
+        let text = describeProbe(d);
+        if (d.local) text += "  ·  local " + describeProbe(d.local);
+        testOut.textContent = text;
       } catch (err) {
         testOut.textContent = String(err);
       }

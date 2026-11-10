@@ -1,6 +1,9 @@
+import httpx
 import pytest
 
+from app.main import app
 from app.paths import resolve_local_path, resolve_path
+from app.web import require_login
 
 
 @pytest.fixture
@@ -89,6 +92,26 @@ def test_local_path_windows_separators(monkeypatch):
         resolve_local_path("/Filmer/Movie/a.mkv", maps)
         == "\\\\NAS\\Media\\Filmer\\Movie\\a.mkv"
     )
+
+
+async def test_settings_test_button_probes_the_local_path(tmp_path):
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/paths/test",
+                json={"path": "/Filmer", "to": str(tmp_path), "local": str(tmp_path)},
+            )
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["exists"] is True
+    assert data["local"]["resolved"] == str(tmp_path)
+    assert data["local"]["exists"] is True
 
 
 def test_windows_output_separators(monkeypatch):
