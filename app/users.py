@@ -43,6 +43,44 @@ def _completion(ud: dict) -> tuple[str, bool]:
     return "Unwatched", False
 
 
+def _session_device(session: dict) -> str:
+    """A short human label for the device behind a Jellyfin session."""
+    return (session.get("DeviceName") or session.get("Client") or "").strip()
+
+
+def _session_active(session: dict) -> bool:
+    """Whether Jellyfin still considers a session connected."""
+    active = session.get("IsActive")
+    return True if active is None else bool(active)
+
+
+def _pick_status(sessions: list[dict]) -> tuple[str, dict | None]:
+    """Derive ``(status, session)`` for one user from their Jellyfin sessions.
+
+    Precedence: actively playing beats paused, which beats merely connected,
+    which beats a stale session Jellyfin still remembers. ``status`` is one of
+    ``watching`` / ``paused`` / ``online`` / ``idle`` / ``offline``.
+    """
+    if not sessions:
+        return "offline", None
+
+    playing = [s for s in sessions if (s.get("NowPlayingItem") or {}).get("Name")]
+    if playing:
+        # Prefer a session that is actually playing over one paused on another
+        # device, so a phone left on pause doesn't mask the TV.
+        playing.sort(key=lambda s: bool((s.get("PlayState") or {}).get("IsPaused")))
+        session = playing[0]
+        paused = bool((session.get("PlayState") or {}).get("IsPaused"))
+        return ("paused" if paused else "watching"), session
+
+    active = [s for s in sessions if _session_active(s)]
+    if active:
+        return "online", active[0]
+
+    newest = max(sessions, key=lambda s: s.get("LastActivityDate") or "")
+    return "idle", newest
+
+
 # ---- persistence ------------------------------------------------------------
 
 
@@ -233,19 +271,22 @@ async def api_users(request: Request, user: str = Depends(require_login)):
     except JellyfinError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
 
-    session_by_user = {}
+    # A user can be connected from several devices at once (e.g. a TV playing
+    # and a phone browsing), so keep every session rather than the last one.
+    sessions_by_user: dict[str, list[dict]] = {}
     for s in sessions:
         uid = s.get("UserId")
         if uid:
-            session_by_user[uid] = s
+            sessions_by_user.setdefault(uid, []).append(s)
 
     result = []
     for u in users:
         uid = u.get("Id")
         last_watched = _state["last_watched"].get(uid) or {}
 
+        status, sess = _pick_status(sessions_by_user.get(uid) or [])
+
         active = None
-        sess = session_by_user.get(uid)
         if sess:
             np = sess.get("NowPlayingItem") or {}
             if np.get("Name"):
@@ -268,6 +309,9 @@ async def api_users(request: Request, user: str = Depends(require_login)):
             {
                 "id": uid,
                 "name": u.get("Name") or "?",
+                "status": status,
+                "device": _session_device(sess) if sess else "",
+                "last_seen": (sess or {}).get("LastActivityDate"),
                 "last_login": u.get("LastLoginDate") or u.get("LastActivityDate"),
                 "last_watched": last_watched,
                 "active": active,

@@ -73,6 +73,60 @@ def _sanitize_profiles(value) -> dict:
     return out
 
 
+def _sanitize_format_profiles(value) -> dict:
+    """Normalise saved device profiles: ``{name: {containers, video, audio}}``.
+
+    Unlike filter profiles, these drive verdicts, so the body is rebuilt from
+    known keys instead of kept opaque: a malformed entry would otherwise mark
+    every file as playable (or unplayable).
+    """
+    out: dict[str, dict] = {}
+    if not isinstance(value, dict):
+        return out
+    for name, profile in value.items():
+        if not isinstance(name, str) or not name.strip() or not isinstance(profile, dict):
+            continue
+        raw_containers = profile.get("containers") or []
+        if isinstance(raw_containers, str):
+            raw_containers = [raw_containers]
+        elif not isinstance(raw_containers, (list, tuple)):
+            raw_containers = []
+        raw_audio = profile.get("audio") or []
+        if isinstance(raw_audio, str):
+            raw_audio = [raw_audio]
+        elif not isinstance(raw_audio, (list, tuple)):
+            raw_audio = []
+        video: dict[str, int] = {}
+        raw_video = profile.get("video")
+        if isinstance(raw_video, dict):
+            for codec, depth in raw_video.items():
+                codec = str(codec).strip().lower()
+                try:
+                    depth = int(depth)
+                except (TypeError, ValueError):
+                    continue
+                if codec and depth > 0:
+                    video[codec] = depth
+        out[name.strip()] = {
+            "containers": sorted(
+                {
+                    c.strip().lower()
+                    for c in raw_containers
+                    if isinstance(c, str) and c.strip()
+                }
+            ),
+            "video": video,
+            "audio": sorted(
+                {
+                    c.strip().lower()
+                    for c in raw_audio
+                    if isinstance(c, str) and c.strip()
+                }
+            ),
+        }
+    return out
+
+
 def _parse_path_map_env(raw: str) -> list[dict]:
     """Parse ``JFTOOLS_PATH_MAP`` (``/from=/to;/from2=/to2``)."""
     if not raw:
@@ -180,6 +234,10 @@ class Settings:
     # Saved filter profiles per page ("search", "moviematch"), managed from that
     # page's profile bar. Kept here so they survive browser clears/backups.
     filter_profiles: dict = field(default_factory=dict)
+    # Saved device profiles for the Formats tab's playback verdict: what a
+    # player accepts ({name: {containers, video, audio}}). Kept in config so the
+    # verdicts survive browser clears and travel with a settings backup.
+    format_profiles: dict = field(default_factory=dict)
     # Full-backup destination and retention. An empty directory means
     # data/backups; keep=0 keeps every archive.
     backup_dir: str = ""
@@ -298,6 +356,10 @@ class Config:
                     settings.opensubtitles_languages = data["opensubtitles_languages"]
                 if "filter_profiles" in data:
                     settings.filter_profiles = _sanitize_profiles(data["filter_profiles"])
+                if "format_profiles" in data:
+                    settings.format_profiles = _sanitize_format_profiles(
+                        data["format_profiles"]
+                    )
                 if isinstance(data.get("backup_dir"), str):
                     settings.backup_dir = data["backup_dir"]
                 if "backup_keep" in data:
@@ -352,6 +414,7 @@ class Config:
             "opensubtitles_accounts": s.opensubtitles_accounts,
             "opensubtitles_languages": s.opensubtitles_languages,
             "filter_profiles": s.filter_profiles,
+            "format_profiles": s.format_profiles,
             "backup_dir": s.backup_dir,
             "backup_keep": s.backup_keep,
             "backup_include_logs": s.backup_include_logs,
@@ -477,6 +540,16 @@ class Config:
         self._settings.filter_profiles = current
         self._persist()
 
+    def save_format_profile(self, name: str, profile: dict | None) -> None:
+        """Add, replace or (``profile=None``) delete one saved device profile."""
+        current = dict(self._settings.format_profiles or {})
+        if profile is None:
+            current.pop(name, None)
+        else:
+            current[name] = profile
+        self._settings.format_profiles = _sanitize_format_profiles(current)
+        self._persist()
+
     def save_backup_settings(self, directory: str, keep: int, include_logs: bool) -> None:
         """Persist the automatic-backup folder, retention and log flag."""
         self._settings.backup_dir = (directory or "").strip()
@@ -548,6 +621,7 @@ class Config:
         "opensubtitles_accounts",
         "opensubtitles_languages",
         "filter_profiles",
+        "format_profiles",
         "backup_dir",
         "backup_keep",
         "backup_include_logs",
@@ -578,6 +652,10 @@ class Config:
                     self._settings.path_maps = _sanitize_path_maps(data[field])
                 elif field == "filter_profiles":
                     self._settings.filter_profiles = _sanitize_profiles(data[field])
+                elif field == "format_profiles":
+                    self._settings.format_profiles = _sanitize_format_profiles(
+                        data[field]
+                    )
                 elif field == "opensubtitles_accounts":
                     self._settings.opensubtitles_accounts = _sanitize_accounts(
                         data[field]

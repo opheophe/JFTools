@@ -101,3 +101,73 @@ async def test_build_last_watched_carries_episode_number():
     assert rec["series"] == "FROM"
     assert rec["season"] == 2
     assert rec["episode"] == 14
+
+
+# ---- presence status --------------------------------------------------------
+
+
+def _sess(user="u1", np=None, paused=False, active=True, last=None, device=None):
+    s = {
+        "UserId": user,
+        "UserName": user,
+        "NowPlayingItem": np or {},
+        "PlayState": {"IsPaused": paused},
+        "IsActive": active,
+    }
+    if last is not None:
+        s["LastActivityDate"] = last
+    if device is not None:
+        s["DeviceName"] = device
+    return s
+
+
+def test_pick_status_offline_without_sessions():
+    assert users._pick_status([]) == ("offline", None)
+
+
+def test_pick_status_watching_prefers_playing_over_paused():
+    tv = _sess(np={"Name": "Dune"}, paused=False, device="TV")
+    phone = _sess(np={"Name": "Pilot"}, paused=True, device="Phone")
+
+    status, session = users._pick_status([phone, tv])
+
+    assert status == "watching"
+    assert session is tv
+
+
+def test_pick_status_paused_when_only_paused_playback():
+    phone = _sess(np={"Name": "Pilot"}, paused=True)
+
+    status, session = users._pick_status([phone])
+
+    assert status == "paused"
+    assert session is phone
+
+
+def test_pick_status_online_when_connected_without_playback():
+    status, session = users._pick_status([_sess(active=True, device="TV")])
+
+    assert status == "online"
+    assert users._session_device(session) == "TV"
+
+
+def test_pick_status_idle_for_stale_session():
+    old = _sess(active=False, last="2026-01-01T00:00:00Z")
+    newer = _sess(active=False, last="2026-01-02T00:00:00Z")
+
+    status, session = users._pick_status([old, newer])
+
+    assert status == "idle"
+    assert session is newer
+
+
+def test_pick_status_treats_missing_is_active_as_connected():
+    # Older Jellyfin versions may omit IsActive; a listed session still means
+    # the user is connected.
+    session = _sess()
+    del session["IsActive"]
+
+    status, picked = users._pick_status([session])
+
+    assert status == "online"
+    assert picked is session

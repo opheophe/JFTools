@@ -8,6 +8,32 @@ let LOADING = false;
 
 const IMG_CACHE = new Map();
 
+// Presence chips for the Status column. Keys mirror _pick_status() in
+// app/users.py; "idle" is a session Jellyfin remembers but no longer considers
+// connected, and "offline" means the user has no session at all.
+const USER_STATUS = {
+  watching: { label: "Watching", cls: "status-watching" },
+  paused: { label: "Paused", cls: "status-paused" },
+  online: { label: "Online", cls: "status-online" },
+  idle: { label: "Idle", cls: "status-idle" },
+  offline: { label: "Offline", cls: "status-offline" },
+};
+
+function statusTitle(u) {
+  const parts = [];
+  if (u.device) parts.push(u.device);
+  if (u.last_seen) parts.push("last active " + fmtDate(u.last_seen));
+  return parts.join(" · ");
+}
+
+function renderStatus(u) {
+  const st = USER_STATUS[u.status] || USER_STATUS.offline;
+  const chip = el("span", { class: "status-chip " + st.cls, title: statusTitle(u) });
+  chip.appendChild(el("span", { class: "status-dot" }));
+  chip.appendChild(el("span", { text: st.label }));
+  return el("td", { class: "status-cell" }, [chip]);
+}
+
 // Reuse already-loaded poster nodes so live re-renders never refetch an image.
 function posterEl(image) {
   if (!image || !image.item_id) return null;
@@ -48,7 +74,7 @@ async function loadUsers() {
     const data = await getJSON("/api/users");
     if (!data.ok) {
       body.innerHTML = "";
-      body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "error", text: data.error })]));
+      body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "error", text: data.error })]));
       setUpdated(data.last_sync, false, data.error || "Failed to load users.");
       return;
     }
@@ -58,7 +84,7 @@ async function loadUsers() {
     if (data.fetching) pollUsersUntilDone();
   } catch (err) {
     body.innerHTML = "";
-    body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "error", text: String(err) })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "error", text: String(err) })]));
   } finally {
     LOADING = false;
   }
@@ -70,12 +96,14 @@ function renderUsers() {
   const body = document.getElementById("users-body");
   body.innerHTML = "";
   if (USERS.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "muted", text: "No users." })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "No users." })]));
     return;
   }
   USERS.forEach((u) => {
     const tr = el("tr", { class: "user-row" });
     tr.appendChild(el("td", { text: u.name }));
+
+    tr.appendChild(renderStatus(u));
 
     tr.appendChild(el("td", { class: "muted", text: fmtDate(u.last_login) }));
 

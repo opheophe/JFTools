@@ -20,6 +20,7 @@ from .config import config
 from .files import router as files_router
 from .jellyfin.client import JellyfinClient, JellyfinError, close_shared_client, get_client
 from .jellyfin_id import migrate_cached_series, router as jellyfin_id_router
+from .formats import router as formats_router
 from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .media import router as media_router
@@ -118,6 +119,8 @@ async def _wait_for_restart(request: Request, call_next):
         and (
             request.url.path.startswith("/settings")
             or request.url.path == "/api/profiles"
+            or request.url.path == "/api/formats/profiles"
+            or request.url.path == "/api/formats/probe"
         )
     ):
         return JSONResponse(
@@ -130,6 +133,7 @@ async def _wait_for_restart(request: Request, call_next):
 app.include_router(about_router)
 app.include_router(audio_router)
 app.include_router(files_router)
+app.include_router(formats_router)
 app.include_router(jellyfin_id_router)
 app.include_router(libraries_router)
 app.include_router(logs_router)

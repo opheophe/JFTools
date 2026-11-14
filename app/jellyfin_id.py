@@ -338,6 +338,65 @@ def _item_display(it: dict) -> str:
     return name
 
 
+def _as_int(value) -> int:
+    """Jellyfin normally sends ints; a stray string must not abort the fetch."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _lower(value) -> str:
+    return str(value or "").lower()
+
+
+def _compact_format(it: dict) -> dict | None:
+    """Shrink Jellyfin's ``MediaSources`` into the small blob the Formats tab uses.
+
+    The full ``MediaSources`` payload is far too large to keep for 26k rows and
+    carries a lot the tab never reads (stream URLs, chapters, attachment lists).
+    Only the container, the first video stream's codec/profile/size/depth/HDR
+    type, and the audio codecs are kept::
+
+        {"c": "mp4",
+         "v": {"c": "av1", "p": "Main", "w": 1920, "h": 1080, "d": 8, "r": "SDR"},
+         "a": [{"c": "opus", "ch": 2, "l": "eng"}]}
+
+    ``None`` means Jellyfin reported no media source (the Formats tab shows it as
+    unknown) and the key is simply absent on rows fetched by older versions.
+    """
+    sources = it.get("MediaSources") or []
+    if not sources:
+        return None
+    source = sources[0]
+    video = None
+    audio: list[dict] = []
+    for stream in source.get("MediaStreams") or []:
+        kind = stream.get("Type")
+        if kind == "Video" and video is None:
+            video = {
+                "c": _lower(stream.get("Codec")),
+                "p": str(stream.get("Profile") or ""),
+                "w": _as_int(stream.get("Width")),
+                "h": _as_int(stream.get("Height")),
+                "d": _as_int(stream.get("BitDepth")),
+                "r": str(stream.get("VideoRangeType") or stream.get("VideoRange") or "").upper(),
+            }
+        elif kind == "Audio":
+            audio.append(
+                {
+                    "c": _lower(stream.get("Codec")),
+                    "ch": _as_int(stream.get("Channels")),
+                    "l": _lower(stream.get("Language")),
+                }
+            )
+    return {
+        "c": _lower(source.get("Container")),
+        "v": video,
+        "a": audio,
+    }
+
+
 def library_for_path(path: str, locations: list[tuple[str, str]]) -> str:
     """Name the Jellyfin library an item's ``Path`` sits in.
 
@@ -369,7 +428,7 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
         # Series rows are show folders, not media. Episodes come back as items
         # of their own, so the show containers only add non-probeable rows.
         "IncludeItemTypes": "Movie,Episode,MusicVideo,Video",
-        "Fields": "Path,ProductionYear,ProviderIds,SeriesName,SeriesId,DateCreated",
+        "Fields": "Path,ProductionYear,ProviderIds,SeriesName,SeriesId,DateCreated,MediaSources",
         "Limit": "500",
         "StartIndex": "0",
         "SortBy": "SortName",
@@ -390,25 +449,29 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
                 continue
             provider = it.get("ProviderIds") or {}
             title = _item_title(it)
-            rows.append(
-                {
-                    "id": it.get("Id", ""),
-                    "type": it.get("Type", ""),
-                    "path": path,
-                    "file": Path(path).name,
-                    "name": it.get("Name") or "",
-                    "series": it.get("SeriesName") or "",
-                    "series_id": it.get("SeriesId") or "",
-                    "display": _item_display(it),
-                    "year": it.get("ProductionYear"),
-                    "library": library_for_path(path, locations),
-                    "added": (it.get("DateCreated") or "")[:10],
-                    "imdb": provider.get("Imdb", ""),
-                    "tmdb": provider.get("Tmdb", ""),
-                    "match": name_match_score(clean_release_tags(Path(path).name), title, it.get("ProductionYear")),
-                    "year_match": year_match_category(path, it.get("ProductionYear")),
-                }
-            )
+            row = {
+                "id": it.get("Id", ""),
+                "type": it.get("Type", ""),
+                "path": path,
+                "file": Path(path).name,
+                "name": it.get("Name") or "",
+                "series": it.get("SeriesName") or "",
+                "series_id": it.get("SeriesId") or "",
+                "display": _item_display(it),
+                "year": it.get("ProductionYear"),
+                "library": library_for_path(path, locations),
+                "added": (it.get("DateCreated") or "")[:10],
+                "imdb": provider.get("Imdb", ""),
+                "tmdb": provider.get("Tmdb", ""),
+                "match": name_match_score(clean_release_tags(Path(path).name), title, it.get("ProductionYear")),
+                "year_match": year_match_category(path, it.get("ProductionYear")),
+            }
+            # Only present when Jellyfin had media info: an absent key is how the
+            # Formats tab says "unknown", and it keeps old caches readable.
+            fmt = _compact_format(it)
+            if fmt:
+                row["fmt"] = fmt
+            rows.append(row)
         progress(fetched, total)
         if not batch or fetched >= total:
             break
@@ -634,7 +697,12 @@ async def jellyfin_id_items(request: Request, user: str = Depends(require_login)
     # Media paths applies without refetching from Jellyfin.
     maps = config.settings.path_maps
     rows = [
-        {**r, "local_path": resolve_local_path(r.get("path") or "", maps)}
+        {
+            # ``fmt`` is only for the Formats tab; keep Search/Movie Match's
+            # payload exactly as small as it was before the extra fetch field.
+            **{k: v for k, v in r.items() if k != "fmt"},
+            "local_path": resolve_local_path(r.get("path") or "", maps),
+        }
         for r in _state["rows"]
     ]
     return JSONResponse(

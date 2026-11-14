@@ -45,6 +45,19 @@ existing server over the API.
   default of each type, or let **Smart mark** pick every subtitle outside your
   preferred languages plus every forced track, then execute it in a single
   in-place rewrite. Hovering the **Tracks** pill also offers **Remux**.
+- Formats: find files that will not direct-play on a device. The tab reuses the
+  Movie Match fetch (Jellyfin's media info) and shows container, video codec,
+  resolution, bit depth, HDR type and every audio codec. Pick a savable **device
+  profile** — built-in *Vardagsrum TV*, *Web browser* and *Strict*, or your own —
+  and each row gets two independent verdicts: **V** (Direct / Transcode /
+  Transcode 4K / No video / No stream info) and **A** (Direct / → AAC / Some
+  tracks / No audio / No stream info), plus a **Remux** badge when the container
+  is unsupported. When Jellyfin has no stream list for a file, **Probe missing**
+  reads it with ffprobe instead of calling it "No video". Suggested searches
+  with live counts (`AV1 + Opus`, `AV1 4K`, `10-bit H.264`, `Dolby Vision`,
+  `DTS/TrueHD`, `Won't direct-play`, the most common format combinations) make
+  "find the other Box Rooms" one click. Filter profiles work exactly as on
+  Search, and device profiles travel with a settings backup.
 - Task notifications: scans, Movie Match fetches, track edits, subtitle/file
   changes and scheduled jobs report success, warnings and errors in the top
   right. Results are also kept in the bell menu, so closing a dialog,
@@ -663,6 +676,7 @@ app/
   users.py           Users page + watch activity
   libraries.py       Libraries page + recent additions
   jellyfin_id.py     Movie Match (on-disk vs Jellyfin)
+  formats.py         Formats page + playback verdicts (device profiles)
   logs.py            per-tab log files
   scheduler.py       scheduled operations (APScheduler)
   jellyfin/client.py shared Jellyfin HTTP client

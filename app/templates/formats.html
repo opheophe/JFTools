@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}JFTools — Formats{% endblock %}
+{% block content %}
+<h1>Formats</h1>
+<p class="muted">Find files that will not direct-play on a device. Formats come from Jellyfin's media info, fetched with Movie Match; <strong>Probe missing</strong> reads any file Jellyfin has no stream info for with ffprobe. Pick a device profile to see what would be transcoded.</p>
+
+<div class="page-head">
+  <button id="fo-fetch" class="primary">Fetch</button>
+  <button id="fo-probe">Probe missing</button>
+  <span id="fo-sync-age" class="muted"></span>
+  <span id="fo-count" class="muted"></span>
+</div>
+<div class="progress" id="fo-progress" hidden><div class="progress-fill" id="fo-progress-fill"></div></div>
+<div id="fo-status" class="muted id-status"></div>
+
+<section class="card">
+  <h2>Suggested searches</h2>
+  <div id="fo-suggest" class="fmt-suggest">
+    <div class="fmt-sug-group"><span class="fmt-sug-label">Video</span><span id="fo-sug-video"></span></div>
+    <div class="fmt-sug-group"><span class="fmt-sug-label">Audio</span><span id="fo-sug-audio"></span></div>
+    <div class="fmt-sug-group"><span class="fmt-sug-label">Combined</span><span id="fo-sug-combined"></span></div>
+    <div class="fmt-sug-group"><span class="fmt-sug-label">Most common formats</span><span id="fo-sug-combos"></span></div>
+  </div>
+  <div class="fmt-device">
+    <label>Device profile <select id="fo-device"></select></label>
+    <button type="button" id="fo-edit-profile">Edit…</button>
+    <button type="button" id="fo-new-profile">New…</button>
+    <span id="fo-device-hint" class="muted"></span>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Media items</h2>
+  <div id="fo-profiles" class="prof-row-host"></div>
+  <div class="id-controls">
+    <label>Library <div class="ms" id="fo-lib"></div></label>
+    <label>Type <div class="ms" id="fo-type"></div></label>
+    <label>Container <div class="ms" id="fo-container"></div></label>
+    <label>Video codec <div class="ms" id="fo-vcodec"></div></label>
+    <label>Bit depth <div class="ms" id="fo-depth"></div></label>
+    <label>HDR type <div class="ms" id="fo-hdr"></div></label>
+    <label>Audio codec <div class="ms" id="fo-acodec"></div></label>
+    <label>Channels <div class="ms" id="fo-channels"></div></label>
+    <label>Playback <div class="ms" id="fo-playback"></div></label>
+    <label>Search file <input type="text" id="fo-search-file" placeholder="regex"></label>
+    <label>Search Jellyfin <input type="text" id="fo-search-jf" placeholder="regex"></label>
+  </div>
+
+  <div class="table-wrap">
+    <table id="fo-table">
+      <thead>
+        <tr><th data-sort="type" class="sortable">Type<span class="sort-arrow"></span></th><th data-sort="path" class="sortable">Parent folder<span class="sort-arrow"></span></th><th data-sort="file" class="sortable">Item on disc<span class="sort-arrow"></span></th><th data-sort="display" class="sortable">Jellyfin name<span class="sort-arrow"></span></th><th data-sort="container" class="sortable">Container<span class="sort-arrow"></span></th><th data-sort="video" class="sortable">Video<span class="sort-arrow"></span></th><th data-sort="audio" class="sortable">Audio<span class="sort-arrow"></span></th><th data-sort="playback" class="sortable">Playback<span class="sort-arrow"></span></th><th>Actions</th></tr>
+      </thead>
+      <tbody id="fo-body"><tr><td colspan="9" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div id="fo-pager" class="pager" hidden></div>
+  <div id="fo-error" class="error" hidden></div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/subfind.js?v={{ asset }}"></script><script src="/static/audio.js?v={{ asset }}"></script><script src="/static/formats.js?v={{ asset }}"></script>{% endblock %}

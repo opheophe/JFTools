@@ -3,7 +3,7 @@
 {% block title %}JFTools — Users{% endblock %}
 {% block content %}
 <h1>Users</h1>
-<p class="muted">Jellyfin users and their watch activity. Hover a title for details; click a user to see their view statistics and favorites.</p>
+<p class="muted">Jellyfin users, their current presence and watch activity. Hover a title for details; click a user to see their view statistics and favorites.</p>
 
 <div class="page-head">
   <span id="users-updated" class="muted"></span>
@@ -15,8 +15,8 @@
   <h2>Watch activity</h2>
   <div class="table-wrap">
     <table id="users-table">
-      <thead><tr><th>User</th><th>Last login</th><th>Last watched</th><th>Currently watching</th></tr></thead>
-      <tbody id="users-body"><tr><td colspan="4" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
+      <thead><tr><th>User</th><th>Status</th><th>Last login</th><th>Last watched</th><th>Currently watching</th></tr></thead>
+      <tbody id="users-body"><tr><td colspan="5" class="muted"><span class="spinner"></span> Loading…</td></tr></tbody>
     </table>
   </div>
 </section>

@@ -142,7 +142,12 @@ async def test_fetch_items_skips_series_rows():
                 {"Id": "s1", "Type": "Series", "Name": "Severance",
                  "Path": "/Serier/Severance", "ProductionYear": 2022},
                 {"Id": "m1", "Type": "Movie", "Name": "Dune",
-                 "Path": "/Filmer/Dune/Dune.mkv", "ProductionYear": 2021},
+                 "Path": "/Filmer/Dune/Dune.mkv", "ProductionYear": 2021,
+                 "MediaSources": [{"Container": "mkv", "MediaStreams": [
+                     {"Type": "Video", "Codec": "hevc", "Width": 3840, "Height": 2160,
+                      "BitDepth": 10, "VideoRangeType": "HDR10"},
+                     {"Type": "Audio", "Codec": "eac3", "Channels": 6, "Language": "eng"},
+                 ]}]},
                 {"Id": "e1", "Type": "Episode", "Name": "Good News About Hell",
                  "SeriesName": "Severance", "SeriesId": "s1",
                  "Path": "/Serier/Severance/Season 1/Severance - S01E01.mkv",
@@ -156,6 +161,9 @@ async def test_fetch_items_skips_series_rows():
 
     assert [r["type"] for r in rows] == ["Movie", "Episode"]
     assert "Series" not in seen["IncludeItemTypes"].split(",")
+    assert "MediaSources" in seen["Fields"].split(",")
+    assert rows[0]["fmt"]["c"] == "mkv"
+    assert rows[0]["fmt"]["v"]["r"] == "HDR10"
 
 
 def test_load_state_drops_cached_series_rows(tmp_path, monkeypatch):
@@ -238,7 +246,7 @@ async def test_items_payload_reports_preferred_languages_and_fresh_flags(monkeyp
     app.dependency_overrides[require_login] = lambda: "tester"
     try:
         monkeypatch.setattr(jid, "_state", {
-            "rows": [{"path": "/x.mkv"}],
+            "rows": [{"path": "/x.mkv", "fmt": {"c": "mkv", "v": None, "a": []}}],
             "marks": set(),
             "last_sync": None,
         })
@@ -269,6 +277,8 @@ async def test_items_payload_reports_preferred_languages_and_fresh_flags(monkeyp
         assert data["scans"]["/x.mkv"]["flags"]["acceptable"] is True
         # No mapping covers /x.mkv, so Subber is not offered for it.
         assert data["rows"][0]["local_path"] == ""
+        # ``fmt`` is Formats-only; Search/Movie Match payloads must not grow.
+        assert "fmt" not in data["rows"][0]
     finally:
         app.dependency_overrides.pop(require_login, None)
 
