@@ -2,8 +2,8 @@
 
 The data comes from the Movie Match fetch, which also requests Jellyfin's
 ``MediaSources`` and stores a compact ``fmt`` blob on every row. This module
-only serves that blob, so the tab loads a few MB instead of the 39 MB scan
-payload Search needs.
+serves that blob plus a compact summary of the Search media scan, so the tab
+loads a few MB instead of the 39 MB scan payload Search needs.
 
 Playback verdicts are computed in the browser from savable *device profiles*
 (what a given player accepts). Built-in presets cover the common cases; saved
@@ -26,7 +26,7 @@ from . import jellyfin_id
 from .config import config
 from .logs import log
 from .paths import resolve_local_path, resolve_path
-from .subtitles import resolve_ffprobe
+from .subtitles import resolve_ffprobe, scans_map
 from .web import require_login, templates
 
 router = APIRouter()
@@ -229,12 +229,42 @@ async def formats_page(request: Request, user: str = Depends(require_login)):
     return templates.TemplateResponse(request, "formats.html", {"request": request})
 
 
+def _scan_summary(entry: dict | None) -> dict | None:
+    """The parts of a media-scan entry the Corrupt filter needs.
+
+    ``scans.json`` entries also carry subtitle and audio track lists; sending
+    those for every row would grow this payload toward Search's. The keys follow
+    the terse style of ``fmt``::
+
+        {"e": "ffprobe exit 1: …", "s": true, "d": 814.13, "z": 200076055}
+
+    ``e`` is the probe error (empty when there was none), ``s`` whether the
+    file was scanned, ``d`` the duration in seconds and ``z`` the size in bytes.
+    ``None`` means the media scan has not touched this path yet.
+    """
+    if not isinstance(entry, dict):
+        return None
+    try:
+        duration = round(float(entry.get("duration") or 0), 2)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return {
+        "e": str(entry.get("error") or ""),
+        "s": bool(entry.get("scanned")),
+        "d": duration,
+        "z": entry.get("size"),
+    }
+
+
 @router.get("/api/formats/items")
 async def formats_items(request: Request, user: str = Depends(require_login)):
     """Every fetched row plus its compact format, without the scan payload."""
     maps = config.settings.path_maps
-    rows = [
-        {
+    scans = scans_map()
+    rows = []
+    for r in jellyfin_id._state["rows"]:
+        path = r.get("path") or ""
+        row = {
             "id": r.get("id", ""),
             "type": r.get("type", ""),
             "path": r.get("path", ""),
@@ -245,10 +275,18 @@ async def formats_items(request: Request, user: str = Depends(require_login)):
             "year": r.get("year"),
             "library": r.get("library", ""),
             "fmt": r.get("fmt"),
-            "local_path": resolve_local_path(r.get("path") or "", maps),
+            "local_path": resolve_local_path(path, maps),
         }
-        for r in jellyfin_id._state["rows"]
-    ]
+        # Jellyfin returned no media source at all: unreadable to its own
+        # scanner. Kept apart from a missing ``fmt`` so an older cache does not
+        # get accused of being corrupt. Absent for rows that have media info.
+        if r.get("nosrc"):
+            row["nosrc"] = True
+        # Absent when the media scan has not touched the path.
+        summary = _scan_summary(scans.get(path))
+        if summary:
+            row["scan"] = summary
+        rows.append(row)
     return JSONResponse(
         {
             "ok": True,

@@ -164,6 +164,11 @@ async def test_fetch_items_skips_series_rows():
     assert "MediaSources" in seen["Fields"].split(",")
     assert rows[0]["fmt"]["c"] == "mkv"
     assert rows[0]["fmt"]["v"]["r"] == "HDR10"
+    assert "nosrc" not in rows[0]
+    # Jellyfin returned no MediaSources for the episode: mark it so the Formats
+    # Corrupt filter can tell it apart from an old cache with no ``fmt``.
+    assert "fmt" not in rows[1]
+    assert rows[1]["nosrc"] is True
 
 
 def test_load_state_drops_cached_series_rows(tmp_path, monkeypatch):

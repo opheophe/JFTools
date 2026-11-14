@@ -163,6 +163,7 @@ async def test_formats_page_renders(monkeypatch):
         assert "/static/formats.js" in response.text
         assert 'id="fo-device"' in response.text
         assert 'id="fo-probe"' in response.text
+        assert 'id="fo-corrupt"' in response.text
     finally:
         app.dependency_overrides.pop(require_login, None)
 
@@ -182,6 +183,7 @@ async def test_items_endpoint_returns_formats_without_scans(monkeypatch):
             "last_sync": 1234.0,
         })
         monkeypatch.setattr(config._settings, "path_maps", [])
+        monkeypatch.setattr(formats, "scans_map", lambda: {})
 
         async with _client() as client:
             response = await client.get("/api/formats/items")
@@ -191,11 +193,63 @@ async def test_items_endpoint_returns_formats_without_scans(monkeypatch):
         assert data["fetched"] is True
         assert data["last_sync"] == 1234.0
         assert data["rows"][0]["fmt"]["v"]["c"] == "av1"
+        # The full scan store is megabytes; Formats only gets a tiny summary.
         assert "scans" not in data
+        assert "scan" not in data["rows"][0]
+        assert "nosrc" not in data["rows"][0]
         assert "Vardagsrum TV" in data["profiles"]
         assert data["builtin"]
     finally:
         app.dependency_overrides.pop(require_login, None)
+
+
+async def test_items_endpoint_sends_only_the_scan_summary(monkeypatch):
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        monkeypatch.setattr(jid, "_state", {
+            "rows": [{
+                "id": "m1", "type": "Movie", "path": "/Filmer/Dune/Dune.mkv",
+                "file": "Dune.mkv", "name": "Dune", "library": "Filmer",
+                "fmt": {"c": "mkv", "v": None, "a": []},
+                "nosrc": True,
+            }],
+            "last_sync": None,
+        })
+        monkeypatch.setattr(config._settings, "path_maps", [])
+        monkeypatch.setattr(formats, "scans_map", lambda: {
+            "/Filmer/Dune/Dune.mkv": {
+                "error": "ffprobe exit 1: moov atom not found",
+                "scanned": False,
+                "duration": 0,
+                "size": 0,
+                # A real entry also carries subtitle and audio tracks; the
+                # Formats payload must not inherit them.
+                "internal": [{"lang": "eng"}],
+                "audio": [{"c": "aac"}],
+            },
+        })
+
+        async with _client() as client:
+            response = await client.get("/api/formats/items")
+
+        row = response.json()["rows"][0]
+        assert row["scan"] == {
+            "e": "ffprobe exit 1: moov atom not found",
+            "s": False,
+            "d": 0.0,
+            "z": 0,
+        }
+        assert row["nosrc"] is True
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+
+def test_scan_summary_tolerates_missing_and_odd_values():
+    assert formats._scan_summary(None) is None
+    assert formats._scan_summary("not an entry") is None
+    assert formats._scan_summary({"duration": "abc"}) == {
+        "e": "", "s": False, "d": 0.0, "z": None,
+    }
 
 
 # ---- probing ---------------------------------------------------------------

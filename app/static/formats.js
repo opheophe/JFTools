@@ -16,6 +16,10 @@
 // "No stream info", not "No video": the file may be perfectly playable, so the
 // tab offers a Probe action that reads the file with ffprobe instead.
 //
+// The Corrupt filter is about broken files, not unsupported ones: it reads the
+// Search media scan's probe error/duration and Jellyfin's own "no media
+// source"/"no streams" gaps, and badges each affected row.
+//
 // Suggested searches are chips with live counts, so finding "the other Box
 // Rooms" is one click rather than a filter-building exercise.
 
@@ -24,7 +28,7 @@ const FO = {
   fetched: false, page: 1, sort: { col: "playback", dir: -1 },
   filters: {
     lib: [], type: [], container: [], vcodec: [], depth: [], hdr: [],
-    acodec: [], channels: [], playback: [], file: "", jf: "", suggest: "",
+    acodec: [], channels: [], playback: [], corrupt: [], file: "", jf: "", suggest: "",
   },
   ms: {},
   profiles: {}, builtin: [], saved: [], device: "", profile: {},
@@ -60,6 +64,49 @@ const FO_PLAYBACK_OPTIONS = [
   { value: "Unknown", label: "Unknown format" },
 ];
 
+// Files that will not play because something is wrong with the file, as opposed
+// to a device simply not decoding it. "Any corruption" is the shortcut for the
+// broken-file options: it leaves out "Not checked" and the rows Playback
+// already calls "No video"/"No audio".
+const FO_CORRUPT_OPTIONS = [
+  { section: "Overall" },
+  { value: "Any corruption", label: "Any corruption" },
+  { section: "File" },
+  { value: "Unreadable", label: "Unreadable" },
+  { value: "Missing file", label: "Missing file" },
+  { value: "Empty file", label: "Empty file" },
+  { value: "No duration", label: "No duration" },
+  { value: "Not checked", label: "Not checked yet" },
+  { section: "Jellyfin" },
+  { value: "No media info", label: "No media info" },
+  { value: "No streams", label: "No streams" },
+  { value: "No video stream", label: "No video stream" },
+  { value: "No audio stream", label: "No audio stream" },
+  { value: "Video without size", label: "Video without size" },
+  { value: "Unknown codec", label: "Unknown codec" },
+];
+
+const FO_CORRUPT_ANY = new Set([
+  "Unreadable", "Missing file", "Empty file", "No duration",
+  "No media info", "No streams", "Video without size", "Unknown codec",
+]);
+
+// Already visible in the V/A badges, so they are filterable but not badged.
+const FO_CORRUPT_QUIET = new Set(["No video stream", "No audio stream"]);
+
+const FO_CORRUPT_TITLE = {
+  "Unreadable": "The media scan could not read this file.",
+  "Missing file": "The file is not reachable on this machine.",
+  "Empty file": "The file is 0 bytes.",
+  "No duration": "The file opens but reports no runtime.",
+  "No media info": "Jellyfin returned no media source for this file.",
+  "No streams": "Jellyfin reports neither a video nor an audio stream.",
+  "No video stream": "Jellyfin reports no video stream.",
+  "No audio stream": "Jellyfin reports no audio stream.",
+  "Video without size": "The video stream reports no width or height.",
+  "Unknown codec": "Jellyfin reports an empty or unknown video codec.",
+};
+
 // ---- format helpers --------------------------------------------------------
 
 function foFmt(r) { return r.fmt || null; }
@@ -75,6 +122,65 @@ function foNeedsProbe(r) {
   const f = foFmt(r);
   return !f || foNoInfo(r);
 }
+
+// The compact media-scan summary formats.py attaches to each row, or null when
+// the Search media scan has not touched the path:
+// {e: probe error, s: scanned, d: duration seconds, z: size bytes}.
+function foScan(r) { return r.scan || null; }
+
+function foNotChecked(r) {
+  const scan = foScan(r);
+  return !scan || (!scan.s && !scan.e);
+}
+
+// Everything that points at a broken file rather than an unsupported one. The
+// labels double as the Corrupt filter values.
+function foCorruptReasons(r) {
+  const out = [];
+  const scan = foScan(r);
+  const err = (scan && scan.e) || "";
+  if (err) {
+    out.push(err === "unreachable" || err === "not a file" ? "Missing file" : "Unreadable");
+  }
+  if (scan && scan.z !== null && scan.z !== undefined && Number(scan.z) === 0) {
+    out.push("Empty file");
+  }
+  if (scan && scan.s && !err && !(Number(scan.d) > 0) && !out.includes("Empty file")) {
+    out.push("No duration");
+  }
+  const f = foFmt(r);
+  if (!f) {
+    // An older cache has no ``fmt`` and no mark either: that is unknown, not
+    // "Jellyfin could not read it".
+    if (r.nosrc) out.push("No media info");
+    return out;
+  }
+  const audio = f.a || [];
+  if (!f.v && !audio.length) {
+    out.push("No streams");
+  } else {
+    if (!f.v) out.push("No video stream");
+    if (!audio.length) out.push("No audio stream");
+    if (f.v) {
+      if (!(Number(f.v.w) > 0 && Number(f.v.h) > 0)) out.push("Video without size");
+      const codec = String(f.v.c || "").toLowerCase();
+      if (!codec || codec === "unknown") out.push("Unknown codec");
+    }
+  }
+  return out;
+}
+
+function foAnyCorrupt(r) {
+  return foCorruptReasons(r).some((reason) => FO_CORRUPT_ANY.has(reason));
+}
+
+function foCorruptTitle(reason, r) {
+  let title = FO_CORRUPT_TITLE[reason] || reason;
+  const scan = foScan(r);
+  if (reason === "Unreadable" && scan && scan.e) title += " " + scan.e;
+  return title;
+}
+
 function foCodec(r) { const v = foVideoStream(r); return (v && v.c) || ""; }
 function foHeight(r) { const v = foVideoStream(r); return (v && v.h) || 0; }
 function foDepth(r) { const v = foVideoStream(r); return (v && v.d) || 0; }
@@ -234,6 +340,7 @@ const FO_SUGGEST = {
   novideo: (r) => !!foFmt(r) && !foVideoStream(r) && foAudioStreams(r).length > 0,
   noinfo: (r) => foNoInfo(r),
   needsprobe: (r) => foNeedsProbe(r),
+  corrupt: (r) => foAnyCorrupt(r),
 };
 
 function foComboKey(r) {
@@ -288,6 +395,15 @@ function foVisible() {
       if (!labels.some((c) => f.channels.includes(c))) return false;
     }
     if (f.playback.length && !f.playback.some((v) => foPlaybackMatch(r, v))) return false;
+    if (f.corrupt.length) {
+      const reasons = foCorruptReasons(r);
+      const ok = f.corrupt.some((value) => {
+        if (value === "Any corruption") return reasons.some((x) => FO_CORRUPT_ANY.has(x));
+        if (value === "Not checked") return foNotChecked(r);
+        return reasons.includes(value);
+      });
+      if (!ok) return false;
+    }
     if (!foSuggestMatch(r)) return false;
     if (fileRe && !fileRe.test(r.file)) return false;
     if (jfRe && !jfRe.test(r.display || r.name)) return false;
@@ -307,7 +423,7 @@ function foLoadFilters() {
     if (!s) return;
     const f = JSON.parse(s);
     if (!f || typeof f !== "object") return;
-    ["lib", "type", "container", "vcodec", "depth", "hdr", "acodec", "channels", "playback"]
+    ["lib", "type", "container", "vcodec", "depth", "hdr", "acodec", "channels", "playback", "corrupt"]
       .forEach((k) => { if (Array.isArray(f[k])) FO.filters[k] = f[k]; });
     if (typeof f.file === "string") FO.filters.file = f.file;
     if (typeof f.jf === "string") FO.filters.jf = f.jf;
@@ -402,6 +518,11 @@ function foPlaybackCell(r) {
     td.appendChild(foBadge("fmt-remux", "Remux",
       "Container " + ((f && f.c) || "?") + " is not in the profile; remux only."));
   }
+  foCorruptReasons(r)
+    .filter((reason) => !FO_CORRUPT_QUIET.has(reason))
+    .forEach((reason) => {
+      td.appendChild(foBadge("fmt-corrupt", "⚠ " + reason, foCorruptTitle(reason, r)));
+    });
   return td;
 }
 
@@ -552,6 +673,7 @@ function renderFoSuggestions() {
     preset("dts_truehd", "DTS/TrueHD"),
   ]);
   foRenderChips("fo-sug-combined", [
+    preset("corrupt", "Corrupt"),
     preset("av1_opus", "AV1 + Opus"),
     preset("wont", "Won't direct-play"),
     preset("direct", "Direct play"),
@@ -774,6 +896,7 @@ function foApplyFilterUI() {
   FO.ms.acodec.setValues(FO.filters.acodec);
   FO.ms.channels.setValues(FO.filters.channels);
   FO.ms.playback.setValues(FO.filters.playback);
+  FO.ms.corrupt.setValues(FO.filters.corrupt);
   document.getElementById("fo-search-file").value = FO.filters.file;
   document.getElementById("fo-search-jf").value = FO.filters.jf;
 }
@@ -802,6 +925,7 @@ function foPopulateOptions() {
   FO.ms.acodec.setOptions(opts(acodecs));
   FO.ms.channels.setOptions(opts(channels));
   FO.ms.playback.setOptions(FO_PLAYBACK_OPTIONS);
+  FO.ms.corrupt.setOptions(FO_CORRUPT_OPTIONS);
 }
 
 function foUpdateProbeButton() {
@@ -946,6 +1070,9 @@ function foBindControls() {
   FO.ms.playback = MultiSelect(document.getElementById("fo-playback"), FO_PLAYBACK_OPTIONS, (vals) => {
     FO.filters.playback = vals; onFilter();
   });
+  FO.ms.corrupt = MultiSelect(document.getElementById("fo-corrupt"), FO_CORRUPT_OPTIONS, (vals) => {
+    FO.filters.corrupt = vals; onFilter();
+  });
 
   document.getElementById("fo-search-file").addEventListener("input", () => {
     FO.filters.file = document.getElementById("fo-search-file").value;
@@ -984,6 +1111,7 @@ document.addEventListener("DOMContentLoaded", () => {
         acodec: Array.isArray(f.acodec) ? f.acodec : [],
         channels: Array.isArray(f.channels) ? f.channels : [],
         playback: Array.isArray(f.playback) ? f.playback : [],
+        corrupt: Array.isArray(f.corrupt) ? f.corrupt : [],
         file: typeof f.file === "string" ? f.file : "",
         jf: typeof f.jf === "string" ? f.jf : "",
         suggest: typeof f.suggest === "string" ? f.suggest : "",

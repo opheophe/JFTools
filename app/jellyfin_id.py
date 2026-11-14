@@ -467,10 +467,14 @@ async def _fetch_items(client: JellyfinClient, progress) -> list[dict]:
                 "year_match": year_match_category(path, it.get("ProductionYear")),
             }
             # Only present when Jellyfin had media info: an absent key is how the
-            # Formats tab says "unknown", and it keeps old caches readable.
+            # Formats tab says "unknown", and it keeps old caches readable. A
+            # ``nosrc`` mark tells the Corrupt filter that Jellyfin's own scan
+            # found no media source at all, rather than this being an old row.
             fmt = _compact_format(it)
             if fmt:
                 row["fmt"] = fmt
+            else:
+                row["nosrc"] = True
             rows.append(row)
         progress(fetched, total)
         if not batch or fetched >= total:
