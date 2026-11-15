@@ -277,11 +277,6 @@ async def formats_items(request: Request, user: str = Depends(require_login)):
             "fmt": r.get("fmt"),
             "local_path": resolve_local_path(path, maps),
         }
-        # Jellyfin returned no media source at all: unreadable to its own
-        # scanner. Kept apart from a missing ``fmt`` so an older cache does not
-        # get accused of being corrupt. Absent for rows that have media info.
-        if r.get("nosrc"):
-            row["nosrc"] = True
         # Absent when the media scan has not touched the path.
         summary = _scan_summary(scans.get(path))
         if summary:

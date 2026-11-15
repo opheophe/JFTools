@@ -211,6 +211,8 @@ async def test_items_endpoint_sends_only_the_scan_summary(monkeypatch):
                 "id": "m1", "type": "Movie", "path": "/Filmer/Dune/Dune.mkv",
                 "file": "Dune.mkv", "name": "Dune", "library": "Filmer",
                 "fmt": {"c": "mkv", "v": None, "a": []},
+                # A stored row can still carry a legacy mark; the payload must
+                # not: corruption now comes only from the media scan.
                 "nosrc": True,
             }],
             "last_sync": None,
@@ -239,7 +241,7 @@ async def test_items_endpoint_sends_only_the_scan_summary(monkeypatch):
             "d": 0.0,
             "z": 0,
         }
-        assert row["nosrc"] is True
+        assert "nosrc" not in row
     finally:
         app.dependency_overrides.pop(require_login, None)
 

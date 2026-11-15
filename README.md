@@ -54,10 +54,11 @@ existing server over the API.
   tracks / No audio / No stream info), plus a **Remux** badge when the container
   is unsupported. When Jellyfin has no stream list for a file, **Probe missing**
   reads it with ffprobe instead of calling it "No video". The **Corrupt** filter
-  finds broken files rather than unsupported ones: unreadable, missing, empty,
-  no duration and not-yet-checked files (from the Search media scan), plus
-  Jellyfin's own "no media info", "no streams", video without size and unknown
-  codec, with a red badge on each affected row. Suggested searches
+  finds files that cannot be read at all — unreadable, missing or empty, as
+  reported by the Search media scan that actually opens them — and badges each
+  one red; "No duration" and "Not checked yet" are filter-only leads. Jellyfin's
+  missing or empty stream list is treated as unknown, not corrupt: Probe fills
+  it in. Suggested searches
   with live counts (`Corrupt`, `AV1 + Opus`, `AV1 4K`, `10-bit H.264`, `Dolby Vision`,
   `DTS/TrueHD`, `Won't direct-play`, the most common format combinations) make
   "find the other Box Rooms" one click. Filter profiles work exactly as on

@@ -16,9 +16,11 @@
 // "No stream info", not "No video": the file may be perfectly playable, so the
 // tab offers a Probe action that reads the file with ffprobe instead.
 //
-// The Corrupt filter is about broken files, not unsupported ones: it reads the
-// Search media scan's probe error/duration and Jellyfin's own "no media
-// source"/"no streams" gaps, and badges each affected row.
+// The Corrupt filter is about files that cannot be read at all. It reads only
+// the Search media scan, which actually opens each file: a probe error, a
+// zero-byte file, or a header with no runtime. Jellyfin's own missing or empty
+// stream list is an information gap (an unprobed extra plays fine), so it stays
+// in the Playback column and the Probe action instead.
 //
 // Suggested searches are chips with live counts, so finding "the other Box
 // Rooms" is one click rather than a filter-building exercise.
@@ -64,10 +66,11 @@ const FO_PLAYBACK_OPTIONS = [
   { value: "Unknown", label: "Unknown format" },
 ];
 
-// Files that will not play because something is wrong with the file, as opposed
-// to a device simply not decoding it. "Any corruption" is the shortcut for the
-// broken-file options: it leaves out "Not checked" and the rows Playback
-// already calls "No video"/"No audio".
+// Files that cannot be read at all, as opposed to files a device merely cannot
+// decode. Only the Search media scan counts, because it actually opens the
+// file. Jellyfin's own missing/empty stream list is an information gap — often
+// just an unprobed extra that plays fine — so the Playback column calls it
+// "No stream info" and Probe fills it in; it is not corruption.
 const FO_CORRUPT_OPTIONS = [
   { section: "Overall" },
   { value: "Any corruption", label: "Any corruption" },
@@ -75,36 +78,23 @@ const FO_CORRUPT_OPTIONS = [
   { value: "Unreadable", label: "Unreadable" },
   { value: "Missing file", label: "Missing file" },
   { value: "Empty file", label: "Empty file" },
+  { section: "Unconfirmed" },
   { value: "No duration", label: "No duration" },
   { value: "Not checked", label: "Not checked yet" },
-  { section: "Jellyfin" },
-  { value: "No media info", label: "No media info" },
-  { value: "No streams", label: "No streams" },
-  { value: "No video stream", label: "No video stream" },
-  { value: "No audio stream", label: "No audio stream" },
-  { value: "Video without size", label: "Video without size" },
-  { value: "Unknown codec", label: "Unknown codec" },
 ];
 
-const FO_CORRUPT_ANY = new Set([
-  "Unreadable", "Missing file", "Empty file", "No duration",
-  "No media info", "No streams", "Video without size", "Unknown codec",
-]);
+const FO_CORRUPT_ANY = new Set(["Unreadable", "Missing file", "Empty file"]);
 
-// Already visible in the V/A badges, so they are filterable but not badged.
-const FO_CORRUPT_QUIET = new Set(["No video stream", "No audio stream"]);
+// Filter-only leads: the scan opened the file, so it is probably playable, but
+// the header has no runtime or the scan never looked at it. Worth finding,
+// not worth a red badge.
+const FO_CORRUPT_QUIET = new Set(["No duration"]);
 
 const FO_CORRUPT_TITLE = {
   "Unreadable": "The media scan could not read this file.",
   "Missing file": "The file is not reachable on this machine.",
   "Empty file": "The file is 0 bytes.",
   "No duration": "The file opens but reports no runtime.",
-  "No media info": "Jellyfin returned no media source for this file.",
-  "No streams": "Jellyfin reports neither a video nor an audio stream.",
-  "No video stream": "Jellyfin reports no video stream.",
-  "No audio stream": "Jellyfin reports no audio stream.",
-  "Video without size": "The video stream reports no width or height.",
-  "Unknown codec": "Jellyfin reports an empty or unknown video codec.",
 };
 
 // ---- format helpers --------------------------------------------------------
@@ -133,39 +123,24 @@ function foNotChecked(r) {
   return !scan || (!scan.s && !scan.e);
 }
 
-// Everything that points at a broken file rather than an unsupported one. The
-// labels double as the Corrupt filter values.
+// Everything that points at a broken file. Only the media scan counts: it is
+// the one source that actually opened the file. The labels double as the
+// Corrupt filter values.
 function foCorruptReasons(r) {
   const out = [];
   const scan = foScan(r);
-  const err = (scan && scan.e) || "";
+  if (!scan) return out;
+  // ``unreachable``/``not a file`` mean the path is gone, not that the bytes
+  // are bad.
+  const err = scan.e || "";
   if (err) {
     out.push(err === "unreachable" || err === "not a file" ? "Missing file" : "Unreadable");
   }
-  if (scan && scan.z !== null && scan.z !== undefined && Number(scan.z) === 0) {
+  if (scan.z !== null && scan.z !== undefined && Number(scan.z) === 0) {
     out.push("Empty file");
   }
-  if (scan && scan.s && !err && !(Number(scan.d) > 0) && !out.includes("Empty file")) {
+  if (scan.s && !err && !(Number(scan.d) > 0) && !out.includes("Empty file")) {
     out.push("No duration");
-  }
-  const f = foFmt(r);
-  if (!f) {
-    // An older cache has no ``fmt`` and no mark either: that is unknown, not
-    // "Jellyfin could not read it".
-    if (r.nosrc) out.push("No media info");
-    return out;
-  }
-  const audio = f.a || [];
-  if (!f.v && !audio.length) {
-    out.push("No streams");
-  } else {
-    if (!f.v) out.push("No video stream");
-    if (!audio.length) out.push("No audio stream");
-    if (f.v) {
-      if (!(Number(f.v.w) > 0 && Number(f.v.h) > 0)) out.push("Video without size");
-      const codec = String(f.v.c || "").toLowerCase();
-      if (!codec || codec === "unknown") out.push("Unknown codec");
-    }
   }
   return out;
 }
