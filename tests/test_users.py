@@ -171,3 +171,155 @@ def test_pick_status_treats_missing_is_active_as_connected():
 
     assert status == "online"
     assert picked is session
+
+# ---- library access ---------------------------------------------------------
+
+
+class _LibraryClient:
+    def __init__(self, user, libraries):
+        self.user = user
+        self.libraries = libraries
+        self.saved = None
+
+    async def get_user(self, user_id):
+        return self.user
+
+    async def get_libraries(self):
+        return self.libraries
+
+    async def update_user_policy(self, user_id, policy):
+        self.saved = (user_id, policy)
+
+
+def _library_client(policy=None, libraries=None):
+    return _LibraryClient(
+        user={"Id": "u1", "Name": "alice", "Policy": policy or {}},
+        libraries=libraries if libraries is not None else [
+            {"Name": "Filmer", "ItemId": "lib1", "CollectionType": "movies"},
+            {"Name": "Serier", "ItemId": "lib2", "CollectionType": "tvshows"},
+        ],
+    )
+
+
+def _api_client():
+    import httpx
+
+    from app.main import app
+
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def _get_libraries(monkeypatch, fake):
+    from app.main import app
+    from app.web import require_login
+
+    monkeypatch.setattr(users, "get_client", lambda: fake)
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with _api_client() as client:
+            return await client.get("/api/users/u1/libraries")
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+
+async def _post_libraries(monkeypatch, fake, data):
+    from app.main import app
+    from app.web import require_login
+
+    monkeypatch.setattr(users, "get_client", lambda: fake)
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with _api_client() as client:
+            return await client.post("/api/users/u1/libraries", data=data)
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+
+async def test_user_libraries_reports_explicit_ids(monkeypatch):
+    fake = _library_client(
+        policy={"EnableAllFolders": False, "EnabledFolders": ["lib1", "gone"]}
+    )
+
+    response = await _get_libraries(monkeypatch, fake)
+
+    data = response.json()
+    assert data["ok"] is True
+    assert data["all"] is False
+    # "gone" is no longer on the server, so it is not reported as granted.
+    assert data["enabled"] == ["lib1"]
+    assert [lib["name"] for lib in data["libraries"]] == ["Filmer", "Serier"]
+
+
+async def test_user_libraries_reports_all_folders(monkeypatch):
+    fake = _library_client(
+        policy={"EnableAllFolders": True, "EnabledFolders": ["lib1"]}
+    )
+
+    data = (await _get_libraries(monkeypatch, fake)).json()
+
+    assert data["all"] is True
+    assert data["enabled"] == ["lib1", "lib2"]
+
+
+async def test_user_libraries_save_keeps_unrelated_policy_fields(monkeypatch):
+    fake = _library_client(policy={
+        "EnableAllFolders": True,
+        "EnabledFolders": ["lib1", "lib2"],
+        "EnableContentDownloading": True,
+        "MaxParentalRating": 12,
+        "BlockedTags": ["horror"],
+    })
+
+    response = await _post_libraries(
+        monkeypatch, fake, {"all": "false", "ids": "lib2,lib1"}
+    )
+
+    assert response.json() == {"ok": True, "all": False, "enabled": ["lib1", "lib2"]}
+    user_id, policy = fake.saved
+    assert user_id == "u1"
+    assert policy["EnableAllFolders"] is False
+    # Canonical library order, not the request's order.
+    assert policy["EnabledFolders"] == ["lib1", "lib2"]
+    # Everything else is sent back untouched: Jellyfin replaces the whole policy.
+    assert policy["EnableContentDownloading"] is True
+    assert policy["MaxParentalRating"] == 12
+    assert policy["BlockedTags"] == ["horror"]
+
+
+async def test_user_libraries_save_all_folders(monkeypatch):
+    fake = _library_client(policy={"EnableAllFolders": False})
+
+    response = await _post_libraries(monkeypatch, fake, {"all": "true", "ids": ""})
+
+    assert response.json()["all"] is True
+    assert fake.saved[1]["EnableAllFolders"] is True
+
+
+async def test_user_libraries_save_rejects_unknown_library(monkeypatch):
+    fake = _library_client()
+
+    response = await _post_libraries(
+        monkeypatch, fake, {"all": "false", "ids": "lib1,libx"}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["ok"] is False
+    assert fake.saved is None
+
+
+async def test_user_libraries_save_maps_forbidden_to_a_hint(monkeypatch):
+    from app.jellyfin.client import JellyfinError
+
+    class Denied(_LibraryClient):
+        async def update_user_policy(self, user_id, policy):
+            raise JellyfinError("Jellyfin returned HTTP 403 for /Users/u1/Policy.")
+
+    fake = Denied(
+        user={"Id": "u1", "Name": "alice", "Policy": {}},
+        libraries=[{"Name": "Filmer", "ItemId": "lib1"}],
+    )
+
+    response = await _post_libraries(monkeypatch, fake, {"all": "true", "ids": ""})
+
+    assert response.status_code == 502
+    assert "admin API key" in response.json()["error"]

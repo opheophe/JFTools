@@ -329,6 +329,8 @@ section.card { margin-top: 1.25rem; }
 .id-google-btn.id-btn-subs:hover { background: rgba(217, 122, 209, 0.16); }
 .id-google-btn.id-btn-audio { color: var(--violet); border-color: var(--violet); }
 .id-google-btn.id-btn-audio:hover { background: rgba(180, 140, 255, 0.16); }
+.id-google-btn.id-btn-libs { color: var(--teal); border-color: var(--teal); }
+.id-google-btn.id-btn-libs:hover { background: rgba(79, 195, 217, 0.16); }
 .id-google-btn.id-btn-google { color: var(--accent); border-color: var(--accent); }
 .id-google-caret { font-size: 0.7rem; }
 .id-google-menu {
@@ -1235,4 +1237,10 @@ button.btn-danger:hover, a.btn.btn-danger:hover { border-color: var(--danger); b
 .fmt-editor-buttons { display: flex; gap: 0.5rem; margin-top: 0.9rem; }
 .fmt-editor-status { min-height: 1.1rem; font-size: 0.82rem; }
 .fmt-editor-status.error { color: var(--danger); }
+
+/* Users page: library access dialog (a short list, not a format matrix). */
+.lib-access { width: 480px; max-width: 94vw; }
+.lib-access-list { overflow-y: auto; padding: 0.1rem 0; }
+.lib-all { font-weight: 600; margin-bottom: 0.45rem; }
+.lib-grid { grid-template-columns: 1fr; }
 

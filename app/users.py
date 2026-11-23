@@ -11,7 +11,7 @@ import asyncio
 import json
 import time
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import config
@@ -411,3 +411,120 @@ async def api_user_favorites(user_id: str, request: Request, user: str = Depends
         "items": favorites_for_user(user_id),
         "fetched": favorites_fetched(),
     })
+
+
+# ---- library access ---------------------------------------------------------
+
+
+def _library_rows(folders: list[dict]) -> list[dict]:
+    """The grantable libraries, keyed by the ItemId a policy stores.
+
+    ``/Library/VirtualFolders`` is the same source ``libraries.py`` caches, but
+    it is fetched live here: a folder added or removed since the last page
+    refresh must not be offered with a stale id.
+    """
+    rows = []
+    for folder in folders:
+        item_id = folder.get("ItemId")
+        if not item_id:
+            continue
+        rows.append(
+            {
+                "id": item_id,
+                "name": folder.get("Name") or "?",
+                "type": folder.get("CollectionType") or "mixed",
+            }
+        )
+    return rows
+
+
+def _policy_error(exc: JellyfinError) -> str:
+    message = str(exc)
+    if "HTTP 403" in message:
+        return (
+            "Jellyfin refused the change. Changing a user's library access "
+            "needs an admin API key."
+        )
+    return message
+
+
+@router.get("/api/users/{user_id}/libraries")
+async def api_user_libraries(user_id: str, request: Request, user: str = Depends(require_login)):
+    """Which libraries this user can see, plus every library to choose from."""
+    client = get_client()
+    try:
+        record = await client.get_user(user_id)
+        libraries = _library_rows(await client.get_libraries())
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    policy = record.get("Policy") or {}
+    ids = [lib["id"] for lib in libraries]
+    all_folders = bool(policy.get("EnableAllFolders"))
+    if all_folders:
+        enabled = ids
+    else:
+        # Drop ids of libraries that no longer exist so a stale policy does not
+        # show up as granted.
+        enabled = [i for i in (policy.get("EnabledFolders") or []) if i in ids]
+    return JSONResponse(
+        {
+            "ok": True,
+            "all": all_folders,
+            "enabled": enabled,
+            "libraries": libraries,
+        }
+    )
+
+
+@router.post("/api/users/{user_id}/libraries")
+async def api_user_libraries_save(
+    user_id: str,
+    request: Request,
+    user: str = Depends(require_login),
+    all_folders: bool = Form(False, alias="all"),
+    ids: str = Form(""),
+):
+    """Grant or revoke a user's access to libraries.
+
+    Only ``EnableAllFolders`` and ``EnabledFolders`` are changed. Jellyfin
+    replaces the whole policy on write, so the rest is sent back exactly as it
+    was read — parental controls, transcoding and device access stay intact.
+    """
+    client = get_client()
+    try:
+        record = await client.get_user(user_id)
+        libraries = _library_rows(await client.get_libraries())
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    known = {lib["id"] for lib in libraries}
+    wanted = [i.strip() for i in ids.split(",") if i.strip()]
+    if any(i not in known for i in wanted):
+        return JSONResponse(
+            {"ok": False, "error": "That library is not on this Jellyfin server."},
+            status_code=400,
+        )
+
+    policy = dict(record.get("Policy") or {})
+    policy["EnableAllFolders"] = bool(all_folders)
+    # Keep Jellyfin's own order, and leave out duplicates from the request.
+    policy["EnabledFolders"] = [lib["id"] for lib in libraries if lib["id"] in wanted]
+    try:
+        await client.update_user_policy(user_id, policy)
+    except JellyfinError as exc:
+        return JSONResponse({"ok": False, "error": _policy_error(exc)}, status_code=502)
+
+    log(
+        "Jellyfin",
+        "INFO",
+        f"Library access for {record.get('Name') or user_id}: "
+        + ("all libraries" if all_folders else f"{len(policy['EnabledFolders'])} of {len(libraries)}"),
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "all": bool(all_folders),
+            "enabled": policy["EnabledFolders"],
+        }
+    )

@@ -191,6 +191,19 @@ class JellyfinClient:
     async def get_users(self) -> list:
         return await self._get("/Users")
 
+    async def get_user(self, user_id: str) -> dict:
+        """One user's record, including the policy that grants folder access."""
+        return await self._get(f"/Users/{user_id}")
+
+    async def update_user_policy(self, user_id: str, policy: dict) -> None:
+        """Replace a user's policy.
+
+        Jellyfin takes the whole ``UserPolicy`` object rather than a patch, so
+        callers must read the current policy and send it back with only the
+        fields they mean to change.
+        """
+        await self._post(f"/Users/{user_id}/Policy", json=policy)
+
     async def get_user_items(self, user_id: str, params: dict) -> dict:
         return await self._get(f"/Users/{user_id}/Items", params=params)
 

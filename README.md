@@ -615,6 +615,13 @@ The **Currently watching** column on the Users page shows what is playing, and
 for episodes it includes the season and episode (`Show — S02E14 — Episode
 title`).
 
+The **Access** chip on each row opens that user's library permissions: tick
+**All libraries** or pick individual ones. Jellyfin owns this setting, so the
+dialog reads the live policy each time and writes back only the library fields —
+parental controls, transcoding and device access are left alone. Changes apply
+on the user's next request. Changing another user's access needs an admin
+API key; without one Jellyfin returns a permission error.
+
 Disable the job in the Scheduler to hide the dot entirely.
 
 ## Updating

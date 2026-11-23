@@ -239,3 +239,52 @@ async def test_get_translates_connect_error():
     with pytest.raises(JellyfinError, match="Could not connect to Jellyfin at http://x:8096"):
         await client.get_system_info()
 
+
+
+async def test_get_user_reads_policy():
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={"Id": "u1", "Name": "alice",
+                                         "Policy": {"EnableAllFolders": True}})
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    record = await client.get_user("u1")
+
+    assert seen["path"] == "/Users/u1"
+    assert record["Policy"]["EnableAllFolders"] is True
+
+
+async def test_update_user_policy_posts_the_whole_policy():
+    import json
+
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        seen["method"] = request.method
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(204)
+
+    policy = {
+        "EnableAllFolders": False,
+        "EnabledFolders": ["lib1"],
+        "EnableContentDownloading": True,
+    }
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    await client.update_user_policy("u1", policy)
+
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/Users/u1/Policy"
+    # Jellyfin replaces the policy, so unrelated fields must ride along.
+    assert seen["body"] == policy
+
+
+async def test_update_user_policy_forbidden_raises():
+    def handler(request):
+        return httpx.Response(403)
+
+    client = JellyfinClient("http://x:8096", "key", transport=httpx.MockTransport(handler))
+    with pytest.raises(JellyfinError, match="HTTP 403"):
+        await client.update_user_policy("u1", {"EnableAllFolders": True})

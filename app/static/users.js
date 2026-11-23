@@ -74,7 +74,7 @@ async function loadUsers() {
     const data = await getJSON("/api/users");
     if (!data.ok) {
       body.innerHTML = "";
-      body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "error", text: data.error })]));
+      body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "error", text: data.error })]));
       setUpdated(data.last_sync, false, data.error || "Failed to load users.");
       return;
     }
@@ -84,7 +84,7 @@ async function loadUsers() {
     if (data.fetching) pollUsersUntilDone();
   } catch (err) {
     body.innerHTML = "";
-    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "error", text: String(err) })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "error", text: String(err) })]));
   } finally {
     LOADING = false;
   }
@@ -96,7 +96,7 @@ function renderUsers() {
   const body = document.getElementById("users-body");
   body.innerHTML = "";
   if (USERS.length === 0) {
-    body.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "No users." })]));
+    body.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No users." })]));
     return;
   }
   USERS.forEach((u) => {
@@ -143,6 +143,14 @@ function renderUsers() {
       tr.appendChild(el("td", { class: "muted", text: "—" }));
     }
 
+    // Clicking the row opens the history, so the pill stops the click from
+    // bubbling up while it opens the library dialog.
+    const actions = el("td", { class: "id-actions" });
+    const access = pillButton("Access", "libs", () => openLibraryAccess(u));
+    access.addEventListener("click", (e) => e.stopPropagation());
+    actions.appendChild(access);
+    tr.appendChild(actions);
+
     tr.addEventListener("click", () => toggleHistory(u));
     body.appendChild(tr);
   });
@@ -172,6 +180,132 @@ function renderLastWatched(u) {
   td.appendChild(wrap);
   if (lw.id) registerPopup(wrap, { key: u.id + ":" + lw.id, itemId: lw.id, userId: u.id });
   return td;
+}
+
+// ---- library access ---------------------------------------------------------
+
+// Grant or revoke a user's Jellyfin libraries. The dialog reuses the Tracks /
+// Formats dialog shell (``subdl-*`` and ``fmt-*``). Jellyfin owns the state, so
+// it is read fresh on every open and again after each save.
+function openLibraryAccess(u) {
+  if (!u || !u.id) return;
+
+  const back = el("div", { class: "subdl-back" });
+  const box = el("div", { class: "subdl lib-access" });
+  const close = () => back.remove();
+
+  const host = el("div", { class: "lib-access-list" });
+  const status = el("div", { class: "fmt-editor-status muted" });
+  const buttons = el("div", { class: "fmt-editor-buttons" });
+  const saveBtn = el("button", { type: "button", class: "primary", text: "Save" });
+  const closeBtn = el("button", { type: "button", text: "Close" });
+  saveBtn.disabled = true;
+  buttons.appendChild(saveBtn);
+  buttons.appendChild(closeBtn);
+
+  box.appendChild(el("h3", { text: "Libraries for " + u.name }));
+  box.appendChild(el("p", {
+    class: "muted",
+    text: "What this user can see and play in Jellyfin. Changes apply on their next request.",
+  }));
+  box.appendChild(host);
+  box.appendChild(status);
+  box.appendChild(buttons);
+  back.appendChild(box);
+  document.body.appendChild(back);
+
+  back.addEventListener("click", (e) => { if (e.target === back) close(); });
+  closeBtn.addEventListener("click", close);
+
+  const setStatus = (text, isError) => {
+    status.textContent = text;
+    status.classList.toggle("error", !!isError);
+  };
+
+  let allCb = null;
+  let boxes = [];
+
+  const build = (data) => {
+    host.innerHTML = "";
+    boxes = [];
+    allCb = null;
+
+    if (!data.libraries.length) {
+      host.appendChild(el("p", { class: "muted", text: "Jellyfin has no libraries." }));
+      saveBtn.disabled = true;
+      return;
+    }
+
+    const allLabel = el("label", { class: "fmt-check lib-all" });
+    allCb = el("input", { type: "checkbox" });
+    allCb.checked = !!data.all;
+    allLabel.appendChild(allCb);
+    allLabel.appendChild(el("span", { text: "All libraries" }));
+    host.appendChild(allLabel);
+
+    const grid = el("div", { class: "fmt-editor-grid lib-grid" });
+    data.libraries.forEach((lib) => {
+      const label = el("label", { class: "fmt-check" });
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = !!data.all || data.enabled.includes(lib.id);
+      label.appendChild(cb);
+      label.appendChild(el("span", { text: lib.name }));
+      grid.appendChild(label);
+      boxes.push({ lib, cb });
+    });
+    host.appendChild(grid);
+
+    const sync = () => {
+      const all = allCb.checked;
+      boxes.forEach((b) => {
+        b.cb.disabled = all;
+        if (all) b.cb.checked = true;
+      });
+      saveBtn.disabled = false;
+    };
+    allCb.addEventListener("change", sync);
+    boxes.forEach((b) => b.cb.addEventListener("change", () => {
+      // Keep the shortcut honest when the list is edited by hand.
+      allCb.checked = boxes.every((x) => x.cb.checked);
+    }));
+    sync();
+  };
+
+  const load = async () => {
+    saveBtn.disabled = true;
+    setStatus("Loading…");
+    try {
+      const data = await getJSON("/api/users/" + encodeURIComponent(u.id) + "/libraries");
+      if (!data.ok) throw new Error(data.error || "Could not load libraries.");
+      build(data);
+      setStatus("");
+    } catch (err) {
+      host.innerHTML = "";
+      allCb = null;
+      setStatus(String(err.message || err), true);
+    }
+  };
+
+  saveBtn.addEventListener("click", async () => {
+    if (!allCb) return;
+    const all = allCb.checked;
+    const ids = all ? boxes.map((b) => b.lib.id) : boxes.filter((b) => b.cb.checked).map((b) => b.lib.id);
+    const body = "all=" + (all ? "true" : "false") +
+      "&ids=" + encodeURIComponent(ids.join(","));
+    saveBtn.disabled = true;
+    setStatus("Saving…");
+    try {
+      const data = await postJSON("/api/users/" + encodeURIComponent(u.id) + "/libraries", body);
+      if (!data.ok) throw new Error(data.error || "Save failed.");
+      await load();
+      setStatus("Saved.");
+    } catch (err) {
+      setStatus(String(err.message || err), true);
+      saveBtn.disabled = false;
+    }
+  });
+
+  load();
 }
 
 async function toggleHistory(u) {
