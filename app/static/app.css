@@ -719,6 +719,10 @@ button.btn-danger:hover, a.btn.btn-danger:hover { border-color: var(--danger); b
 /* Presence chip in the Users table (Status column). The dot inherits the
    chip's colour, so each state only needs one colour rule. */
 .status-cell { white-space: nowrap; }
+.status-device {
+  max-width: 11rem; margin-top: 0.15rem;
+  overflow: hidden; text-overflow: ellipsis; font-size: 0.72rem;
+}
 .status-chip {
   display: inline-flex; align-items: center; gap: 0.4rem;
   padding: 0.1rem 0.6rem 0.1rem 0.5rem;

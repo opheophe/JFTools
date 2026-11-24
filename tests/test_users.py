@@ -106,13 +106,15 @@ async def test_build_last_watched_carries_episode_number():
 # ---- presence status --------------------------------------------------------
 
 
-def _sess(user="u1", np=None, paused=False, active=True, last=None, device=None):
+def _sess(user="u1", np=None, paused=False, active=True, last=None, device=None,
+          media_control=True):
     s = {
         "UserId": user,
         "UserName": user,
         "NowPlayingItem": np or {},
         "PlayState": {"IsPaused": paused},
         "IsActive": active,
+        "SupportsMediaControl": media_control,
     }
     if last is not None:
         s["LastActivityDate"] = last
@@ -171,6 +173,30 @@ def test_pick_status_treats_missing_is_active_as_connected():
 
     assert status == "online"
     assert picked is session
+
+
+def test_pick_status_idle_for_login_without_a_client():
+    # Jellyfin reports IsActive true for a session with no controller - a bare
+    # login or an HTTP-only integration - and such a session never ends. It
+    # must not keep the user "online" forever; a real client advertises media
+    # control while its websocket is open.
+    login_only = _sess(active=True, media_control=False, last="2026-01-01T00:00:00Z")
+
+    status, session = users._pick_status([login_only])
+
+    assert status == "idle"
+    assert session is login_only
+
+
+def test_pick_status_online_when_media_control_flag_is_missing():
+    # Servers that do not send the flag keep the old IsActive behaviour.
+    session = _sess(active=True)
+    del session["SupportsMediaControl"]
+
+    status, _ = users._pick_status([session])
+
+    assert status == "online"
+
 
 # ---- library access ---------------------------------------------------------
 

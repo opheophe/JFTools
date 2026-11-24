@@ -2033,6 +2033,11 @@ function applyWatchDot(data) {
   dot.hidden = false;
   dot.className = "watch-dot " + (data.status === "watching" ? "watching"
     : data.status === "paused" ? "paused" : "idle");
+  // The dot tracks playback, not presence: users can be Online with nothing
+  // playing. Say so, because a red dot next to Online rows reads as a bug.
+  dot.title = data.status === "watching" ? "Someone is watching"
+    : data.status === "paused" ? "Playback is paused"
+    : "Nobody is watching (users can still be online)";
 }
 
 async function pollWatchDot() {

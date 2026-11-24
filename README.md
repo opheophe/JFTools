@@ -611,6 +611,11 @@ Jellyfin's live sessions and drives a status dot next to the **Users** nav link:
 - **orange** — a session is paused
 - **red** — nobody watching
 
+The dot follows playback, not presence. A user with Jellyfin open but nothing
+playing is **Online** in the table while the dot stays red. **Online** needs a
+live client session; a login that never opened a client (an HTTP-only
+integration, say) shows as **Idle** instead of lingering as online.
+
 The **Currently watching** column on the Users page shows what is playing, and
 for episodes it includes the season and episode (`Show — S02E14 — Episode
 title`).

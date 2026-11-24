@@ -31,7 +31,11 @@ function renderStatus(u) {
   const chip = el("span", { class: "status-chip " + st.cls, title: statusTitle(u) });
   chip.appendChild(el("span", { class: "status-dot" }));
   chip.appendChild(el("span", { text: st.label }));
-  return el("td", { class: "status-cell" }, [chip]);
+  const cell = el("td", { class: "status-cell" }, [chip]);
+  // Show which device Jellyfin has the session on. Without it, "Online" gives
+  // no clue whether it is the TV left on standby or a ghost login.
+  if (u.device) cell.appendChild(el("div", { class: "status-device muted", text: u.device }));
+  return cell;
 }
 
 // Reuse already-loaded poster nodes so live re-renders never refetch an image.

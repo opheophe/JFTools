@@ -49,9 +49,22 @@ def _session_device(session: dict) -> str:
 
 
 def _session_active(session: dict) -> bool:
-    """Whether Jellyfin still considers a session connected."""
+    """Whether a real client is currently connected.
+
+    ``IsActive`` alone is not a presence signal: Jellyfin reports it true for a
+    session with no controller, and those never end. A bare login or an
+    HTTP-only integration therefore lingers as "online" forever. A real client
+    opens a websocket and advertises media control, and Jellyfin reports
+    ``SupportsMediaControl`` only while that socket is open.
+    """
     active = session.get("IsActive")
-    return True if active is None else bool(active)
+    if active is False:
+        return False
+    control = session.get("SupportsMediaControl")
+    if control is None:
+        # Very old servers omit the flag; fall back to IsActive.
+        return True if active is None else bool(active)
+    return bool(control)
 
 
 def _pick_status(sessions: list[dict]) -> tuple[str, dict | None]:
