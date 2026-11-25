@@ -468,6 +468,26 @@ td.fb-actions { white-space: nowrap; }
 }
 .subdl .row { justify-content: flex-end; margin-top: 0.35rem; }
 .subdl-status { min-height: 1rem; font-size: 0.85rem; }
+
+/* Folder-path dialog (Open → Show path) */
+.path-dialog { width: 720px; max-width: 94vw; gap: 0.55rem; }
+.path-dialog-list { display: flex; flex-direction: column; gap: 0.55rem; min-height: 1rem; }
+.path-dialog-row { display: flex; flex-direction: column; gap: 0.25rem; }
+.path-dialog-label { font-size: 0.78rem; font-weight: 700; }
+.path-dialog-line { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.path-dialog-value {
+  flex: 1 1 auto; min-width: 0; padding: 0.4rem 0.5rem; overflow-wrap: anywhere;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.8rem;
+  color: var(--text); background: var(--inset); border: 1px solid var(--border);
+  border-radius: 6px; user-select: all;
+}
+.path-dialog-copy { flex-shrink: 0; }
+.path-dialog-warn { margin: 0; font-size: 0.78rem; color: var(--warn); }
+.path-dialog .btn-link { margin-right: auto; }
+.path-copy-area {
+  position: fixed; left: -9999px; top: 0; width: 1px; height: 1px;
+  opacity: 0; pointer-events: none;
+}
 .subdl-status .spinner { display: inline-block; }
 .subdl-meta { font-size: 0.8rem; }
 .subdl-meta p { margin-bottom: 0.2rem; }

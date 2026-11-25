@@ -1,8 +1,9 @@
 import httpx
 import pytest
 
+from app.config import config
 from app.main import app
-from app.paths import resolve_local_path, resolve_path
+from app.paths import display_path, folder_of, resolve_local_path, resolve_path
 from app.web import require_login
 
 
@@ -124,3 +125,140 @@ def test_windows_case_insensitive(monkeypatch):
     monkeypatch.setattr("app.paths._is_windows", lambda: True)
     maps = [{"from": "/filmer", "to": "Z:\\Filmer"}]
     assert resolve_path("/Filmer/Movie/a.mkv", maps) == "Z:\\Filmer\\Movie\\a.mkv"
+
+
+def test_folder_of_strips_the_file():
+    assert folder_of("/Filmer/Movie/a.mkv") == "/Filmer/Movie"
+    assert folder_of("/a.mkv") == "/"
+    assert folder_of("C:\\Filmer\\Movie\\a.mkv") == "C:\\Filmer\\Movie"
+    assert folder_of("C:\\a.mkv") == "C:\\"
+    assert folder_of("\\\\NAS\\Media\\Movie\\a.mkv") == "\\\\NAS\\Media\\Movie"
+
+
+def test_folder_of_keeps_a_folder():
+    assert folder_of("/Filmer/Show/", is_dir=True) == "/Filmer/Show"
+    assert folder_of("\\\\NAS\\Media\\Show", is_dir=True) == "\\\\NAS\\Media\\Show"
+
+
+def test_display_path_uses_windows_separators_for_windows_paths():
+    assert display_path("//NAS/Media/Movie") == "\\\\NAS\\Media\\Movie"
+    assert display_path("Z:/Filmer/Movie") == "Z:\\Filmer\\Movie"
+    assert display_path("/media/Filmer/Movie") == "/media/Filmer/Movie"
+    assert display_path("") == ""
+
+
+async def test_folder_endpoint_returns_a_files_parent(monkeypatch):
+    monkeypatch.setattr("app.paths._is_windows", lambda: False)
+    monkeypatch.setattr(
+        config._settings, "path_maps", [{"from": "/Filmer", "to": "/media/Filmer"}]
+    )
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(
+                "/api/paths/folder", params={"path": "/Filmer/Movie/a.mkv"}
+            )
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "ok": True,
+        "folder": "/media/Filmer/Movie",
+        "local_folder": "",
+        "mapped": True,
+    }
+
+
+async def test_folder_endpoint_keeps_a_series_folder(monkeypatch):
+    monkeypatch.setattr("app.paths._is_windows", lambda: False)
+    monkeypatch.setattr(
+        config._settings, "path_maps", [{"from": "/Filmer", "to": "/media/Filmer"}]
+    )
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(
+                "/api/paths/folder",
+                params={"path": "/Filmer/Show", "is_dir": "true"},
+            )
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+    assert resp.status_code == 200
+    assert resp.json()["folder"] == "/media/Filmer/Show"
+
+
+async def test_folder_endpoint_returns_the_local_path(monkeypatch):
+    monkeypatch.setattr("app.paths._is_windows", lambda: False)
+    monkeypatch.setattr(
+        config._settings,
+        "path_maps",
+        [
+            {
+                "from": "/Filmer",
+                "to": "/media/Filmer",
+                "local": "\\\\NAS\\Media\\Filmer",
+            }
+        ],
+    )
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(
+                "/api/paths/folder", params={"path": "/Filmer/Movie/a.mkv"}
+            )
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+    data = resp.json()
+    assert data["folder"] == "/media/Filmer/Movie"
+    assert data["local_folder"] == "\\\\NAS\\Media\\Filmer\\Movie"
+    assert data["mapped"] is True
+
+
+async def test_folder_endpoint_flags_an_unmapped_path(monkeypatch):
+    monkeypatch.setattr(config._settings, "path_maps", [])
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(
+                "/api/paths/folder", params={"path": "/Filmer/Movie/a.mkv"}
+            )
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+    data = resp.json()
+    assert data["folder"] == "/Filmer/Movie"
+    assert data["mapped"] is False
+
+
+async def test_folder_endpoint_rejects_an_empty_path():
+    app.dependency_overrides[require_login] = lambda: "tester"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/paths/folder", params={"path": "  "})
+    finally:
+        app.dependency_overrides.pop(require_login, None)
+
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+async def test_folder_endpoint_requires_login():
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/paths/folder", params={"path": "/Filmer"})
+
+    assert resp.status_code == 401

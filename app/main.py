@@ -25,7 +25,7 @@ from .libraries import router as libraries_router
 from .logs import log, router as logs_router
 from .media import router as media_router
 from .notifications import router as notifications_router
-from .paths import resolve_local_path, resolve_path
+from .paths import display_path, folder_of, resolve_local_path, resolve_path
 from .player import prune_play_cache, router as player_router
 from .remotesync import run_import
 from .remux import router as remux_router
@@ -616,6 +616,37 @@ async def paths_test(request: Request, user: str = Depends(require_login)):
     if local_target:
         result["local"] = _probe_path(local_target)
     return JSONResponse(result)
+
+
+@app.get("/api/paths/folder")
+async def paths_folder(
+    path: str = "",
+    is_dir: bool = False,
+    user: str = Depends(require_login),
+):
+    """Resolve a row's Jellyfin path to the folder a client can copy.
+
+    The browser cannot launch Explorer on a remote device, and the rows carry
+    the path Jellyfin reported, not the mapped one. This returns the folder
+    after the same Media-path translation the file browser uses. It touches no
+    files, so a missing share can never make the dialog wait.
+    """
+    raw = path.strip()
+    if not raw:
+        return JSONResponse(
+            {"ok": False, "error": "No path supplied."}, status_code=400
+        )
+    maps = config.settings.path_maps
+    target = resolve_path(raw, maps)
+    local = resolve_local_path(raw, maps)
+    return JSONResponse(
+        {
+            "ok": True,
+            "folder": display_path(folder_of(target, is_dir)),
+            "local_folder": display_path(folder_of(local, is_dir)),
+            "mapped": target != raw or bool(local),
+        }
+    )
 
 
 @app.post("/settings/backup")

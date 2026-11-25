@@ -285,6 +285,9 @@ headless via `JFTOOLS_PATH_MAP` (`/Filmer=\\NAS\Filmer;/Ero=Z:\Ero`); the local
 path is configured in-app only.
 
 Notes:
+- **Remote browsing:** a web page cannot open Explorer on the device viewing it.
+  Use **Open → Show path** on any row to copy the mapped folder, then paste it
+  into Explorer on a Windows PC that can reach the share.
 - **Permissions:** the app runs as `PUID:PGID` in Docker (or your user when run
   locally); those credentials need read (and, for writes, write) access to the
   mapped folders.

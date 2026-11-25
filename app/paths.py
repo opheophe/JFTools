@@ -98,3 +98,47 @@ def resolve_local_path(path: str, path_maps: list[dict] | None = None) -> str:
     if src is None:
         return ""
     return _apply(path, src, dst)
+
+
+def folder_of(path: str, is_dir: bool = False) -> str:
+    """The folder holding ``path``.
+
+    ``is_dir`` marks a path that is already a folder (a series row), so it is
+    returned unchanged. Everything else loses its final segment. Both separator
+    styles are understood, which matters because a Windows path can arrive on a
+    Linux host through a mapping.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return ""
+    trimmed = raw.rstrip("/\\")
+    if not trimmed:
+        return raw  # a root such as "/"
+    if is_dir:
+        return trimmed
+    cut = max(trimmed.rfind("/"), trimmed.rfind("\\"))
+    if cut < 0:
+        return trimmed
+    parent = trimmed[:cut]
+    if not parent:
+        return raw[0]  # POSIX root
+    if len(parent) == 2 and parent[1] == ":":
+        return parent + "\\"  # drive root: "C:" -> "C:\\"
+    return parent
+
+
+def display_path(path: str) -> str:
+    """Render a mapped path the way Windows expects when it is Windows-style.
+
+    A ``local`` mapping can be a UNC share or a drive path even when JFTools
+    itself runs on Linux; the mapping helpers then return it with forward
+    slashes. Copying that into Explorer works poorly, so normalise it for
+    display without touching genuine POSIX paths.
+    """
+    value = (path or "").strip()
+    if not value:
+        return ""
+    windows_style = value.startswith("//") or (
+        len(value) > 1 and value[0].isalpha() and value[1] == ":"
+    )
+    return value.replace("/", "\\") if windows_style else value

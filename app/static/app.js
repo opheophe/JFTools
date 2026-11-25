@@ -1037,6 +1037,136 @@ function hoverMenuAction(text, onClick) {
   return item;
 }
 
+// ---- folder path dialog -----------------------------------------------------
+//
+// A browser cannot launch Explorer on the device viewing the page, and rows
+// carry the Jellyfin path rather than the mapped one. "Show path" asks the
+// server for the folder after the Media-path translation, then offers it for
+// copying into Explorer on a Windows PC that can reach the share.
+
+function copyTextFallback(text) {
+  // JFTools is normally served over plain HTTP on the LAN, where the async
+  // clipboard API is unavailable. execCommand still works there.
+  const area = el("textarea", { class: "path-copy-area", readonly: "readonly" });
+  area.value = text;
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  area.remove();
+  return ok;
+}
+
+function copyText(text) {
+  const value = String(text || "");
+  if (!value) return Promise.resolve(false);
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(value)
+      .then(() => true)
+      .catch(() => copyTextFallback(value));
+  }
+  return Promise.resolve(copyTextFallback(value));
+}
+
+function showFolderPath(r) {
+  if (!r || !r.path) return;
+
+  const back = el("div", { class: "subdl-back" });
+  const box = el("div", {
+    class: "subdl path-dialog",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "path-dialog-title",
+    tabindex: "-1",
+  });
+  const close = () => {
+    back.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+
+  box.appendChild(el("h3", { id: "path-dialog-title", text: "Folder path" }));
+  box.appendChild(el("p", {
+    class: "muted",
+    text: "Copy this into Explorer on a Windows PC that can reach the share.",
+  }));
+
+  const list = el("div", { class: "path-dialog-list" });
+  const status = el("div", { class: "muted path-dialog-status", text: "Resolving…" });
+  box.appendChild(list);
+  box.appendChild(status);
+
+  const footer = el("div", { class: "row" });
+  footer.appendChild(el("a", {
+    class: "btn-link",
+    href: "/files?path=" + encodeURIComponent(r.path),
+    target: "_blank",
+    rel: "noopener",
+    text: "File browser",
+  }));
+  const closeBtn = el("button", { type: "button", text: "Close" });
+  closeBtn.addEventListener("click", close);
+  footer.appendChild(closeBtn);
+  box.appendChild(footer);
+
+  back.appendChild(box);
+  document.body.appendChild(back);
+  back.addEventListener("click", (e) => { if (e.target === back) close(); });
+  box.focus();
+
+  const addPath = (label, value) => {
+    const row = el("div", { class: "path-dialog-row" });
+    row.appendChild(el("div", { class: "path-dialog-label", text: label }));
+    const line = el("div", { class: "path-dialog-line" });
+    const code = el("code", { class: "path-dialog-value", text: value, title: value });
+    const copy = el("button", { type: "button", class: "mini path-dialog-copy", text: "Copy" });
+    copy.addEventListener("click", async () => {
+      const ok = await copyText(value);
+      copy.textContent = ok ? "Copied" : "Selected";
+      copy.title = ok ? "Copied to the clipboard" : "Press Ctrl+C to copy the selected path";
+      if (!ok) {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        const sel = window.getSelection();
+        if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+      }
+      window.setTimeout(() => { copy.textContent = "Copy"; }, 1600);
+    });
+    line.appendChild(code);
+    line.appendChild(copy);
+    row.appendChild(line);
+    list.appendChild(row);
+  };
+
+  getJSON("/api/paths/folder?path=" + encodeURIComponent(r.path) +
+    "&is_dir=" + (r.type === "Series" ? "1" : "0"))
+    .then((data) => {
+      if (!data || !data.ok) throw new Error((data && data.error) || "Could not resolve the path.");
+      const local = data.local_folder || "";
+      const server = data.folder || "";
+      status.hidden = true;
+      if (local && local !== server) addPath("Local path", local);
+      if (server) addPath(local && local !== server ? "JFTools path" : "Folder path", server);
+      if (!local && !server) {
+        status.hidden = false;
+        status.textContent = "No folder path available.";
+        status.classList.add("error");
+        return;
+      }
+      if (!data.mapped) {
+        list.appendChild(el("p", {
+          class: "path-dialog-warn",
+          text: "No Media path mapping matched — this is the path Jellyfin reported.",
+        }));
+      }
+    })
+    .catch((err) => {
+      status.textContent = "Could not resolve the path: " + err.message;
+      status.classList.add("error");
+    });
+}
+
 // Remux a row's video into a fresh MKV. The server copies every stream into a
 // temporary file, probes the copy and only then swaps it in (app/remux.py), so
 // a failed copy leaves the original alone. Non-MKV files are renamed to .mkv.
@@ -1133,6 +1263,7 @@ function rowActions(r, cfg) {
   }
   if (r.path) {
     openItems.push(hoverMenuLink("/files?path=" + enc(r.path), "File browser"));
+    openItems.push(hoverMenuAction("Show path", () => showFolderPath(r)));
   }
   td.appendChild(hoverMenuButton("Open", openItems, "open"));
 
